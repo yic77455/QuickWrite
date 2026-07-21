@@ -960,17 +960,118 @@ class WorkspaceProvider extends ChangeNotifier {
   }) async {
     if (_currentBook == null) return 0;
 
-    int movedCount = 0;
+    final targetVolumeName = getVolumeName(targetVolumeUuid);
 
+    // 收集可移动的章节（跳过目标分卷相同和目标分卷下重名的）
+    final chaptersToMove = <ChapterModel>[];
     for (final chapterUuid in chapterUuids) {
-      final success = await moveChapterToVolume(
-        chapterUuid: chapterUuid,
-        targetVolumeUuid: targetVolumeUuid,
+      final chapter = _chapters.where((c) => c.uuid == chapterUuid).firstOrNull;
+      if (chapter == null) continue;
+      if (chapter.volumeUuid == targetVolumeUuid) continue;
+      // 检查目标分卷下是否已存在同名章节
+      final existing = _chapters.where(
+        (c) => c.title == chapter.title && c.volumeUuid == targetVolumeUuid,
       );
-      if (success) movedCount++;
+      if (existing.isNotEmpty) continue;
+      chaptersToMove.add(chapter);
     }
 
-    return movedCount;
+    if (chaptersToMove.isEmpty) return 0;
+
+    // 计算目标分卷内的起始排序序号
+    final targetVolumeChapters = _chapters.where((c) => c.volumeUuid == targetVolumeUuid).toList();
+    int nextVolumeOrderIndex = targetVolumeChapters.fold<int>(
+      0, (max, c) => c.volumeOrderIndex > max ? c.volumeOrderIndex : max,
+    ) + 1;
+
+    final backupPath = await AppPaths.instance.getBackupPath();
+    final bookUuid = _currentBook!.uuid;
+
+    // 逐个移动文件和备份目录（文件系统操作无法批量）
+    for (final chapter in chaptersToMove) {
+      final oldVolumeName = getVolumeName(chapter.volumeUuid);
+      final oldFilePath = getChapterFilePath(chapter);
+
+      // 更新章节的分卷归属和排序
+      chapter.volumeUuid = targetVolumeUuid;
+      chapter.updatedAt = DateTime.now();
+      chapter.volumeOrderIndex = nextVolumeOrderIndex++;
+
+      // 生成新的文件相对路径
+      final String newRelativePath = targetVolumeName.isNotEmpty
+          ? '${_sanitizeFileName(targetVolumeName)}${Platform.pathSeparator}${_sanitizeFileName(chapter.title)}${GlobalConstants.chapterFileExtension}'
+          : '${_sanitizeFileName(chapter.title)}${GlobalConstants.chapterFileExtension}';
+      chapter.filePath = newRelativePath;
+
+      // 移动章节文件
+      try {
+        final oldFile = File(oldFilePath);
+        if (await oldFile.exists()) {
+          final newFilePath = getChapterFilePath(chapter);
+          final parentDir = Directory(newFilePath).parent;
+          if (!await parentDir.exists()) {
+            await parentDir.create(recursive: true);
+          }
+          await oldFile.rename(newFilePath);
+        }
+      } catch (e) {
+        debugPrint('移动章节文件失败: $e');
+      }
+
+      // 移动备份目录
+      try {
+        final sanitizedChapter = _sanitizeFileName(chapter.title);
+        String oldBackupPath;
+        String newBackupPath;
+
+        if (oldVolumeName.isNotEmpty) {
+          final sanitizedVolume = _sanitizeFileName(oldVolumeName);
+          oldBackupPath = '$backupPath${Platform.pathSeparator}$bookUuid${Platform.pathSeparator}chapters${Platform.pathSeparator}$sanitizedVolume${Platform.pathSeparator}$sanitizedChapter';
+        } else {
+          oldBackupPath = '$backupPath${Platform.pathSeparator}$bookUuid${Platform.pathSeparator}chapters${Platform.pathSeparator}$sanitizedChapter';
+        }
+
+        if (targetVolumeName.isNotEmpty) {
+          final sanitizedVolume = _sanitizeFileName(targetVolumeName);
+          newBackupPath = '$backupPath${Platform.pathSeparator}$bookUuid${Platform.pathSeparator}chapters${Platform.pathSeparator}$sanitizedVolume${Platform.pathSeparator}$sanitizedChapter';
+        } else {
+          newBackupPath = '$backupPath${Platform.pathSeparator}$bookUuid${Platform.pathSeparator}chapters${Platform.pathSeparator}$sanitizedChapter';
+        }
+
+        final oldBackupDir = Directory(oldBackupPath);
+        if (await oldBackupDir.exists()) {
+          final newBackupDir = Directory(newBackupPath);
+          if (!await newBackupDir.exists()) {
+            if (!await newBackupDir.parent.exists()) {
+              await newBackupDir.parent.create(recursive: true);
+            }
+            await oldBackupDir.rename(newBackupPath);
+          }
+        }
+      } catch (e) {
+        debugPrint('移动章节备份目录失败: $e');
+      }
+
+      // 更新备份服务中的分卷信息
+      BackupService.instance.updateTabBackupInfo(
+        tabId: chapter.uuid,
+        chapterTitle: chapter.title,
+        volumeName: targetVolumeName,
+      );
+    }
+
+    // 单事务批量更新所有章节记录和书籍修改时间
+    await _isar.writeTxn(() async {
+      await _isar.chapterModels.putAll(chaptersToMove);
+      _currentBook!.updatedAt = DateTime.now();
+      await _isar.bookModels.put(_currentBook!);
+    });
+
+    // 一次性刷新
+    await _loadChapters();
+    notifyListeners();
+
+    return chaptersToMove.length;
   }
 
   /// 批量导出章节
@@ -2208,17 +2309,71 @@ class WorkspaceProvider extends ChangeNotifier {
   }) async {
     if (_currentBook == null) return 0;
 
-    int movedCount = 0;
+    final targetGroupName = getSettingGroupName(targetGroupUuid);
 
+    // 收集可移动的设定项（跳过目标分组相同和目标分组下重名的）
+    final itemsToMove = <SettingItemModel>[];
     for (final itemUuid in itemUuids) {
-      final success = await moveSettingItemToGroup(
-        itemUuid: itemUuid,
-        targetGroupUuid: targetGroupUuid,
+      final item = _settingItems.where((i) => i.uuid == itemUuid).firstOrNull;
+      if (item == null) continue;
+      if (item.groupUuid == targetGroupUuid) continue;
+      // 检查目标分组下是否已存在同名设定项
+      final existing = _settingItems.where(
+        (i) => i.title == item.title && i.groupUuid == targetGroupUuid,
       );
-      if (success) movedCount++;
+      if (existing.isNotEmpty) continue;
+      itemsToMove.add(item);
     }
 
-    return movedCount;
+    if (itemsToMove.isEmpty) return 0;
+
+    // 计算目标分组内的起始排序序号
+    final targetGroupItems = _settingItems.where((i) => i.groupUuid == targetGroupUuid).toList();
+    int nextGroupOrderIndex = targetGroupItems.length;
+
+    // 逐个移动文件（文件系统操作无法批量）
+    for (final item in itemsToMove) {
+      final oldFilePath = getSettingItemFilePath(item);
+
+      // 更新设定项的分组归属和排序
+      item.groupUuid = targetGroupUuid;
+      item.updatedAt = DateTime.now();
+      item.groupOrderIndex = nextGroupOrderIndex++;
+
+      // 生成新的文件相对路径
+      final String newRelativePath = targetGroupName.isNotEmpty
+          ? '${_sanitizeFileName(targetGroupName)}${Platform.pathSeparator}${_sanitizeFileName(item.title)}${GlobalConstants.chapterFileExtension}'
+          : '${_sanitizeFileName(item.title)}${GlobalConstants.chapterFileExtension}';
+      item.filePath = newRelativePath;
+
+      // 移动设定项文件
+      try {
+        final oldFile = File(oldFilePath);
+        if (await oldFile.exists()) {
+          final newFilePath = getSettingItemFilePath(item);
+          final parentDir = Directory(newFilePath).parent;
+          if (!await parentDir.exists()) {
+            await parentDir.create(recursive: true);
+          }
+          await oldFile.rename(newFilePath);
+        }
+      } catch (e) {
+        debugPrint('移动设定项文件失败: $e');
+      }
+    }
+
+    // 单事务批量更新所有设定项记录和书籍修改时间
+    await _isar.writeTxn(() async {
+      await _isar.settingItemModels.putAll(itemsToMove);
+      _currentBook!.updatedAt = DateTime.now();
+      await _isar.bookModels.put(_currentBook!);
+    });
+
+    // 一次性刷新
+    await _loadSettingItems();
+    notifyListeners();
+
+    return itemsToMove.length;
   }
   /// 保存当前标签页的内容
   /// 

@@ -529,6 +529,70 @@ class RecycleBinProvider extends ChangeNotifier {
     return restoredItem;
   }
 
+  /// 批量恢复章节
+  ///
+  /// [items] 要恢复的回收项列表
+  /// [books] bookUuid -> BookModel 映射
+  /// [existingChaptersByBook] bookUuid -> 该书现有章节列表
+  /// [existingVolumesByBook] bookUuid -> 该书现有分卷列表
+  /// 返回 (成功数量, 失败数量)
+  Future<({int success, int fail})> restoreChaptersFromRecycleBatch({
+    required List<RecycleItemModel> items,
+    required Map<String, BookModel> books,
+    required Map<String, List<ChapterModel>> existingChaptersByBook,
+    required Map<String, List<VolumeModel>> existingVolumesByBook,
+  }) async {
+    final worksPath = await AppPaths.instance.getBooksPath();
+
+    final result = await RecycleItemService.instance.restoreChaptersBatch(
+      items: items,
+      bookFolderPathOf: (bookUuid) =>
+          '$worksPath${Platform.pathSeparator}${books[bookUuid]?.title ?? ''}',
+      existingChaptersOf: (bookUuid) => existingChaptersByBook[bookUuid] ?? [],
+      existingVolumesOf: (bookUuid) => existingVolumesByBook[bookUuid] ?? [],
+    );
+
+    if (result.success > 0) {
+      final restoredUuids = items.map((i) => i.uuid).toSet();
+      _allRecycledItems.removeWhere((i) => restoredUuids.contains(i.uuid));
+      notifyListeners();
+    }
+
+    return result;
+  }
+
+  /// 批量恢复设定项
+  ///
+  /// [items] 要恢复的回收项列表
+  /// [books] bookUuid -> BookModel 映射
+  /// [existingItemsByBook] bookUuid -> 该书现有设定项列表
+  /// [existingGroupsByBook] bookUuid -> 该书现有分组列表
+  /// 返回 (成功数量, 失败数量)
+  Future<({int success, int fail})> restoreSettingItemsFromRecycleBatch({
+    required List<RecycleItemModel> items,
+    required Map<String, BookModel> books,
+    required Map<String, List<SettingItemModel>> existingItemsByBook,
+    required Map<String, List<SettingGroupModel>> existingGroupsByBook,
+  }) async {
+    final worksPath = await AppPaths.instance.getBooksPath();
+
+    final result = await RecycleItemService.instance.restoreSettingItemsBatch(
+      items: items,
+      bookFolderPathOf: (bookUuid) =>
+          '$worksPath${Platform.pathSeparator}${books[bookUuid]?.title ?? ''}',
+      existingItemsOf: (bookUuid) => existingItemsByBook[bookUuid] ?? [],
+      existingGroupsOf: (bookUuid) => existingGroupsByBook[bookUuid] ?? [],
+    );
+
+    if (result.success > 0) {
+      final restoredUuids = items.map((i) => i.uuid).toSet();
+      _allRecycledItems.removeWhere((i) => restoredUuids.contains(i.uuid));
+      notifyListeners();
+    }
+
+    return result;
+  }
+
   /// 彻底删除单个回收项
   ///
   /// [item] 要彻底删除的回收项

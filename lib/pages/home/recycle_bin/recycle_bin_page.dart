@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/models/book.dart';
+import 'package:quick_write/core/models/chapter.dart';
+import 'package:quick_write/core/models/setting_group.dart';
+import 'package:quick_write/core/models/setting_item.dart';
+import 'package:quick_write/core/models/volume.dart';
 import 'package:quick_write/core/providers/bookshelf_provider.dart';
 import 'package:quick_write/core/providers/home_state_provider.dart';
 import 'package:quick_write/core/providers/recycle_bin_provider.dart';
@@ -186,50 +190,82 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
       cancelText: '取消',
       icon: Icons.restore,
       onConfirm: () async {
-        int successCount = 0;
-        int failCount = 0;
-        for (final item in selectedItems) {
-          final book = existingBooks[item.bookUuid];
-          if (book == null) {
-            failCount++;
-            continue;
+        final dismissLoading = showLoadingDialog(
+          context: context,
+          message: '正在恢复 ${selectedItems.length} 个项目，请稍候...',
+        );
+        try {
+          // 过滤出可恢复的项（原书籍存在）
+          final restorableItems = selectedItems
+              .where((i) => existingBooks.containsKey(i.bookUuid))
+              .toList();
+          final unRestorableCount = selectedItems.length - restorableItems.length;
+
+          // 按类型分组
+          final chapterItems = restorableItems.where((i) => i.isChapter).toList();
+          final settingItems = restorableItems.where((i) => i.isSetting).toList();
+
+          // 按书籍收集现有数据（每个 bookUuid 只查询一次）
+          final existingChaptersByBook = <String, List<ChapterModel>>{};
+          final existingVolumesByBook = <String, List<VolumeModel>>{};
+          for (final item in chapterItems) {
+            if (!existingChaptersByBook.containsKey(item.bookUuid)) {
+              existingChaptersByBook[item.bookUuid] =
+                  await recycleBinProvider.getBookChapters(item.bookUuid);
+              existingVolumesByBook[item.bookUuid] =
+                  await recycleBinProvider.getBookVolumes(item.bookUuid);
+            }
           }
-          bool success = false;
-          if (item.isChapter) {
-            final chapters = await recycleBinProvider.getBookChapters(item.bookUuid);
-            final volumes = await recycleBinProvider.getBookVolumes(item.bookUuid);
-            final restored = await recycleBinProvider.restoreChapterFromRecycle(
-              item: item,
-              book: book,
-              existingChapters: chapters,
-              volumes: volumes,
+
+          final existingItemsByBook = <String, List<SettingItemModel>>{};
+          final existingGroupsByBook = <String, List<SettingGroupModel>>{};
+          for (final item in settingItems) {
+            if (!existingItemsByBook.containsKey(item.bookUuid)) {
+              existingItemsByBook[item.bookUuid] =
+                  await recycleBinProvider.getBookSettingItems(item.bookUuid);
+              existingGroupsByBook[item.bookUuid] =
+                  await recycleBinProvider.getBookSettingGroups(item.bookUuid);
+            }
+          }
+
+          int successCount = 0;
+          int failCount = unRestorableCount;
+
+          // 批量恢复章节
+          if (chapterItems.isNotEmpty) {
+            final result = await recycleBinProvider.restoreChaptersFromRecycleBatch(
+              items: chapterItems,
+              books: existingBooks,
+              existingChaptersByBook: existingChaptersByBook,
+              existingVolumesByBook: existingVolumesByBook,
             );
-            success = restored != null;
-          } else {
-            final items = await recycleBinProvider.getBookSettingItems(item.bookUuid);
-            final groups = await recycleBinProvider.getBookSettingGroups(item.bookUuid);
-            final restored = await recycleBinProvider.restoreSettingItemFromRecycle(
-              item: item,
-              book: book,
-              existingItems: items,
-              groups: groups,
+            successCount += result.success;
+            failCount += result.fail;
+          }
+
+          // 批量恢复设定项
+          if (settingItems.isNotEmpty) {
+            final result = await recycleBinProvider.restoreSettingItemsFromRecycleBatch(
+              items: settingItems,
+              books: existingBooks,
+              existingItemsByBook: existingItemsByBook,
+              existingGroupsByBook: existingGroupsByBook,
             );
-            success = restored != null;
+            successCount += result.success;
+            failCount += result.fail;
           }
-          if (success) {
-            successCount++;
-          } else {
-            failCount++;
+
+          await recycleBinProvider.refreshItems();
+          _deselectAll();
+          if (mounted) {
+            String message = '已恢复 $successCount 个项目';
+            if (failCount > 0) {
+              message += '，$failCount 个失败';
+            }
+            SnackBarService.show(context, message);
           }
-        }
-        await recycleBinProvider.refreshItems();
-        _deselectAll();
-        if (mounted) {
-          String message = '已恢复 $successCount 个项目';
-          if (failCount > 0) {
-            message += '，$failCount 个失败';
-          }
-          SnackBarService.show(context, message);
+        } finally {
+          dismissLoading();
         }
       },
     );
@@ -290,10 +326,18 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
       confirmText: '删除',
       cancelText: '取消',
       onConfirm: () async {
-        await recycleBinProvider.deleteItemsPermanentlyBatch(selectedItems);
-        _deselectAll();
-        if (mounted) {
-          SnackBarService.show(context, '已彻底删除 ${selectedItems.length} 个项目');
+        final dismissLoading = showLoadingDialog(
+          context: context,
+          message: '正在彻底删除 ${selectedItems.length} 个项目，请稍候...',
+        );
+        try {
+          await recycleBinProvider.deleteItemsPermanentlyBatch(selectedItems);
+          _deselectAll();
+          if (mounted) {
+            SnackBarService.show(context, '已彻底删除 ${selectedItems.length} 个项目');
+          }
+        } finally {
+          dismissLoading();
         }
       },
     );
@@ -389,6 +433,10 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
         final success = await bookshelfProvider.restoreFromRecycleBin(book);
         if (success) {
           await recycleBinProvider.refresh();
+          // 从选中集合中移除已恢复的项目，同步全选复选框和选中计数
+          setState(() {
+            _selectedBookUuids.remove(uuid);
+          });
           if (mounted) {
             SnackBarService.show(context, '「${book.title}」已恢复');
           }
@@ -412,6 +460,10 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
       cancelText: '取消',
       onConfirm: () async {
         await recycleBinProvider.deletePermanently(book);
+        // 从选中集合中移除已删除的项目，同步全选复选框和选中计数
+        setState(() {
+          _selectedBookUuids.remove(uuid);
+        });
         if (mounted) {
           SnackBarService.show(context, '「${book.title}」已彻底删除');
         }
@@ -465,8 +517,14 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
           );
           success = restored != null;
         }
-        if (success && mounted) {
-          SnackBarService.show(context, '「${item.title}」已恢复');
+        if (success) {
+          // 从选中集合中移除已恢复的项目，同步全选复选框和选中计数
+          setState(() {
+            _selectedItemUuids.remove(uuid);
+          });
+          if (mounted) {
+            SnackBarService.show(context, '「${item.title}」已恢复');
+          }
         }
       },
     );
@@ -488,6 +546,10 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
       cancelText: '取消',
       onConfirm: () async {
         await recycleBinProvider.deleteItemPermanently(item);
+        // 从选中集合中移除已删除的项目，同步全选复选框和选中计数
+        setState(() {
+          _selectedItemUuids.remove(uuid);
+        });
         if (mounted) {
           SnackBarService.show(context, '「${item.title}」已彻底删除');
         }

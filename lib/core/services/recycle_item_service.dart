@@ -484,6 +484,266 @@ class RecycleItemService {
     }
   }
 
+  /// 批量恢复章节
+  ///
+  /// [items] 要恢复的回收项列表
+  /// [bookFolderPathOf] 根据 bookUuid 返回书籍文件夹根路径
+  /// [existingChaptersOf] 根据 bookUuid 返回该书现有章节列表
+  /// [existingVolumesOf] 根据 bookUuid 返回该书现有分卷列表
+  /// 返回 (成功数量, 失败数量)
+  Future<({int success, int fail})> restoreChaptersBatch({
+    required List<RecycleItemModel> items,
+    required String Function(String bookUuid) bookFolderPathOf,
+    required List<ChapterModel> Function(String bookUuid) existingChaptersOf,
+    required List<VolumeModel> Function(String bookUuid) existingVolumesOf,
+  }) async {
+    if (items.isEmpty) return (success: 0, fail: 0);
+
+    final recycleBinPath = await AppPaths.instance.getRecycleBinPath();
+    final restoredChapters = <ChapterModel>[];
+    final itemIdsToDelete = <int>[];
+    int successCount = 0;
+    int failCount = 0;
+
+    // 按书籍分组，便于动态维护每本书的章节列表（重名检测需要）
+    final itemsByBook = <String, List<RecycleItemModel>>{};
+    for (final item in items) {
+      itemsByBook.putIfAbsent(item.bookUuid, () => []).add(item);
+    }
+
+    for (final entry in itemsByBook.entries) {
+      final bookUuid = entry.key;
+      final bookItems = entry.value;
+      final bookFolderPath = bookFolderPathOf(bookUuid);
+      // 复制一份现有章节列表，后续恢复的章节会追加进去用于重名检测
+      final existingChapters = List<ChapterModel>.from(existingChaptersOf(bookUuid));
+      final existingVolumes = existingVolumesOf(bookUuid);
+
+      for (final item in bookItems) {
+        try {
+          // 从回收站读取文件
+          final recycleFileFullPath =
+              '$recycleBinPath${Platform.pathSeparator}${item.recycleFilePath}';
+          final recycleFile = File(recycleFileFullPath);
+          if (!recycleFile.existsSync()) {
+            failCount++;
+            continue;
+          }
+
+          // 检测重名，必要时添加后缀
+          String finalTitle = item.title;
+          int suffix = 1;
+          while (existingChapters.any((c) => c.title == finalTitle)) {
+            finalTitle = '${item.title} ($suffix)';
+            suffix++;
+          }
+
+          // 检测原分卷是否还存在
+          String targetVolumeUuid = '';
+          String volumeName = '';
+          if (item.containerUuid.isNotEmpty) {
+            final volume =
+                existingVolumes.where((v) => v.uuid == item.containerUuid).firstOrNull;
+            if (volume != null) {
+              targetVolumeUuid = volume.uuid;
+              volumeName = volume.name;
+            }
+          }
+
+          // 计算排序索引
+          final sameContainerChapters = existingChapters
+              .where((c) => c.volumeUuid == targetVolumeUuid)
+              .toList();
+          final newVolumeOrderIndex = sameContainerChapters.length;
+          final newOrderIndex = existingChapters.length;
+
+          // 生成文件路径
+          final String sanitizedTitle = _sanitizeFileName(finalTitle);
+          final String sanitizedVolume = _sanitizeFileName(volumeName);
+          final String newRelativePath = volumeName.isNotEmpty
+              ? '$sanitizedVolume${Platform.pathSeparator}$sanitizedTitle.txt'
+              : '$sanitizedTitle.txt';
+
+          // 确保目标目录存在
+          final String targetDirPath = volumeName.isNotEmpty
+              ? '$bookFolderPath${Platform.pathSeparator}chapters${Platform.pathSeparator}$sanitizedVolume'
+              : '$bookFolderPath${Platform.pathSeparator}chapters';
+          final targetDir = Directory(targetDirPath);
+          if (!targetDir.existsSync()) {
+            await targetDir.create(recursive: true);
+          }
+
+          // 移动文件
+          final targetFilePath =
+              '$bookFolderPath${Platform.pathSeparator}chapters${Platform.pathSeparator}$newRelativePath';
+          await recycleFile.rename(targetFilePath);
+
+          // 创建恢复后的 ChapterModel
+          final restoredChapter = item.toChapterModel(
+            filePath: newRelativePath,
+            orderIndex: newOrderIndex,
+            volumeOrderIndex: newVolumeOrderIndex,
+          )
+            ..title = finalTitle
+            ..volumeUuid = targetVolumeUuid;
+
+          restoredChapters.add(restoredChapter);
+          itemIdsToDelete.add(item.id);
+          // 动态更新现有章节列表，以便后续项的重名检测
+          existingChapters.add(restoredChapter);
+          successCount++;
+        } catch (e) {
+          debugPrint('批量恢复章节失败: $e');
+          failCount++;
+        }
+      }
+    }
+
+    // 单事务批量写入：删除回收项记录 + 存入恢复的章节记录
+    if (restoredChapters.isNotEmpty || itemIdsToDelete.isNotEmpty) {
+      await _db.writeTxn(() async {
+        if (itemIdsToDelete.isNotEmpty) {
+          await _db.recycleItemModels.deleteAll(itemIdsToDelete);
+        }
+        if (restoredChapters.isNotEmpty) {
+          await _db.chapterModels.putAll(restoredChapters);
+        }
+      });
+    }
+
+    return (success: successCount, fail: failCount);
+  }
+
+  /// 批量恢复设定项
+  ///
+  /// [items] 要恢复的回收项列表
+  /// [bookFolderPathOf] 根据 bookUuid 返回书籍文件夹根路径
+  /// [existingItemsOf] 根据 bookUuid 返回该书现有设定项列表
+  /// [existingGroupsOf] 根据 bookUuid 返回该书现有分组列表
+  /// 返回 (成功数量, 失败数量)
+  Future<({int success, int fail})> restoreSettingItemsBatch({
+    required List<RecycleItemModel> items,
+    required String Function(String bookUuid) bookFolderPathOf,
+    required List<SettingItemModel> Function(String bookUuid) existingItemsOf,
+    required List<SettingGroupModel> Function(String bookUuid) existingGroupsOf,
+  }) async {
+    if (items.isEmpty) return (success: 0, fail: 0);
+
+    final recycleBinPath = await AppPaths.instance.getRecycleBinPath();
+    final restoredItems = <SettingItemModel>[];
+    final itemIdsToDelete = <int>[];
+    int successCount = 0;
+    int failCount = 0;
+
+    // 按书籍分组，便于动态维护每本书的设定项列表（重名检测需要）
+    final itemsByBook = <String, List<RecycleItemModel>>{};
+    for (final item in items) {
+      itemsByBook.putIfAbsent(item.bookUuid, () => []).add(item);
+    }
+
+    for (final entry in itemsByBook.entries) {
+      final bookUuid = entry.key;
+      final bookItems = entry.value;
+      final bookFolderPath = bookFolderPathOf(bookUuid);
+      // 复制一份现有设定项列表，后续恢复的设定项会追加进去用于重名检测
+      final existingItems = List<SettingItemModel>.from(existingItemsOf(bookUuid));
+      final existingGroups = existingGroupsOf(bookUuid);
+
+      for (final item in bookItems) {
+        try {
+          // 从回收站读取文件
+          final recycleFileFullPath =
+              '$recycleBinPath${Platform.pathSeparator}${item.recycleFilePath}';
+          final recycleFile = File(recycleFileFullPath);
+          if (!recycleFile.existsSync()) {
+            failCount++;
+            continue;
+          }
+
+          // 检测重名，必要时添加后缀
+          String finalTitle = item.title;
+          int suffix = 1;
+          while (existingItems.any((i) => i.title == finalTitle)) {
+            finalTitle = '${item.title} ($suffix)';
+            suffix++;
+          }
+
+          // 检测原分组是否还存在
+          String targetGroupUuid = '';
+          String groupName = '';
+          if (item.containerUuid.isNotEmpty) {
+            final group =
+                existingGroups.where((g) => g.uuid == item.containerUuid).firstOrNull;
+            if (group != null) {
+              targetGroupUuid = group.uuid;
+              groupName = group.name;
+            }
+          }
+
+          // 计算排序索引
+          final sameContainerItems = existingItems
+              .where((i) => i.groupUuid == targetGroupUuid)
+              .toList();
+          final newGroupOrderIndex = sameContainerItems.length;
+          final newOrderIndex = existingItems.length;
+
+          // 生成文件路径
+          final String sanitizedTitle = _sanitizeFileName(finalTitle);
+          final String sanitizedGroup = _sanitizeFileName(groupName);
+          final String newRelativePath = groupName.isNotEmpty
+              ? '$sanitizedGroup${Platform.pathSeparator}$sanitizedTitle.txt'
+              : '$sanitizedTitle.txt';
+
+          // 确保目标目录存在
+          final String targetDirPath = groupName.isNotEmpty
+              ? '$bookFolderPath${Platform.pathSeparator}settings${Platform.pathSeparator}$sanitizedGroup'
+              : '$bookFolderPath${Platform.pathSeparator}settings';
+          final targetDir = Directory(targetDirPath);
+          if (!targetDir.existsSync()) {
+            await targetDir.create(recursive: true);
+          }
+
+          // 移动文件
+          final targetFilePath =
+              '$bookFolderPath${Platform.pathSeparator}settings${Platform.pathSeparator}$newRelativePath';
+          await recycleFile.rename(targetFilePath);
+
+          // 创建恢复后的 SettingItemModel
+          final restoredItem = item.toSettingItemModel(
+            filePath: newRelativePath,
+            orderIndex: newOrderIndex,
+            groupOrderIndex: newGroupOrderIndex,
+          )
+            ..title = finalTitle
+            ..groupUuid = targetGroupUuid;
+
+          restoredItems.add(restoredItem);
+          itemIdsToDelete.add(item.id);
+          // 动态更新现有设定项列表，以便后续项的重名检测
+          existingItems.add(restoredItem);
+          successCount++;
+        } catch (e) {
+          debugPrint('批量恢复设定项失败: $e');
+          failCount++;
+        }
+      }
+    }
+
+    // 单事务批量写入：删除回收项记录 + 存入恢复的设定项记录
+    if (restoredItems.isNotEmpty || itemIdsToDelete.isNotEmpty) {
+      await _db.writeTxn(() async {
+        if (itemIdsToDelete.isNotEmpty) {
+          await _db.recycleItemModels.deleteAll(itemIdsToDelete);
+        }
+        if (restoredItems.isNotEmpty) {
+          await _db.settingItemModels.putAll(restoredItems);
+        }
+      });
+    }
+
+    return (success: successCount, fail: failCount);
+  }
+
   // ================= 彻底删除 =================
 
   /// 彻底删除单个回收项
