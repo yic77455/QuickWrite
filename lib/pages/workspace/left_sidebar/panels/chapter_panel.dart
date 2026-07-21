@@ -9,6 +9,7 @@ import 'package:quick_write/core/models/volume.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/services/cache_services/misc_cache_service.dart';
 import 'package:quick_write/core/utils/chapter_number_utils.dart';
+import 'package:quick_write/core/utils/reorder_utils.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/dialogs/new_chapter_dialog.dart';
 import 'package:quick_write/shared/dialogs/export_dialog.dart';
@@ -291,7 +292,14 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
             itemExtent: _chapterItemExtent,
             itemCount: displayChapters.length,
             onReorder: (int oldIndex, int newIndex) {
-              context.read<WorkspaceProvider>().reorderChaptersInVolume('', oldIndex, newIndex);
+              // 倒序时需将显示列表的拖拽索引映射回原始数据列表索引
+              final indices = mapReorderIndices(
+                displayOldIndex: oldIndex,
+                displayNewIndex: newIndex,
+                length: displayChapters.length,
+                reversed: _isChapterReversed,
+              );
+              context.read<WorkspaceProvider>().reorderChaptersInVolume('', indices.dataOldIndex, indices.dataNewIndex);
             },
             proxyDecorator: _buildReorderProxyDecorator,
             itemBuilder: (context, index) {
@@ -441,7 +449,14 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
             itemExtent: _chapterItemExtent,
             itemCount: displayVolumeChapters.length,
             onReorder: (int oldIndex, int newIndex) {
-              context.read<WorkspaceProvider>().reorderChaptersInVolume(volumeUuid, oldIndex, newIndex);
+              // 倒序时需将显示列表的拖拽索引映射回原始数据列表索引
+              final indices = mapReorderIndices(
+                displayOldIndex: oldIndex,
+                displayNewIndex: newIndex,
+                length: displayVolumeChapters.length,
+                reversed: _isChapterReversed,
+              );
+              context.read<WorkspaceProvider>().reorderChaptersInVolume(volumeUuid, indices.dataOldIndex, indices.dataNewIndex);
             },
             proxyDecorator: _buildReorderProxyDecorator,
             itemBuilder: (context, index) {

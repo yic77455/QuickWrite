@@ -11,6 +11,7 @@ import 'package:quick_write/core/services/cache_services/misc_cache_service.dart
 import 'package:quick_write/shared/widgets/widgets.dart';
 import 'package:quick_write/shared/dialogs/new_setting_dialog.dart';
 import 'package:quick_write/shared/dialogs/export_dialog.dart';
+import 'package:quick_write/core/utils/reorder_utils.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/utils/batch_selection_controller.dart';
 import '../widgets/contents_list_widgets.dart';
@@ -294,7 +295,14 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
             itemExtent: _settingItemExtent,
             itemCount: displayItems.length,
             onReorder: (int oldIndex, int newIndex) {
-              context.read<WorkspaceProvider>().reorderSettingItemsInGroup('', oldIndex, newIndex);
+              // 倒序时需将显示列表的拖拽索引映射回原始数据列表索引
+              final indices = mapReorderIndices(
+                displayOldIndex: oldIndex,
+                displayNewIndex: newIndex,
+                length: displayItems.length,
+                reversed: _isReversed,
+              );
+              context.read<WorkspaceProvider>().reorderSettingItemsInGroup('', indices.dataOldIndex, indices.dataNewIndex);
             },
             proxyDecorator: _buildReorderProxyDecorator,
             itemBuilder: (context, index) {
@@ -427,7 +435,14 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
             itemExtent: _settingItemExtent,
             itemCount: displayGroupItems.length,
             onReorder: (int oldIndex, int newIndex) {
-              context.read<WorkspaceProvider>().reorderSettingItemsInGroup(groupUuid, oldIndex, newIndex);
+              // 倒序时需将显示列表的拖拽索引映射回原始数据列表索引
+              final indices = mapReorderIndices(
+                displayOldIndex: oldIndex,
+                displayNewIndex: newIndex,
+                length: displayGroupItems.length,
+                reversed: _isReversed,
+              );
+              context.read<WorkspaceProvider>().reorderSettingItemsInGroup(groupUuid, indices.dataOldIndex, indices.dataNewIndex);
             },
             proxyDecorator: _buildReorderProxyDecorator,
             itemBuilder: (context, index) {
