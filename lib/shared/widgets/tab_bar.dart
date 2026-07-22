@@ -231,7 +231,7 @@ class _TabItemState extends State<TabItem> {
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
               curve: Curves.easeOut,
-              constraints: const BoxConstraints(minWidth: 10, maxWidth: 200),
+              constraints: const BoxConstraints(minWidth: 50, maxWidth: 200),
               decoration: BoxDecoration(
                 color: bgColor,
                 border: Border(
