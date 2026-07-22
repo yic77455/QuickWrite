@@ -97,35 +97,6 @@ class OutlineEditorTopBar extends StatelessWidget {
   }
 }
 
-/// 大纲编辑器空状态
-///
-/// 无任何节点时显示的占位提示
-class OutlineEditorEmptyState extends StatelessWidget {
-  /// 颜色方案
-  final ColorScheme colorScheme;
-
-  const OutlineEditorEmptyState({super.key, required this.colorScheme});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.account_tree_outlined, size: 48, color: colorScheme.onSurfaceVariant.withValues(alpha: 0.3)),
-          const SizedBox(height: 12),
-          Text('暂无大纲内容', style: TextStyle(color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5), fontSize: 14)),
-          const SizedBox(height: 8),
-          Text(
-            '点击右上角 + 添加节点',
-            style: TextStyle(color: colorScheme.onSurfaceVariant.withValues(alpha: 0.4), fontSize: 12),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// 大纲编辑器底部快捷键提示
 ///
 /// 展示常用快捷键及其功能说明

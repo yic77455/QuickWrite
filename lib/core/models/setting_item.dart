@@ -41,7 +41,7 @@ class SettingItemModel {
   int wordCount = 0;
 
   /// 设定项文件相对路径（相对于书籍的 settings 目录）
-  /// 例如："角色设定/主角 - 李明.txt" 或 "世界观设定.txt"
+  /// 例如："角色设定/主角 - 李明.md" 或 "世界观设定.md"
   String filePath = '';
 
   /// 创建时间

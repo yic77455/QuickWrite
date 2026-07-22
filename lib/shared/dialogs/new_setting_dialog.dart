@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:quick_write/core/models/setting_item.dart';
 import 'package:quick_write/core/models/setting_group.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
+import 'package:quick_write/core/services/cache_services/misc_cache_service.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
@@ -131,6 +132,11 @@ class _NewSettingDialogContentState extends State<_NewSettingDialogContent>
     if (!mounted) return;
 
     if (settingItem != null) {
+      // 创建成功，保存分组选择记忆
+      final bookUuid = workspaceProvider.currentBook?.uuid;
+      if (bookUuid != null) {
+        MiscCacheService.instance.saveLastSelectedSettingGroup(bookUuid, _selectedGroupUuid);
+      }
       widget.onCreated?.call(settingItem);
       Navigator.of(context).pop();
       SnackBarService.show(context, '设定创建成功');
@@ -167,11 +173,16 @@ class _NewSettingDialogContentState extends State<_NewSettingDialogContent>
     // 在 async gap 之前获取 Provider 引用
     final workspaceProvider = widget.workspaceProvider;
 
-    final groupUuid = await workspaceProvider.addSettingGroup(name: groupName);
+    final newGroup = await workspaceProvider.addSettingGroup(name: groupName);
 
     if (!mounted) return;
 
-    if (groupUuid != null) {
+    if (newGroup != null) {
+      // 创建成功，保存分组选择记忆
+      final bookUuid = workspaceProvider.currentBook?.uuid;
+      if (bookUuid != null) {
+        MiscCacheService.instance.saveLastSelectedSettingGroup(bookUuid, newGroup.uuid);
+      }
       Navigator.of(context).pop();
       SnackBarService.show(context, '分组创建成功');
     } else {

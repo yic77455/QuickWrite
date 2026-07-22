@@ -462,7 +462,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
   /// 从关联的文件加载大纲内容
   ///
-  /// 文件不存在时视为空数据（新建设定项）；读取失败时保持空数据
+  /// 文件不存在时视为新设定项，初始化一个默认空节点
   Future<void> _loadFromFile() async {
     _isLoading = true;
     try {
@@ -470,8 +470,10 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       if (await file.exists()) {
         final text = await file.readAsString();
         parseFromText(text);
+      } else {
+        // 文件不存在时视为新设定项，初始化默认空节点
+        parseFromText('');
       }
-      // 文件不存在时使用空数据（新建设定项），无需额外处理
     } catch (e) {
       debugPrint('加载大纲文件失败: $e');
     } finally {
@@ -560,6 +562,11 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
         stack.last.$1.children.add(node);
       }
       stack.add((node, depth));
+    }
+
+    // 解析结果为空时创建一个默认空节点，始终保证至少有一个节点存在
+    if (_roots.isEmpty) {
+      _roots.add(_createNode(''));
     }
 
     // 同步资源：为新节点创建控制器/焦点节点，清理已不存在的节点资源
@@ -1179,6 +1186,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 删除节点
   ///
   /// 子节点提升到当前节点的位置。
+  /// 最后一个无子节点的根节点不可删除，始终保持至少一个节点存在。
   void _deleteNode(String nodeId) {
     final location = _findLocation(nodeId);
     if (location == null) return;
@@ -1186,10 +1194,17 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     final siblings = location.parent?.children ?? _roots;
     if (siblings.isEmpty) return;
 
+    final nodeToDelete = siblings[location.index];
+
+    // 最后一个无子节点的根节点不可删除，始终保持至少一个节点存在
+    if (location.parent == null &&
+        nodeToDelete.children.isEmpty &&
+        _roots.length == 1) {
+      return;
+    }
+
     // 开启批量操作，在操作完成后记录撤销项
     _undoManager.beginBatch();
-
-    final nodeToDelete = siblings[location.index];
 
     // 删除前记录扁平列表中的上一节点（就近原则：删除后聚焦到上一位置）
     final flatListBefore = _flatten();
@@ -1331,15 +1346,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     setState(() {});
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _focusNodeWithSelection(newNode.id, moveCursorToEnd: false);
-      // 滚动到底部使新节点可见
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
-      }
+      // 滚动使新节点可见
+      _focusAndScrollToNode(newNode.id, moveCursorToEnd: false);
       _endBatchAndNotify(description: '添加根节点', focusNodeId: newNode.id, focusSelection: _selectionAtStart());
     });
   }
@@ -2227,8 +2235,12 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   }
 
   /// 删除选中节点（连同子节点一起删除，不提升子节点）
+  /// 所有根节点都被选中时阻止删除，始终保持至少一个节点存在。
   void _deleteSelectedNodes() {
     if (_selectedNodeIds.isEmpty) return;
+
+    // 所有根节点都被选中时阻止删除，始终保持至少一个节点存在
+    if (_roots.every((r) => _selectedNodeIds.contains(r.id))) return;
 
     // 记录删除前选区中第一个节点的位置，用于后续恢复焦点
     final flatList = _flatten();
@@ -3809,10 +3821,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
             child: Stack(
               fit: StackFit.expand,
               children: [
-                // 主内容区域：空状态或可滚动的大纲列表
-                flatList.isEmpty
-                    ? OutlineEditorEmptyState(colorScheme: colorScheme)
-                    : Focus(
+                // 主内容区域：可滚动的大纲列表
+                Focus(
                         focusNode: _editorFocusNode,
                         onKeyEvent: _onEditorKeyEvent,
                         child: Listener(

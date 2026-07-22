@@ -250,7 +250,11 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
       onExitBatchMode: _exitBatchMode,
       addTooltip: '新建设定/分组',
       onAdd: () {
-        _showNewSettingDialog();
+        final provider = context.read<WorkspaceProvider>();
+        // 从缓存读取上次选择的分组
+        final bookUuid = provider.currentBook?.uuid;
+        final lastGroup = bookUuid != null ? MiscCacheService.instance.getLastSelectedSettingGroup(bookUuid) : '';
+        _showNewSettingDialog(initialGroupUuid: lastGroup);
       },
       isReversed: _isReversed,
       onToggleReversed: () {
@@ -664,7 +668,7 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
     }
 
     return ListItem(
-      leftIndent: 18,
+      leftIndent: 30,
       leading: Icon(
         Icons.summarize_outlined,
         size: 18,

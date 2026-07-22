@@ -248,18 +248,18 @@ class _TabItemState extends State<TabItem> {
                   Icon(widget.tab.icon ?? widget.tab.defaultIcon, size: 16, color: fgColor),
                   const SizedBox(width: 6),
                   
-                  // 预览模式指示器（小圆点）
-                  if (widget.tab.isPreview) ...[
-                    Container(
-                      width: 5,
-                      height: 5,
-                      decoration: BoxDecoration(
-                        color: fgColor.withValues(alpha: 0.5),
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 5),
-                  ],
+                  // // 预览模式指示器（小圆点）
+                  // if (widget.tab.isPreview) ...[
+                  //   Container(
+                  //     width: 5,
+                  //     height: 5,
+                  //     decoration: BoxDecoration(
+                  //       color: fgColor.withValues(alpha: 0.5),
+                  //       shape: BoxShape.circle,
+                  //     ),
+                  //   ),
+                  //   const SizedBox(width: 5),
+                  // ],
                   // 标题（鼠标悬停显示完整章节名）
                   Flexible(
                     child: CursorTooltipTarget(

@@ -1763,9 +1763,9 @@ class WorkspaceProvider extends ChangeNotifier {
     String filePath;
     final groupName = getSettingGroupName(groupUuid);
     if (groupName.isNotEmpty) {
-      filePath = '${_sanitizeFileName(groupName)}${Platform.pathSeparator}${_sanitizeFileName(title)}${GlobalConstants.chapterFileExtension}';
+      filePath = '${_sanitizeFileName(groupName)}${Platform.pathSeparator}${_sanitizeFileName(title)}${GlobalConstants.settingFileExtension}';
     } else {
-      filePath = '${_sanitizeFileName(title)}${GlobalConstants.chapterFileExtension}';
+      filePath = '${_sanitizeFileName(title)}${GlobalConstants.settingFileExtension}';
     }
 
     final item = SettingItemModel()
@@ -1854,7 +1854,7 @@ class WorkspaceProvider extends ChangeNotifier {
     // 更新所有设定项的 filePath
     for (final item in groupItems) {
       item.updatedAt = DateTime.now();
-      item.filePath = '${_sanitizeFileName(newName)}${Platform.pathSeparator}${_sanitizeFileName(item.title)}${GlobalConstants.chapterFileExtension}';
+      item.filePath = '${_sanitizeFileName(newName)}${Platform.pathSeparator}${_sanitizeFileName(item.title)}${GlobalConstants.settingFileExtension}';
     }
 
     // 更新分组名称
@@ -1904,9 +1904,9 @@ class WorkspaceProvider extends ChangeNotifier {
     // 生成新的文件路径
     final groupName = getSettingGroupName(item.groupUuid);
     if (groupName.isNotEmpty) {
-      item.filePath = '${_sanitizeFileName(groupName)}${Platform.pathSeparator}${_sanitizeFileName(newTitle)}${GlobalConstants.chapterFileExtension}';
+      item.filePath = '${_sanitizeFileName(groupName)}${Platform.pathSeparator}${_sanitizeFileName(newTitle)}${GlobalConstants.settingFileExtension}';
     } else {
-      item.filePath = '${_sanitizeFileName(newTitle)}${GlobalConstants.chapterFileExtension}';
+      item.filePath = '${_sanitizeFileName(newTitle)}${GlobalConstants.settingFileExtension}';
     }
 
     // 重命名文件
@@ -2202,9 +2202,9 @@ class WorkspaceProvider extends ChangeNotifier {
 
     // 生成新的文件路径
     if (newGroupName.isNotEmpty) {
-      item.filePath = '${_sanitizeFileName(newGroupName)}${Platform.pathSeparator}${_sanitizeFileName(item.title)}${GlobalConstants.chapterFileExtension}';
+      item.filePath = '${_sanitizeFileName(newGroupName)}${Platform.pathSeparator}${_sanitizeFileName(item.title)}${GlobalConstants.settingFileExtension}';
     } else {
-      item.filePath = '${_sanitizeFileName(item.title)}${GlobalConstants.chapterFileExtension}';
+      item.filePath = '${_sanitizeFileName(item.title)}${GlobalConstants.settingFileExtension}';
     }
 
     // 重命名文件
@@ -2342,8 +2342,8 @@ class WorkspaceProvider extends ChangeNotifier {
 
       // 生成新的文件相对路径
       final String newRelativePath = targetGroupName.isNotEmpty
-          ? '${_sanitizeFileName(targetGroupName)}${Platform.pathSeparator}${_sanitizeFileName(item.title)}${GlobalConstants.chapterFileExtension}'
-          : '${_sanitizeFileName(item.title)}${GlobalConstants.chapterFileExtension}';
+          ? '${_sanitizeFileName(targetGroupName)}${Platform.pathSeparator}${_sanitizeFileName(item.title)}${GlobalConstants.settingFileExtension}'
+          : '${_sanitizeFileName(item.title)}${GlobalConstants.settingFileExtension}';
       item.filePath = newRelativePath;
 
       // 移动设定项文件

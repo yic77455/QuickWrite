@@ -97,10 +97,16 @@ class BookGroupExpandCache {
   /// 空字符串表示"未分卷"，用于记忆顶部操作栏新建弹窗中的分卷选择
   final String lastSelectedVolume;
 
+  /// 新建设定时上次选择的分组 UUID
+  ///
+  /// 空字符串表示"未分组"，用于记忆新建设定弹窗中的分组选择
+  final String lastSelectedSettingGroup;
+
   const BookGroupExpandCache({
     this.isUnassignedCollapsed = false,
     this.expandedCategories = const [],
     this.lastSelectedVolume = '',
+    this.lastSelectedSettingGroup = '',
   });
 
   /// 从 JSON Map 创建实例
@@ -112,6 +118,7 @@ class BookGroupExpandCache {
               .toList() ??
           [],
       lastSelectedVolume: json['lastSelectedVolume'] as String? ?? '',
+      lastSelectedSettingGroup: json['lastSelectedSettingGroup'] as String? ?? '',
     );
   }
 
@@ -121,6 +128,7 @@ class BookGroupExpandCache {
       'isUnassignedCollapsed': isUnassignedCollapsed,
       'expandedCategories': expandedCategories,
       'lastSelectedVolume': lastSelectedVolume,
+      'lastSelectedSettingGroup': lastSelectedSettingGroup,
     };
   }
 
@@ -129,11 +137,13 @@ class BookGroupExpandCache {
     bool? isUnassignedCollapsed,
     List<String>? expandedCategories,
     String? lastSelectedVolume,
+    String? lastSelectedSettingGroup,
   }) {
     return BookGroupExpandCache(
       isUnassignedCollapsed: isUnassignedCollapsed ?? this.isUnassignedCollapsed,
       expandedCategories: expandedCategories ?? this.expandedCategories,
       lastSelectedVolume: lastSelectedVolume ?? this.lastSelectedVolume,
+      lastSelectedSettingGroup: lastSelectedSettingGroup ?? this.lastSelectedSettingGroup,
     );
   }
 }

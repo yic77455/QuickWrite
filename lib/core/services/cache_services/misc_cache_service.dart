@@ -117,6 +117,22 @@ class MiscCacheService extends CacheService<MiscCacheData> {
     return await save(_data);
   }
 
+  // ================= 新建设定分组选择记忆 =================
+
+  /// 获取指定书籍上次新建设定时选择的分组 UUID
+  String getLastSelectedSettingGroup(String bookUuid) {
+    return _data.books[bookUuid]?.lastSelectedSettingGroup ?? '';
+  }
+
+  /// 保存指定书籍新建设定时选择的分组 UUID
+  Future<bool> saveLastSelectedSettingGroup(String bookUuid, String groupUuid) async {
+    final bookCache = _data.books[bookUuid] ?? const BookGroupExpandCache();
+    final newBooks = Map<String, BookGroupExpandCache>.from(_data.books);
+    newBooks[bookUuid] = bookCache.copyWith(lastSelectedSettingGroup: groupUuid);
+    _data = _data.copyWith(books: newBooks);
+    return await save(_data);
+  }
+
   // ================= 章节排序状态 =================
 
   /// 获取章节列表是否倒序排列

@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:isar/isar.dart';
 import 'package:uuid/uuid.dart';
+import 'package:quick_write/core/constants/constants.dart';
 import 'package:quick_write/core/models/chapter.dart';
 import 'package:quick_write/core/models/volume.dart';
 import 'package:quick_write/core/models/setting_group.dart';
@@ -446,8 +447,8 @@ class RecycleItemService {
       final String sanitizedTitle = _sanitizeFileName(finalTitle);
       final String sanitizedGroup = _sanitizeFileName(groupName);
       final String newRelativePath = groupName.isNotEmpty
-          ? '$sanitizedGroup${Platform.pathSeparator}$sanitizedTitle.txt'
-          : '$sanitizedTitle.txt';
+          ? '$sanitizedGroup${Platform.pathSeparator}$sanitizedTitle${GlobalConstants.settingFileExtension}'
+          : '$sanitizedTitle${GlobalConstants.settingFileExtension}';
 
       // 确保目标目录存在
       final String targetDirPath = groupName.isNotEmpty
@@ -691,8 +692,8 @@ class RecycleItemService {
           final String sanitizedTitle = _sanitizeFileName(finalTitle);
           final String sanitizedGroup = _sanitizeFileName(groupName);
           final String newRelativePath = groupName.isNotEmpty
-              ? '$sanitizedGroup${Platform.pathSeparator}$sanitizedTitle.txt'
-              : '$sanitizedTitle.txt';
+              ? '$sanitizedGroup${Platform.pathSeparator}$sanitizedTitle${GlobalConstants.settingFileExtension}'
+              : '$sanitizedTitle${GlobalConstants.settingFileExtension}';
 
           // 确保目标目录存在
           final String targetDirPath = groupName.isNotEmpty

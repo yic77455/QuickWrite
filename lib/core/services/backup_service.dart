@@ -84,7 +84,7 @@ class BackupRecord {
 ///       │       └── ...
 ///       └── settings/
 ///           └── {设定名称}/
-///               ├── 20260517_143025.txt
+///               ├── 20260517_143025.md
 ///               └── ...
 /// ```
 class BackupService {
@@ -214,7 +214,7 @@ class BackupService {
     try {
       final backupPath = await AppPaths.instance.getBackupPath();
       final chapterDirPath = _buildChapterBackupPath(backupPath, bookUuid, chapterTitle, volumeName);
-      return _collectBackupRecords(chapterDirPath);
+      return _collectBackupRecords(chapterDirPath, GlobalConstants.chapterFileExtension);
     } catch (e) {
       debugPrint('获取备份列表失败: $e');
       return [];
@@ -228,7 +228,7 @@ class BackupService {
     try {
       final backupPath = await AppPaths.instance.getBackupPath();
       final settingDirPath = _buildSettingBackupPath(backupPath, bookUuid, settingTitle);
-      return _collectBackupRecords(settingDirPath);
+      return _collectBackupRecords(settingDirPath, GlobalConstants.settingFileExtension);
     } catch (e) {
       debugPrint('获取设定备份列表失败: $e');
       return [];
@@ -237,21 +237,23 @@ class BackupService {
 
   /// 从指定目录收集备份记录
   ///
-  /// 列出目录下所有 .txt 备份文件，解析文件名时间戳并按时间降序排列
-  Future<List<BackupRecord>> _collectBackupRecords(String dirPath) async {
+  /// [extension] 指定备份文件扩展名，章节备份为 .txt，设定项备份为 .md
+  /// 列出目录下匹配扩展名的备份文件，解析文件名时间戳并按时间降序排列
+  Future<List<BackupRecord>> _collectBackupRecords(String dirPath, String extension) async {
     final dir = Directory(dirPath);
     if (!await dir.exists()) return [];
 
     final files = await dir
         .list()
-        .where((f) => f is File && f.path.endsWith(GlobalConstants.chapterFileExtension))
+        .where((f) => f is File && f.path.endsWith(extension))
         .cast<File>()
         .toList();
 
     final records = <BackupRecord>[];
     for (final file in files) {
-      final fileName = file.path.split(Platform.pathSeparator).last.replaceAll(GlobalConstants.chapterFileExtension, '');
-      final dateTime = _parseTimestamp(fileName);
+      final fileName = file.path.split(Platform.pathSeparator).last;
+      final timestamp = fileName.substring(0, fileName.length - extension.length);
+      final dateTime = _parseTimestamp(timestamp);
       final stat = await file.stat();
       records.add(BackupRecord(
         filePath: file.path,
@@ -403,8 +405,7 @@ class BackupService {
 
         // 先统计该书籍目录下的备份文件数
         await for (final entity in bookDir.list(recursive: true)) {
-          if (entity is File &&
-              entity.path.endsWith(GlobalConstants.chapterFileExtension)) {
+          if (_isBackupFile(entity)) {
             deletedCount++;
           }
         }
@@ -422,6 +423,41 @@ class BackupService {
   }
 
   // ================= 私有方法 =================
+
+  /// 备份文件支持的所有扩展名
+  ///
+  /// 章节备份使用 .txt，设定项备份使用 .md
+  static const List<String> _backupExtensions = [
+    GlobalConstants.chapterFileExtension,
+    GlobalConstants.settingFileExtension,
+  ];
+
+  /// 判断文件系统实体是否为备份文件
+  ///
+  /// 遍历书籍目录树时使用，同时识别章节备份（.txt）和设定项备份（.md）
+  bool _isBackupFile(FileSystemEntity entity) {
+    if (entity is! File) return false;
+    return _backupExtensions.any((ext) => entity.path.endsWith(ext));
+  }
+
+  /// 根据标签页类型获取对应的备份文件扩展名
+  ///
+  /// 设定项使用 .md，章节使用 .txt
+  String _backupExtensionFor(bool isSetting) {
+    return isSetting
+        ? GlobalConstants.settingFileExtension
+        : GlobalConstants.chapterFileExtension;
+  }
+
+  /// 去除备份文件名中的扩展名，仅保留时间戳部分
+  String _stripBackupExtension(String fileName) {
+    for (final ext in _backupExtensions) {
+      if (fileName.endsWith(ext)) {
+        return fileName.substring(0, fileName.length - ext.length);
+      }
+    }
+    return fileName;
+  }
 
   /// 执行单次备份
   Future<void> _performBackup(String tabId, _TabBackupInfo info) async {
@@ -476,7 +512,8 @@ class BackupService {
         '${now.minute.toString().padLeft(2, '0')}'
         '${now.second.toString().padLeft(2, '0')}';
 
-    final file = File('$dirPath${Platform.pathSeparator}$timestamp${GlobalConstants.chapterFileExtension}');
+    final extension = _backupExtensionFor(info.isSetting);
+    final file = File('$dirPath${Platform.pathSeparator}$timestamp$extension');
     await file.writeAsString(content);
   }
 
@@ -491,9 +528,10 @@ class BackupService {
 
       if (!await dir.exists()) return null;
 
+      final extension = _backupExtensionFor(info.isSetting);
       final files = await dir
           .list()
-          .where((f) => f is File && f.path.endsWith(GlobalConstants.chapterFileExtension))
+          .where((f) => f is File && f.path.endsWith(extension))
           .cast<File>()
           .toList();
 
@@ -534,8 +572,8 @@ class BackupService {
 
       // 遍历书籍下所有备份文件
       await for (final entity in bookEntity.list(recursive: true)) {
-        if (entity is File && entity.path.endsWith(GlobalConstants.chapterFileExtension)) {
-          final fileName = entity.path.split(Platform.pathSeparator).last.replaceAll(GlobalConstants.chapterFileExtension, '');
+        if (_isBackupFile(entity)) {
+          final fileName = _stripBackupExtension(entity.path.split(Platform.pathSeparator).last);
           final dateTime = _parseTimestamp(fileName);
 
           if (dateTime.isBefore(cutoffDate)) {
