@@ -5,6 +5,7 @@ import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/services/cache_services/misc_cache_service.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
+import 'package:quick_write/pages/workspace/right_sidebar/widgets/book_info_section.dart';
 
 /// 工具面板
 ///
@@ -55,6 +56,9 @@ class _ToolsPanelState extends State<ToolsPanel> {
             const SizedBox(height: 20),
             // 码字统计区
             _buildStatsSection(context),
+            const SizedBox(height: 20),
+            // 书籍信息区
+            const BookInfoSection(),
           ],
         ),
       ),
