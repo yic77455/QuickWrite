@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
+import 'package:quick_write/shared/widgets/qw_switch.dart';
 
 /// 右侧边栏设置分组容器
 /// 
@@ -113,10 +114,9 @@ class SwitchSettingItem extends StatelessWidget {
             ),
           ),
           // 右侧开关控件
-          Switch(
+          QwSwitch(
             value: value,
             onChanged: enabled ? onChanged : null,
-            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
         ],
       ),

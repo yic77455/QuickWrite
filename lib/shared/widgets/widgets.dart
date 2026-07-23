@@ -10,6 +10,7 @@ export 'qw_dialogs.dart';
 export 'qw_snackbar.dart';
 export 'qw_tooltip.dart';
 export 'qw_dropdown.dart';
+export 'qw_switch.dart';
 export 'resizable_divider.dart';
 export 'segmented_control.dart';
 export 'themed_cover_image.dart';

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/pages/home/settings/setting_widgets.dart';
+import 'package:quick_write/shared/widgets/widgets.dart';
 
 /// 窗口设置分组
 ///
@@ -30,7 +31,7 @@ class WindowSection extends StatelessWidget {
           icon: Icons.open_in_new,
           title: '在新窗口中打开工作台',
           subtitle: '开启后，点击书籍会在新窗口中打开工作台；关闭则在当前窗口中打开',
-          trailing: Switch(
+          trailing: QwSwitch(
             value: settingsService.openWorkspaceInNewWindow,
             onChanged: (value) async {
               // 检查是否有打开的工作台窗口

@@ -64,7 +64,7 @@ class AppearanceSection extends StatelessWidget {
           icon: Icons.dark_mode_outlined,
           title: '暗色模式下封面变暗',
           subtitle: '开启后，暗色模式下封面图片会添加遮罩，减少对眼睛的刺激',
-          trailing: Switch(
+          trailing: QwSwitch(
             value: settingsService.dimCoverInDarkMode,
             onChanged: (value) async {
               await settingsService.updateDimCoverInDarkMode(value);

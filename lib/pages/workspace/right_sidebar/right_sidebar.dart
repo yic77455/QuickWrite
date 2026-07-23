@@ -205,8 +205,17 @@ class _RightSidebarState extends State<RightSidebar>
           const Spacer(),
 
           // 显示设置按钮（仅工具面板显示），点击展开下拉菜单配置区块显示与顺序
-          if (sidebarType == RightSidebarType.tools)
+          if (sidebarType == RightSidebarType.tools)...[
             _buildDisplaySettingsButton(context),
+            const SizedBox(width: 8),
+            Container(
+              width: 2,
+              height: 16,
+              color: colorScheme.outlineVariant.withValues(alpha: 0.3),
+            ),
+            const SizedBox(width: 4),
+          ],
+            
 
           // 关闭按钮
           CursorTooltipTarget(

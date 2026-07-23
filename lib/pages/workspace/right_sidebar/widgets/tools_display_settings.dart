@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
+import 'package:quick_write/shared/widgets/widgets.dart';
 
 /// 工具面板可配置显示的区块标识
 enum ToolsSection {
@@ -130,10 +131,9 @@ class ToolsDisplaySettings extends StatelessWidget {
           ),
           const SizedBox(width: 2),
           // 显示开关
-          Switch(
+          QwSwitch(
             value: isVisible,
             onChanged: (v) => _toggle(section, v),
-            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
         ],
       ),
