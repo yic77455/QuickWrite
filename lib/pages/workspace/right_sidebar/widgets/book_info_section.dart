@@ -7,9 +7,9 @@ import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/utils/word_count_utils.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 
-/// 书籍信息区域
+/// 作品信息区域
 ///
-/// 工具面板的概要卡片，展示当前打开书籍的封面、书名、章节数、
+/// 工具面板的概要卡片，展示当前打开作品的封面、书名、章节数、
 /// 分卷数、总字数（不含设定），以及当前标签页章节所在分卷的章节数与字数。
 class BookInfoSection extends StatelessWidget {
   const BookInfoSection({super.key});
@@ -29,7 +29,7 @@ class BookInfoSection extends StatelessWidget {
             Icon(Icons.menu_book_rounded, size: 16, color: colorScheme.primary),
             const SizedBox(width: 6),
             Text(
-              '书籍信息',
+              '作品信息',
               style: context.bodySmall?.copyWith(
                 fontWeight: FontWeight.w600,
                 color: colorScheme.onSurfaceVariant,
@@ -38,13 +38,13 @@ class BookInfoSection extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 8),
-        // 信息卡片：书籍未加载时显示占位
+        // 信息卡片：作品未加载时显示占位
         book == null ? _buildPlaceholder(context) : _buildInfoCard(context, provider, book),
       ],
     );
   }
 
-  /// 构建书籍未加载时的占位卡片
+  /// 构建作品未加载时的占位卡片
   Widget _buildPlaceholder(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     return Container(
@@ -55,14 +55,14 @@ class BookInfoSection extends StatelessWidget {
       ),
       child: Center(
         child: Text(
-          '书籍信息加载中...',
+          '作品信息加载中...',
           style: context.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
         ),
       ),
     );
   }
 
-  /// 构建书籍信息卡片
+  /// 构建作品信息卡片
   Widget _buildInfoCard(BuildContext context, WorkspaceProvider provider, BookModel book) {
     final colorScheme = Theme.of(context).colorScheme;
     final chapters = provider.chapters;
@@ -258,7 +258,7 @@ class BookInfoSection extends StatelessWidget {
   }
 }
 
-/// 书籍统计数据卡片
+/// 作品统计数据卡片
 ///
 /// 用于展示单项统计数据，包含图标、标签、数值和可选单位。
 /// [highlight] 为 true 时使用更突出的样式（用于总字数等核心指标）。

@@ -4,6 +4,7 @@ import 'package:quick_write/core/models/book.dart';
 import 'package:quick_write/core/providers/bookshelf_provider.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
+import 'package:quick_write/shared/dialogs/book_detail_dialog.dart';
 import 'package:quick_write/shared/dialogs/export_dialog.dart';
 import 'package:quick_write/shared/dialogs/new_book_dialog.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
@@ -133,6 +134,11 @@ class _HoverBookItemState extends State<HoverBookItem> {
         labelText: '打开',
         icon: Icons.open_in_new,
         onTap: () => openWorkspace(context: context, bookId: widget.book.uuid, bookTitle: widget.book.title),
+      ),
+      ContextMenuItem(
+        labelText: '详情',
+        icon: Icons.info_outline,
+        onTap: () => showBookDetailDialog(context: context, book: widget.book),
       ),
       ContextMenuItem.divider(),
       ContextMenuItem(
