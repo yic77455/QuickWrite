@@ -10,7 +10,10 @@ import 'package:quick_write/core/services/cache_services/cache_service.dart';
 /// 缓存内容包括：
 /// - 书架上当前选中的分组 ID
 /// - 每本书的未分卷组折叠状态
-/// - 每本书的已展开设定分类 ID 列表
+/// - 新建章节、设定时分卷或分组选择记忆
+/// - 章节、设定列表是否倒序排列
+/// - 统计界面是否包含粘贴字数
+/// - 工具面板区块显示顺序
 class MiscCacheService extends CacheService<MiscCacheData> {
   // ================= 单例模式 =================
 
@@ -85,22 +88,6 @@ class MiscCacheService extends CacheService<MiscCacheData> {
     return await save(_data);
   }
 
-  // ================= 设定分类展开状态 =================
-
-  /// 获取指定书籍的已展开设定分类 ID 列表
-  List<String> getExpandedCategories(String bookUuid) {
-    return _data.books[bookUuid]?.expandedCategories.toList() ?? [];
-  }
-
-  /// 保存指定书籍的已展开设定分类 ID 列表
-  Future<bool> saveExpandedCategories(String bookUuid, List<String> categories) async {
-    final bookCache = _data.books[bookUuid] ?? const BookGroupExpandCache();
-    final newBooks = Map<String, BookGroupExpandCache>.from(_data.books);
-    newBooks[bookUuid] = bookCache.copyWith(expandedCategories: categories);
-    _data = _data.copyWith(books: newBooks);
-    return await save(_data);
-  }
-
   // ================= 新建章节分卷选择记忆 =================
 
   /// 获取指定书籍上次新建章节时选择的分卷 UUID
@@ -169,6 +156,21 @@ class MiscCacheService extends CacheService<MiscCacheData> {
   /// 保存统计界面是否包含粘贴字数
   Future<bool> saveStatsIncludePasteWords(bool include) async {
     _data = _data.copyWith(statsIncludePasteWords: include);
+    return await save(_data);
+  }
+
+  // ================= 工具面板显示设置 =================
+
+  /// 获取工具面板区块显示顺序（仅包含可见区块）
+  ///
+  /// 列表按显示顺序存储开启显示的区块 ID，默认为 ['bookInfo', 'stats']
+  List<String> getToolsSectionOrder() {
+    return _data.toolsSectionOrder.toList();
+  }
+
+  /// 保存工具面板区块显示顺序
+  Future<bool> saveToolsSectionOrder(List<String> order) async {
+    _data = _data.copyWith(toolsSectionOrder: order);
     return await save(_data);
   }
 

@@ -75,8 +75,10 @@ class BookInfoSection extends StatelessWidget {
     // 返回 null 表示当前无章节标签页；空字符串表示未分卷；非空为分卷 UUID
     final currentVolumeUuid = _resolveCurrentVolumeUuid(provider);
     final hasCurrentChapter = currentVolumeUuid != null;
+    // 仅当当前章节属于某个具体分卷时才展示分卷统计数据
+    final hasCurrentVolume = currentVolumeUuid != null && currentVolumeUuid.isNotEmpty;
     final volumeName = hasCurrentChapter ? provider.getVolumeName(currentVolumeUuid) : '';
-    final volumeChapters = hasCurrentChapter
+    final volumeChapters = hasCurrentVolume
         ? chapters.where((c) => c.volumeUuid == currentVolumeUuid).toList()
         : <ChapterModel>[];
     final volumeWords = volumeChapters.fold<int>(0, (sum, c) => sum + c.wordCount);
@@ -126,8 +128,8 @@ class BookInfoSection extends StatelessWidget {
           _buildDivider(colorScheme),
           // 当前分卷小标题行：左侧标题 + 右侧分卷名
           _buildCurrentVolumeHeader(context, hasCurrentChapter, volumeName),
-          // 当前分卷的章节数与字数（两列网格，仅在有当前章节时显示）
-          if (hasCurrentChapter) ...[
+          // 当前分卷的章节数与字数（两列网格，仅在当前章节属于具体分卷时显示）
+          if (hasCurrentVolume) ...[
             const SizedBox(height: 8),
             Row(
               children: [

@@ -6,14 +6,20 @@ import 'package:quick_write/core/services/cache_services/misc_cache_service.dart
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 import 'package:quick_write/pages/workspace/right_sidebar/widgets/book_info_section.dart';
+import 'package:quick_write/pages/workspace/right_sidebar/widgets/tools_display_settings.dart';
 
 /// 工具面板
 ///
-/// 右侧边栏的工具面板，包含功能区和码字统计两个区域。
-/// 功能区提供快捷工具入口（如随机取名）；
-/// 码字统计区展示今日码字、本次码字、码字速度、码字时长、空闲时长等数据。
+/// 右侧边栏的工具面板，包含功能区和按配置顺序展示的可见区块（书籍信息、码字统计）。
+/// 区块的显示开关与顺序由标题栏的"显示设置"配置，配置状态由父级 [RightSidebar] 持有并通过参数传入。
 class ToolsPanel extends StatefulWidget {
-  const ToolsPanel({super.key});
+  /// 可见区块的显示顺序列表（元素为 [ToolsSection] 的 id）
+  final List<String> sectionOrder;
+
+  const ToolsPanel({
+    super.key,
+    required this.sectionOrder,
+  });
 
   @override
   State<ToolsPanel> createState() => _ToolsPanelState();
@@ -53,16 +59,25 @@ class _ToolsPanelState extends State<ToolsPanel> {
           children: [
             // 功能区
             _buildFunctionSection(context),
-            const SizedBox(height: 20),
-            // 码字统计区
-            _buildStatsSection(context),
-            const SizedBox(height: 20),
-            // 书籍信息区
-            const BookInfoSection(),
+            // 按配置顺序渲染可见区块（书籍信息/码字统计）
+            for (int i = 0; i < widget.sectionOrder.length; i++) ...[
+              const SizedBox(height: 20),
+              _buildSectionById(widget.sectionOrder[i]),
+            ],
           ],
         ),
       ),
     );
+  }
+
+  /// 根据区块 ID 构建对应的区块组件
+  Widget _buildSectionById(String id) {
+    switch (ToolsSection.fromId(id)) {
+      case ToolsSection.bookInfo:
+        return const BookInfoSection();
+      case ToolsSection.stats:
+        return _buildStatsSection(context);
+    }
   }
 
   /// 构建分区标题（图标 + 文字）
