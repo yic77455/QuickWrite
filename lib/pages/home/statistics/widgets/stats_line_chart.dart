@@ -335,10 +335,14 @@ class _LineChartPainter extends CustomPainter {
     // 绘制折线下方的渐变填充
     if (pointOffsets.length >= 2) {
       final fillPath = Path()
-        ..moveTo(pointOffsets.first.dx, plotBottom)
-        ..addPolygon(pointOffsets, false)
-        ..lineTo(pointOffsets.last.dx, plotBottom)
-        ..close();
+        ..addPolygon(
+          [
+            ...pointOffsets,
+            Offset(pointOffsets.last.dx, plotBottom),
+            Offset(pointOffsets.first.dx, plotBottom),
+          ],
+          true,
+        );
       final fillPaint = Paint()
         ..shader = LinearGradient(
           begin: Alignment.topCenter,
