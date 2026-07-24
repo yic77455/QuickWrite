@@ -20,6 +20,7 @@ import 'package:quick_write/core/utils/text_style_range.dart';
 import 'package:quick_write/core/utils/word_count_utils.dart';
 import 'package:quick_write/core/models/outline_models.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
+import 'utils/outline_shortcut_keys.dart';
 import 'widgets/outline_color_palette.dart';
 import 'widgets/outline_node_widgets.dart';
 import 'widgets/outline_editor_widgets.dart';
@@ -331,6 +332,16 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     final siblings = location.parent?.children ?? _roots;
     if (location.index >= siblings.length) return null;
     return siblings[location.index];
+  }
+
+  /// 获取节点的所有同级节点 ID（包含自身）
+  ///
+  /// 同级节点指具有相同父节点的节点；根节点的同级为所有根节点。
+  List<String> _getSiblingNodeIds(String nodeId) {
+    final location = _findLocation(nodeId);
+    if (location == null) return [nodeId];
+    final siblings = location.parent?.children ?? _roots;
+    return siblings.map((node) => node.id).toList();
   }
 
   /// 计算节点子树的最大相对深度（节点自身为 0，每深入一层加 1）
@@ -2126,6 +2137,28 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     );
   }
 
+  /// 设置节点的标题级别
+  ///
+  /// 对目标节点列表统一设置标题级别（0=正文, 1=H1, 2=H2, 3=H3）。
+  /// 单节点时保留文字选区用于撤销后恢复。
+  void _setHeadingLevel(List<String> nodeIds, int level) {
+    if (nodeIds.isEmpty) return;
+    final nodes = nodeIds.map((id) => _findNode(id)).whereType<OutlineNode>().toList();
+    if (nodes.isEmpty) return;
+
+    final TextSelection? selection =
+        nodes.length == 1 ? _controllers[nodeIds.first]?.selection : null;
+
+    _undoManager.beginBatch();
+    setState(() {
+      for (final node in nodes) {
+        node.headingLevel = level;
+      }
+    });
+    _endBatchAndNotify(
+        description: '设置标题级别', focusNodeId: nodeIds.first, focusSelection: selection);
+  }
+
   // ================= 剪贴板操作 =================
 
   /// 剪切选中文本
@@ -2933,19 +2966,9 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     if (nodes.isEmpty) {
       return const SizedBox.shrink();
     }
-    // 单节点时保留文字选区用于撤销后恢复
-    final TextSelection? selection = nodes.length == 1 ? _controllers[targetIds.first]?.selection : null;
     return HeadingLevelSelector(
       nodes: nodes,
-      onLevelChanged: (level) {
-        _undoManager.beginBatch();
-        setState(() {
-          for (final node in nodes) {
-            node.headingLevel = level;
-          }
-        });
-        _endBatchAndNotify(description: '设置标题级别', focusNodeId: targetIds.first, focusSelection: selection);
-      },
+      onLevelChanged: (level) => _setHeadingLevel(targetIds, level),
     );
   }
 
@@ -3086,6 +3109,57 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       return KeyEventResult.handled;
     }
 
+    // ================= 文字样式快捷键 =================
+
+    // Ctrl+B：加粗
+    if (isControl && !isAlt && event.logicalKey == LogicalKeyboardKey.keyB) {
+      _toggleTextStyle([nodeId], TextStyleFlags.toggleBold);
+      return KeyEventResult.handled;
+    }
+    // Ctrl+I：斜体
+    if (isControl && !isAlt && event.logicalKey == LogicalKeyboardKey.keyI) {
+      _toggleTextStyle([nodeId], TextStyleFlags.toggleItalic);
+      return KeyEventResult.handled;
+    }
+    // Ctrl+U：下划线
+    if (isControl && !isAlt && event.logicalKey == LogicalKeyboardKey.keyU) {
+      _toggleTextStyle([nodeId], TextStyleFlags.toggleUnderline);
+      return KeyEventResult.handled;
+    }
+
+    // Alt+数字：设置标题级别
+    // Shift 时作用于当前节点的所有同级节点，否则仅作用于当前节点
+    if (isAlt && !isControl) {
+      final level = OutlineShortcutKeys.headingLevelFromKey(event.logicalKey);
+      if (level != null) {
+        final targetIds = isShift ? _getSiblingNodeIds(nodeId) : [nodeId];
+        _setHeadingLevel(targetIds, level);
+        return KeyEventResult.handled;
+      }
+
+      // Alt+字母：设置字体颜色（D 为清除）
+      if (OutlineShortcutKeys.isColorLetterKey(event.logicalKey)) {
+        if (OutlineShortcutKeys.isClearColorKey(event.logicalKey)) {
+          _applyColor([nodeId], clearForeground: true);
+        } else {
+          _applyColor([nodeId],
+              foregroundColor: OutlineShortcutKeys.foregroundColor(event.logicalKey));
+        }
+        return KeyEventResult.handled;
+      }
+    }
+
+    // Ctrl+Alt+字母：设置字底颜色（D 为清除）
+    if (isControl && isAlt && OutlineShortcutKeys.isColorLetterKey(event.logicalKey)) {
+      if (OutlineShortcutKeys.isClearColorKey(event.logicalKey)) {
+        _applyColor([nodeId], clearBackground: true);
+      } else {
+        _applyColor([nodeId],
+            backgroundColor: OutlineShortcutKeys.backgroundColor(event.logicalKey));
+      }
+      return KeyEventResult.handled;
+    }
+
     // Enter：创建同级新节点（Ctrl+Enter 切换删除线）
     if (event.logicalKey == LogicalKeyboardKey.enter) {
       if (isControl || isAlt) {
@@ -3192,6 +3266,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final isControl = HardwareKeyboard.instance.isControlPressed;
     final isShift = HardwareKeyboard.instance.isShiftPressed;
+    final isAlt = HardwareKeyboard.instance.isAltPressed;
 
     // Ctrl+S / Cmd+S：保存
     if ((isControl || HardwareKeyboard.instance.isMetaPressed) && event.logicalKey == LogicalKeyboardKey.keyS) {
@@ -3245,6 +3320,63 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     if (isControl && event.logicalKey == LogicalKeyboardKey.keyY) {
       _handleRedo();
       return KeyEventResult.handled;
+    }
+
+    // ================= 文字样式快捷键（作用于节点选区）=================
+
+    if (_selectedNodeIds.isNotEmpty) {
+      final targetIds = _selectedNodeIds.toList();
+
+      // Ctrl+B：加粗；Ctrl+I：斜体；Ctrl+U：下划线；Ctrl+Enter：删除线
+      if (isControl && !isAlt) {
+        if (event.logicalKey == LogicalKeyboardKey.keyB) {
+          _toggleTextStyle(targetIds, TextStyleFlags.toggleBold);
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.keyI) {
+          _toggleTextStyle(targetIds, TextStyleFlags.toggleItalic);
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.keyU) {
+          _toggleTextStyle(targetIds, TextStyleFlags.toggleUnderline);
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.enter) {
+          _toggleTextStyle(targetIds, TextStyleFlags.toggleStrikethrough);
+          return KeyEventResult.handled;
+        }
+      }
+
+      // Alt+数字：设置标题级别
+      if (isAlt && !isControl) {
+        final level = OutlineShortcutKeys.headingLevelFromKey(event.logicalKey);
+        if (level != null) {
+          _setHeadingLevel(targetIds, level);
+          return KeyEventResult.handled;
+        }
+
+        // Alt+字母：设置字体颜色（D 为清除）
+        if (OutlineShortcutKeys.isColorLetterKey(event.logicalKey)) {
+          if (OutlineShortcutKeys.isClearColorKey(event.logicalKey)) {
+            _applyColor(targetIds, clearForeground: true);
+          } else {
+            _applyColor(targetIds,
+                foregroundColor: OutlineShortcutKeys.foregroundColor(event.logicalKey));
+          }
+          return KeyEventResult.handled;
+        }
+      }
+
+      // Ctrl+Alt+字母：设置字底颜色（D 为清除）
+      if (isControl && isAlt && OutlineShortcutKeys.isColorLetterKey(event.logicalKey)) {
+        if (OutlineShortcutKeys.isClearColorKey(event.logicalKey)) {
+          _applyColor(targetIds, clearBackground: true);
+        } else {
+          _applyColor(targetIds,
+              backgroundColor: OutlineShortcutKeys.backgroundColor(event.logicalKey));
+        }
+        return KeyEventResult.handled;
+      }
     }
 
     // Ctrl+A：在主题选区与文档选区间切换

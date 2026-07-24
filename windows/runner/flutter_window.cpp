@@ -1,4 +1,4 @@
-#include "flutter_window.h"
+﻿#include "flutter_window.h"
 
 #include <optional>
 
@@ -93,6 +93,30 @@ static LRESULT CALLBACK MultiWindowSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPa
   return DefSubclassProc(hWnd, uMsg, wParam, lParam);
 }
 
+// 抑制 Windows Alt+key 菜单激活提示音的子类化过程。
+// 挂载到 Flutter 视图（子窗口）上，该窗口拥有焦点时接收键盘消息。
+// Flutter 将 WM_SYSKEYDOWN 与 WM_SYSCHAR 合并以产生 Alt+key 按键事件，
+// 因此 WM_SYSCHAR 不能被阻断。提示音来源于 DefWindowProc 处理 WM_SYSCHAR 时
+// 合成并向本子窗口发送的 WM_SYSCOMMAND(SC_KEYMENU) 消息；无菜单的窗口收到该
+// 消息会触发默认 MessageBeep。在此拦截 SC_KEYMENU 可消除提示音，同时让
+// WM_SYSCHAR 继续流向 Flutter。Alt+Space 予以放行，以保留窗口系统菜单。
+static LRESULT CALLBACK AltBeepSuppressProc(HWND hWnd, UINT uMsg,
+                                            WPARAM wParam, LPARAM lParam,
+                                            UINT_PTR uIdSubclass,
+                                            DWORD_PTR dwRefData) {
+  switch (uMsg) {
+    case WM_SYSCOMMAND:
+      if ((wParam & 0xFFF0) == SC_KEYMENU && lParam != VK_SPACE) {
+        return 0;
+      }
+      break;
+    case WM_NCDESTROY:
+      RemoveWindowSubclass(hWnd, AltBeepSuppressProc, uIdSubclass);
+      break;
+  }
+  return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+}
+
 void AttachImeFixerToMultiWindow(flutter::FlutterViewController* controller) {
   auto ctx = new ImeWindowContext();
   
@@ -133,6 +157,8 @@ void AttachImeFixerToMultiWindow(flutter::FlutterViewController* controller) {
 
   ctx->channel = std::move(channel);
   SetWindowSubclass(hwnd, MultiWindowSubclassProc, 1, reinterpret_cast<DWORD_PTR>(ctx));
+  // 多窗口的 Flutter 视图同样挂载 Alt+key 提示音抑制器
+  SetWindowSubclass(hwnd, AltBeepSuppressProc, 2, 0);
 }
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
@@ -199,6 +225,10 @@ bool FlutterWindow::OnCreate() {
     AttachImeFixerToMultiWindow(flutter_view_controller);
   });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+
+  // 将 Alt+key 提示音抑制器挂载到 Flutter 视图（拥有键盘焦点时接收 WM_SYSCHAR 的子窗口）
+  SetWindowSubclass(flutter_controller_->view()->GetNativeWindow(),
+                    AltBeepSuppressProc, 2, 0);
 
   // flutter_controller_->engine()->SetNextFrameCallback([&]() {
   //   this->Show();
