@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/models/chapter.dart';
-import 'package:quick_write/core/models/edit_event.dart';
 import 'package:quick_write/core/models/setting_item.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/services/backup_service.dart';

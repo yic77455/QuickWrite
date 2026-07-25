@@ -345,6 +345,10 @@ class _WorkspaceToolbarState extends State<WorkspaceToolbar> {
 
   /// 构建功能区（大图标）
   Widget _buildFunctionSection(BuildContext context) {
+    final workspaceProvider = context.watch<WorkspaceProvider>();
+    final rightSidebarType = workspaceProvider.rightSidebarType;
+    final isRightSidebarExpanded = workspaceProvider.isRightSidebarExpanded;
+
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -357,10 +361,12 @@ class _WorkspaceToolbarState extends State<WorkspaceToolbar> {
           },
         ),
         const SizedBox(width: 8),
-        LargeToolbarButton(
+        ToggleLargeToolbarButton(
           icon: Icons.search_rounded,
           label: '全文搜索',
           tooltip: '全文搜索',
+          // 当前侧边栏打开且类型为搜索时显示选中状态
+          isSelected: isRightSidebarExpanded && rightSidebarType == RightSidebarType.search,
           onPressed: () {
             context.read<WorkspaceProvider>().toggleRightSidebar(RightSidebarType.search);
           },
@@ -375,10 +381,12 @@ class _WorkspaceToolbarState extends State<WorkspaceToolbar> {
           },
         ),
         const SizedBox(width: 8),
-        LargeToolbarButton(
+        ToggleLargeToolbarButton(
           icon: Icons.history_rounded,
           label: '历史版本',
           tooltip: '查看历史版本',
+          // 当前侧边栏打开且类型为历史版本时显示选中状态
+          isSelected: isRightSidebarExpanded && rightSidebarType == RightSidebarType.history,
           onPressed: () {
             context.read<WorkspaceProvider>().toggleRightSidebar(RightSidebarType.history);
           },
