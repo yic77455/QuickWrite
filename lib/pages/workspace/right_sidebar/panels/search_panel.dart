@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
+import 'package:quick_write/core/utils/search_query_parser.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 
 /// 全文搜索面板
@@ -106,24 +107,41 @@ class _SearchPanelState extends State<SearchPanel> {
                   height: 1.8,
                 ),
                 prefixIcon: Icon(Icons.search_rounded, size: 16, color: colorScheme.onSurfaceVariant),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? Padding(
-                          padding: const EdgeInsets.all(8),
-                          child: SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: IconButton(
-                              onPressed: _clearSearch,
-                              tooltip: '清空内容',
-                              icon: Icon(Icons.close_rounded, size: 16),
-                              padding: EdgeInsets.zero,
-                              color: colorScheme.onSurfaceVariant,
-                              hoverColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.08),
-                              highlightColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.12),
-                            ),
+                suffixIcon: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // 多关键词搜索提示图标，悬停查看用法说明
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: Tooltip(
+                        message: '可用 && 连接多个关键词进行交集搜索\n例如：张三 && 李四\n表示搜索同时包含"张三"和"李四"的章节',
+                        child: Icon(
+                          Icons.info_outline_rounded,
+                          size: 16,
+                          color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                        ),
+                      ),
+                    ),
+                    // 清空按钮（仅有输入内容时显示）
+                    if (_searchController.text.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: IconButton(
+                            onPressed: _clearSearch,
+                            tooltip: '清空内容',
+                            icon: Icon(Icons.close_rounded, size: 16),
+                            padding: EdgeInsets.zero,
+                            color: colorScheme.onSurfaceVariant,
+                            hoverColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.08),
+                            highlightColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.12),
                           ),
-                        )
-                    : null,
+                        ),
+                      ),
+                  ],
+                ),
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 border: OutlineInputBorder(
@@ -219,14 +237,15 @@ class _SearchPanelState extends State<SearchPanel> {
   /// 构建搜索结果列表
   Widget _buildResultList(BuildContext context, WorkspaceProvider provider) {
     final colorScheme = Theme.of(context).colorScheme;
-    final searchQuery = provider.globalSearchQuery;
+    // 解析多关键词一次，复用给下游高亮逻辑
+    final keywords = SearchQueryParser.parse(provider.globalSearchQuery);
 
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       itemCount: provider.globalSearchResults.length,
       itemBuilder: (context, index) {
         final result = provider.globalSearchResults[index];
-        return _buildChapterResultItem(context, result, searchQuery, colorScheme, provider);
+        return _buildChapterResultItem(context, result, keywords, colorScheme, provider);
       },
     );
   }
@@ -235,7 +254,7 @@ class _SearchPanelState extends State<SearchPanel> {
   Widget _buildChapterResultItem(
     BuildContext context,
     GlobalSearchResult result,
-    String searchQuery,
+    List<String> keywords,
     ColorScheme colorScheme,
     WorkspaceProvider provider,
   ) {
@@ -301,7 +320,7 @@ class _SearchPanelState extends State<SearchPanel> {
         // 匹配行列表（最多显示3行）
         ...result.matchLines
             .take(3)
-            .map((matchLine) => _buildMatchLineItem(context, result, matchLine, searchQuery, colorScheme, provider)),
+            .map((matchLine) => _buildMatchLineItem(context, result, matchLine, keywords, colorScheme, provider)),
 
         // 如果还有更多匹配行
         if (result.matchLines.length > 3)
@@ -323,7 +342,7 @@ class _SearchPanelState extends State<SearchPanel> {
     BuildContext context,
     GlobalSearchResult result,
     GlobalSearchMatchLine matchLine,
-    String searchQuery,
+    List<String> keywords,
     ColorScheme colorScheme,
     WorkspaceProvider provider,
   ) {
@@ -355,7 +374,7 @@ class _SearchPanelState extends State<SearchPanel> {
                 ),
               ),
               // 行内容（高亮关键词）
-              Expanded(child: _buildHighlightedText(matchLine.lineContent, searchQuery, colorScheme)),
+              Expanded(child: _buildHighlightedText(matchLine.lineContent, keywords, colorScheme)),
             ],
           ),
         ),
@@ -364,30 +383,70 @@ class _SearchPanelState extends State<SearchPanel> {
   }
 
   /// 构建带关键词高亮的文本
-  Widget _buildHighlightedText(String text, String query, ColorScheme colorScheme) {
+  ///
+  /// 支持多关键词同时高亮：收集所有关键词在文本中的命中区间，
+  /// 按起始位置排序后合并重叠部分，依次输出普通文本与高亮文本。
+  Widget _buildHighlightedText(String text, List<String> keywords, ColorScheme colorScheme) {
+    // 无关键词时直接返回普通文本
+    if (keywords.isEmpty) {
+      return RichText(
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        text: TextSpan(
+          style: context.bodySmall?.copyWith(color: colorScheme.onSurface),
+          text: text,
+        ),
+      );
+    }
+
     final sourceText = text.toLowerCase();
-    final searchQuery = query.toLowerCase();
 
+    // 收集所有关键词的命中区间（以小写比较，区间端点基于原始索引）
+    final matches = <({int start, int end})>[];
+    for (final keyword in keywords) {
+      final k = keyword.toLowerCase();
+      if (k.isEmpty) continue;
+      int searchStart = 0;
+      while (true) {
+        final index = sourceText.indexOf(k, searchStart);
+        if (index == -1) break;
+        matches.add((start: index, end: index + k.length));
+        searchStart = index + k.length;
+      }
+    }
+
+    // 无命中时直接返回普通文本
+    if (matches.isEmpty) {
+      return RichText(
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        text: TextSpan(
+          style: context.bodySmall?.copyWith(color: colorScheme.onSurface),
+          text: text,
+        ),
+      );
+    }
+
+    // 起始位置升序排序，起始相同时较长的区间优先，确保包含关系下保留更完整的高亮
+    matches.sort((a, b) {
+      final cmp = a.start.compareTo(b.start);
+      if (cmp != 0) return cmp;
+      return b.end.compareTo(a.end);
+    });
+
+    // 顺序遍历，跳过与前一段重叠的区间，拼装 TextSpan
     final spans = <TextSpan>[];
-    int start = 0;
-
-    while (start < sourceText.length) {
-      final index = sourceText.indexOf(searchQuery, start);
-      if (index == -1) {
-        // 剩余部分无匹配
-        spans.add(TextSpan(text: text.substring(start)));
-        break;
-      }
-
+    int cursor = 0;
+    for (final m in matches) {
+      if (m.start < cursor) continue; // 跳过已被前一段覆盖的重叠区间
       // 匹配前的普通文本
-      if (index > start) {
-        spans.add(TextSpan(text: text.substring(start, index)));
+      if (m.start > cursor) {
+        spans.add(TextSpan(text: text.substring(cursor, m.start)));
       }
-
       // 高亮匹配文本
       spans.add(
         TextSpan(
-          text: text.substring(index, index + query.length),
+          text: text.substring(m.start, m.end),
           style: TextStyle(
             color: colorScheme.primary,
             fontWeight: FontWeight.w600,
@@ -395,8 +454,11 @@ class _SearchPanelState extends State<SearchPanel> {
           ),
         ),
       );
-
-      start = index + query.length;
+      cursor = m.end;
+    }
+    // 末尾剩余普通文本
+    if (cursor < text.length) {
+      spans.add(TextSpan(text: text.substring(cursor)));
     }
 
     return RichText(

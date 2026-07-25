@@ -22,6 +22,7 @@ import 'package:quick_write/core/services/multi_window_service.dart';
 import 'package:quick_write/core/services/cache_services/window_cache_service.dart';
 import 'package:quick_write/core/utils/editor_undo_manager.dart';
 import 'package:quick_write/core/utils/find_replace_target.dart';
+import 'package:quick_write/core/utils/search_query_parser.dart';
 import 'package:quick_write/core/utils/word_count_utils.dart';
 import 'package:quick_write/pages/workspace/editor/novel_editor.dart';
 import 'package:quick_write/pages/workspace/editor/outline_editor.dart';
@@ -3318,41 +3319,53 @@ class WorkspaceProvider extends ChangeNotifier {
 
   /// 执行全文搜索
   /// 遍历当前书籍的所有章节文件，搜索关键词
+  ///
+  /// 支持使用 "&&" 连接多个关键词进行交集搜索：
+  /// 章节级筛选要求同时包含所有关键词，行级匹配则展示任意关键词的命中位置，
+  /// 便于用户在通过交集筛选的章节内查看每个关键词的具体出现位置。
   Future<void> _performGlobalSearch() async {
     if (_globalSearchQuery.isEmpty || _currentBook == null) return;
+
+    // 解析多关键词，若解析后为空（如仅输入了分隔符）则清空结果
+    final keywords = SearchQueryParser.parse(_globalSearchQuery);
+    if (keywords.isEmpty) {
+      _globalSearchResults = [];
+      _isGlobalSearching = false;
+      notifyListeners();
+      return;
+    }
 
     _isGlobalSearching = true;
     notifyListeners();
 
     final results = <GlobalSearchResult>[];
-    final searchQuery = _globalSearchCaseSensitive
-        ? _globalSearchQuery
-        : _globalSearchQuery.toLowerCase();
 
     for (final chapter in _chapters) {
       try {
         final content = await readChapterContent(chapter);
         if (content.isEmpty) continue;
 
-        // 查找所有匹配位置
+        // 章节级交集过滤：必须同时包含所有关键词
+        if (!SearchQueryParser.containsAll(
+          content,
+          keywords,
+          caseSensitive: _globalSearchCaseSensitive,
+        )) {
+          continue;
+        }
+
+        // 收集行级匹配（任意关键词命中即记录该行）
         final matchLines = <GlobalSearchMatchLine>[];
         final lines = content.split('\n');
         int lineStartOffset = 0;
 
         for (int lineIndex = 0; lineIndex < lines.length; lineIndex++) {
           final line = lines[lineIndex];
-          final sourceLine =
-              _globalSearchCaseSensitive ? line : line.toLowerCase();
-
-          int searchStart = 0;
-          int matchCountInLine = 0;
-
-          while (searchStart < sourceLine.length) {
-            final index = sourceLine.indexOf(searchQuery, searchStart);
-            if (index == -1) break;
-            matchCountInLine++;
-            searchStart = index + searchQuery.length;
-          }
+          final matchCountInLine = SearchQueryParser.countMatches(
+            line,
+            keywords,
+            caseSensitive: _globalSearchCaseSensitive,
+          );
 
           if (matchCountInLine > 0) {
             matchLines.add(GlobalSearchMatchLine(
@@ -3415,22 +3428,25 @@ class WorkspaceProvider extends ChangeNotifier {
     final tab = _openedTabs.where((t) => t.id == result.chapterUuid).firstOrNull;
     if (tab?.textController != null) {
       final controller = tab!.textController!;
-      final searchQuery = _globalSearchCaseSensitive
-          ? _globalSearchQuery
-          : _globalSearchQuery.toLowerCase();
+      final keywords = SearchQueryParser.parse(_globalSearchQuery);
       final sourceText = _globalSearchCaseSensitive
           ? controller.text
           : controller.text.toLowerCase();
 
-      // 在匹配行范围内查找第一个匹配位置
+      // 在匹配行范围内查找最早出现的关键词位置
       final lineStart = matchLine.startOffset;
       final lineEnd = lineStart + matchLine.lineContent.length;
 
-      int matchOffset = sourceText.indexOf(searchQuery, lineStart);
-      if (matchOffset >= 0 && matchOffset < lineEnd) {
+      final match = SearchQueryParser.findFirstMatch(
+        sourceText,
+        keywords,
+        start: lineStart,
+        caseSensitive: _globalSearchCaseSensitive,
+      );
+      if (match != null && match.start < lineEnd) {
         controller.selection = TextSelection(
-          baseOffset: matchOffset,
-          extentOffset: matchOffset + _globalSearchQuery.length,
+          baseOffset: match.start,
+          extentOffset: match.start + match.length,
         );
         // 通知小说编辑器滚动到新选区位置
         final editorState = tab.editorKey.currentState;
