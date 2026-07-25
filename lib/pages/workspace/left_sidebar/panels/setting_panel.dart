@@ -650,7 +650,7 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
           child: ListItem(
             leftIndent: 30,
             leading: Icon(
-              Icons.description_outlined,
+              Icons.summarize_outlined,
               size: 18,
               color: isSelected ? colorScheme.primary : colorScheme.onSurfaceVariant,
             ),

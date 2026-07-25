@@ -620,6 +620,9 @@ mixin BookDataMixin on WorkspaceStateBase {
 
     if (chaptersToMove.isEmpty) return 0;
 
+    // 按全局 orderIndex 排序，确保移动项在目标分卷中的相对顺序与原始顺序一致
+    chaptersToMove.sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
+
     // 计算目标分卷内的起始排序序号
     final targetVolumeChapters = _chapters.where((c) => c.volumeUuid == targetVolumeUuid).toList();
     int nextVolumeOrderIndex = targetVolumeChapters.fold<int>(
@@ -709,8 +712,8 @@ mixin BookDataMixin on WorkspaceStateBase {
       await _isar.bookModels.put(_currentBook!);
     });
 
-    // 一次性刷新
-    await _loadChapters();
+    // 重建全局 orderIndex 并刷新章节列表
+    await _rebuildGlobalOrderIndex();
     notifyListeners();
 
     return chaptersToMove.length;
@@ -879,8 +882,8 @@ mixin BookDataMixin on WorkspaceStateBase {
       await _isar.chapterModels.put(chapter);
     });
 
-    // 刷新章节列表
-    await _loadChapters();
+    // 重建全局 orderIndex 并刷新章节列表
+    await _rebuildGlobalOrderIndex();
 
     notifyListeners();
     return true;
@@ -975,59 +978,64 @@ mixin BookDataMixin on WorkspaceStateBase {
     final chapter = volumeChapters.removeAt(oldIndex);
     volumeChapters.insert(newIndex, chapter);
 
-    // 更新所有的 volumeOrderIndex，并更新全局 orderIndex
-    // 为了不打乱其他分卷的章节，我们需要重排所有章节的全局 orderIndex
+    // 更新卷内序号
     for (int i = 0; i < volumeChapters.length; i++) {
       volumeChapters[i].volumeOrderIndex = i;
     }
 
-    // 更新 _chapters 列表
-    // 分组收集所有分卷及其章节，以便全量更新全局 orderIndex
+    // 重建全局 orderIndex 并写入数据库
+    await _rebuildGlobalOrderIndex();
+
+    notifyListeners();
+  }
+
+  /// 重建所有章节的全局 orderIndex
+  ///
+  /// 按分卷顺序与卷内 volumeOrderIndex 重新分配全局 orderIndex，
+  /// 确保 _chapters 按 orderIndex 排序时，各分卷内章节顺序与 volumeOrderIndex 一致。
+  /// 同时将更新后的章节数据批量写入数据库。
+  Future<void> _rebuildGlobalOrderIndex() async {
+    // 按分卷分组（包含未分卷组）
     final groups = <String, List<ChapterModel>>{};
     for (final v in _volumes) {
       groups[v.uuid] = [];
     }
-    // 未分卷组
     groups[''] = [];
 
     for (final c in _chapters) {
-      if (c.volumeUuid == volumeUuid) continue; // 稍后填入排序好的
       groups.putIfAbsent(c.volumeUuid, () => []).add(c);
     }
 
-    groups[volumeUuid] = volumeChapters;
-
-    // 按分卷顺序重新组合所有章节
-    final newAllChapters = <ChapterModel>[];
-
-    // 先加未分卷
-    if (groups.containsKey('')) {
-      final unassigned = groups['']!..sort((a, b) => a.volumeOrderIndex.compareTo(b.volumeOrderIndex));
-      newAllChapters.addAll(unassigned);
+    // 卷内按 volumeOrderIndex 排序
+    for (final list in groups.values) {
+      list.sort((a, b) => a.volumeOrderIndex.compareTo(b.volumeOrderIndex));
     }
 
-    // 再加各分卷
+    // 按分卷顺序拼接（未分卷在前，各分卷按 orderIndex 排序）
+    final newAllChapters = <ChapterModel>[];
+    if (groups.containsKey('')) {
+      newAllChapters.addAll(groups['']!);
+    }
     for (final v in _volumes) {
       if (groups.containsKey(v.uuid)) {
-        final vc = groups[v.uuid]!..sort((a, b) => a.volumeOrderIndex.compareTo(b.volumeOrderIndex));
-        newAllChapters.addAll(vc);
+        newAllChapters.addAll(groups[v.uuid]!);
       }
     }
 
-    // 重新赋全局 orderIndex
+    // 重新分配全局 orderIndex
     for (int i = 0; i < newAllChapters.length; i++) {
       newAllChapters[i].orderIndex = i;
     }
 
     _chapters = newAllChapters;
 
-    // 写入数据库
+    // 立即通知 UI 更新，避免拖拽完成后因等待数据库写入而产生的闪烁
+    notifyListeners();
+
+    // 批量写入数据库
     await _isar.writeTxn(() async {
-      // 全量更新，因为全局 orderIndex 发生了变化
       await _isar.chapterModels.putAll(newAllChapters);
     });
-
-    notifyListeners();
   }
 
   /// 切换分卷展开/折叠状态
@@ -1763,52 +1771,59 @@ mixin BookDataMixin on WorkspaceStateBase {
       groupItems[i].groupOrderIndex = i;
     }
 
-    // 更新 _settingItems 列表
-    // 分组收集所有分组及其设定项，以便全量更新全局 orderIndex
+    // 重建全局 orderIndex 并写入数据库
+    await _rebuildGlobalSettingOrderIndex();
+
+    notifyListeners();
+  }
+
+  /// 重建所有设定项的全局 orderIndex
+  ///
+  /// 按分组顺序与组内 groupOrderIndex 重新分配全局 orderIndex，
+  /// 确保 _settingItems 按 orderIndex 排序时，各分组内设定项顺序与 groupOrderIndex 一致。
+  /// 同时将更新后的设定项数据批量写入数据库。
+  Future<void> _rebuildGlobalSettingOrderIndex() async {
+    // 按分组分组（包含未分组）
     final groups = <String, List<SettingItemModel>>{};
     for (final g in _settingGroups) {
       groups[g.uuid] = [];
     }
-    // 未分组
     groups[''] = [];
 
     for (final i in _settingItems) {
-      if (i.groupUuid == groupUuid) continue; // 稍后填入排序好的
       groups.putIfAbsent(i.groupUuid, () => []).add(i);
     }
 
-    groups[groupUuid] = groupItems;
-
-    // 按分组顺序重新组合所有设定项
-    final newAllItems = <SettingItemModel>[];
-
-    // 先加未分组
-    if (groups.containsKey('')) {
-      final unassigned = groups['']!..sort((a, b) => a.groupOrderIndex.compareTo(b.groupOrderIndex));
-      newAllItems.addAll(unassigned);
+    // 组内按 groupOrderIndex 排序
+    for (final list in groups.values) {
+      list.sort((a, b) => a.groupOrderIndex.compareTo(b.groupOrderIndex));
     }
 
-    // 再加各分组
+    // 按分组顺序拼接（未分组在前，各分组按 orderIndex 排序）
+    final newAllItems = <SettingItemModel>[];
+    if (groups.containsKey('')) {
+      newAllItems.addAll(groups['']!);
+    }
     for (final g in _settingGroups) {
       if (groups.containsKey(g.uuid)) {
-        final gi = groups[g.uuid]!..sort((a, b) => a.groupOrderIndex.compareTo(b.groupOrderIndex));
-        newAllItems.addAll(gi);
+        newAllItems.addAll(groups[g.uuid]!);
       }
     }
 
-    // 重新赋全局 orderIndex
+    // 重新分配全局 orderIndex
     for (int i = 0; i < newAllItems.length; i++) {
       newAllItems[i].orderIndex = i;
     }
 
     _settingItems = newAllItems;
 
-    // 写入数据库
+    // 立即通知 UI 更新，避免拖拽完成后因等待数据库写入而产生的闪烁
+    notifyListeners();
+
+    // 批量写入数据库
     await _isar.writeTxn(() async {
       await _isar.settingItemModels.putAll(newAllItems);
     });
-
-    notifyListeners();
   }
 
   /// 移动设定项到指定分组
@@ -1878,7 +1893,8 @@ mixin BookDataMixin on WorkspaceStateBase {
       }
     });
 
-    await _loadSettingItems();
+    // 重建全局 orderIndex 并刷新设定项列表
+    await _rebuildGlobalSettingOrderIndex();
     notifyListeners();
     return true;
   }
@@ -1968,6 +1984,9 @@ mixin BookDataMixin on WorkspaceStateBase {
 
     if (itemsToMove.isEmpty) return 0;
 
+    // 按全局 orderIndex 排序，确保移动项在目标分组中的相对顺序与原始顺序一致
+    itemsToMove.sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
+
     // 计算目标分组内的起始排序序号
     final targetGroupItems = _settingItems.where((i) => i.groupUuid == targetGroupUuid).toList();
     int nextGroupOrderIndex = targetGroupItems.length;
@@ -2010,8 +2029,8 @@ mixin BookDataMixin on WorkspaceStateBase {
       await _isar.bookModels.put(_currentBook!);
     });
 
-    // 一次性刷新
-    await _loadSettingItems();
+    // 重建全局 orderIndex 并刷新设定项列表
+    await _rebuildGlobalSettingOrderIndex();
     notifyListeners();
 
     return itemsToMove.length;

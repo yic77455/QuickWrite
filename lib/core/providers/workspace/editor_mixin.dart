@@ -790,16 +790,30 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
       );
 
       if (isPreview) {
-        // 查找当前已有的预览标签页并替换
-        final previewIndex = _openedTabs.indexWhere((t) => t.isPreview);
-        if (previewIndex != -1) {
-          final oldTab = _openedTabs[previewIndex];
-          _disposeTabResources(oldTab);
-          _openedTabs[previewIndex] = tab;
-          _currentTabIndex = previewIndex;
-        } else {
+        // 当前标签页为预览模式的章节/设定时，固定该标签页，
+        // 将历史版本预览作为新标签页打开，避免当前文档被替换
+        final currentTab = this.currentTab;
+        final shouldPinCurrent = currentTab != null &&
+            currentTab.isPreview &&
+            (currentTab.type == EditorTabType.chapter ||
+                currentTab.type == EditorTabType.settings);
+
+        if (shouldPinCurrent) {
+          currentTab.isPreview = false;
           _openedTabs.add(tab);
           _currentTabIndex = _openedTabs.length - 1;
+        } else {
+          // 查找当前已有的预览标签页并替换
+          final previewIndex = _openedTabs.indexWhere((t) => t.isPreview);
+          if (previewIndex != -1) {
+            final oldTab = _openedTabs[previewIndex];
+            _disposeTabResources(oldTab);
+            _openedTabs[previewIndex] = tab;
+            _currentTabIndex = previewIndex;
+          } else {
+            _openedTabs.add(tab);
+            _currentTabIndex = _openedTabs.length - 1;
+          }
         }
       } else {
         // 非预览模式，直接添加新标签页
