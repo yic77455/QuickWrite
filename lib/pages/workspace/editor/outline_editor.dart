@@ -24,6 +24,7 @@ import 'utils/outline_shortcut_keys.dart';
 import 'widgets/outline_color_palette.dart';
 import 'widgets/outline_node_widgets.dart';
 import 'widgets/outline_editor_widgets.dart';
+import 'widgets/outline_shortcut_panel.dart';
 
 /// 大纲编辑器
 ///
@@ -191,6 +192,9 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
   /// Shift+click 后待恢复的选区操作（在 PointerUp 后的帧执行，覆盖 TextField tap 的默认行为）
   VoidCallback? _pendingShiftClickRestore;
+
+  /// 快捷键列表面板是否可见
+  bool _isShortcutPanelVisible = false;
 
   // ================= 生命周期 =================
 
@@ -3897,6 +3901,13 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
   // ================= 渲染 =================
 
+  /// 切换快捷键列表面板的显示状态
+  void _toggleShortcutPanel() {
+    setState(() {
+      _isShortcutPanelVisible = !_isShortcutPanelVisible;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = widget.colorScheme;
@@ -3947,6 +3958,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
             onExpandAll: _expandAll,
             onCollapseAll: _collapseAll,
             onAddRoot: _addRootNode,
+            isShortcutPanelVisible: _isShortcutPanelVisible,
+            onToggleShortcutPanel: _toggleShortcutPanel,
           ),
           // 大纲列表
           Expanded(
@@ -4061,6 +4074,17 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
                     ),
                   ),
                 ),
+                // 快捷键列表面板：浮动在编辑器右侧，覆盖滚动条，不受内容滚动影响
+                if (_isShortcutPanelVisible)
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    bottom: 0,
+                    child: OutlineShortcutPanel(
+                      colorScheme: colorScheme,
+                      onClose: _toggleShortcutPanel,
+                    ),
+                  ),
               ],
             ),
           ),

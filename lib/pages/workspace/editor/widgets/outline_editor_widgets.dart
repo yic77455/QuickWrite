@@ -30,6 +30,12 @@ class OutlineEditorTopBar extends StatelessWidget {
   /// 添加根节点回调
   final VoidCallback onAddRoot;
 
+  /// 快捷键列表面板是否可见
+  final bool isShortcutPanelVisible;
+
+  /// 切换快捷键列表面板显示状态回调
+  final VoidCallback onToggleShortcutPanel;
+
   const OutlineEditorTopBar({
     super.key,
     required this.colorScheme,
@@ -37,6 +43,8 @@ class OutlineEditorTopBar extends StatelessWidget {
     required this.onExpandAll,
     required this.onCollapseAll,
     required this.onAddRoot,
+    required this.isShortcutPanelVisible,
+    required this.onToggleShortcutPanel,
   });
 
   @override
@@ -54,6 +62,17 @@ class OutlineEditorTopBar extends StatelessWidget {
           const SizedBox(width: 8),
           Text('大纲编辑器', style: context.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
           const Spacer(),
+          // 快捷键列表面板开关
+          _buildIconButton(
+            icon: Icons.keyboard_outlined,
+            tooltip: '快捷键',
+            onTap: onToggleShortcutPanel,
+            isSelected: isShortcutPanelVisible,
+          ),
+          const SizedBox(width: 6),
+          // 分隔线：将快捷键查阅入口与节点操作按钮区分开
+          _buildVerticalDivider(),
+          const SizedBox(width: 6),
           // 展开全部
           _buildIconButton(icon: Icons.unfold_more_rounded, tooltip: '展开全部', onTap: onExpandAll),
           // 折叠全部
@@ -66,22 +85,33 @@ class OutlineEditorTopBar extends StatelessWidget {
     );
   }
 
+  /// 构建工具栏中的垂直分隔线
+  Widget _buildVerticalDivider() {
+    return Container(width: 1, height: 20, color: colorScheme.outlineVariant.withValues(alpha: 0.5));
+  }
+
   /// 构建工具栏图标按钮
+  ///
+  /// [isSelected] 为 true 时以选中态样式呈现（背景与图标着色为主题色），
+  /// 适用于开关式按钮。
   Widget _buildIconButton({
     required IconData icon,
     required String tooltip,
     required VoidCallback onTap,
     bool enabled = true,
+    bool isSelected = false,
   }) {
-    final color = enabled
-        ? colorScheme.onSurfaceVariant
-        : colorScheme.onSurfaceVariant.withValues(alpha: 0.3);
+    final Color iconColor = !enabled
+        ? colorScheme.onSurfaceVariant.withValues(alpha: 0.3)
+        : isSelected
+            ? colorScheme.primary
+            : colorScheme.onSurfaceVariant;
 
     return SizedBox(
       width: 32,
       height: 32,
       child: Material(
-        color: Colors.transparent,
+        color: isSelected ? colorScheme.primary.withValues(alpha: 0.12) : Colors.transparent,
         borderRadius: BorderRadius.circular(6),
         child: InkWell(
           onTap: enabled ? onTap : null,
@@ -89,7 +119,7 @@ class OutlineEditorTopBar extends StatelessWidget {
           hoverColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.08),
           child: Tooltip(
             message: tooltip,
-            child: Icon(icon, size: 18, color: color),
+            child: Icon(icon, size: 18, color: iconColor),
           ),
         ),
       ),
