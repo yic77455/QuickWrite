@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
 import 'package:quick_write/core/services/cache_services/window_cache_service.dart';
 import 'package:window_manager/window_manager.dart';
@@ -107,10 +108,15 @@ class WindowProvider extends ChangeNotifier with WindowListener {
     notifyListeners(); // 通知监听者状态已改变
     // 恢复时保存完整状态（位置、大小、最大化状态）
     _debounceSave();
-    // 延迟到当前 build 帧结束后再调整边栏宽度，避免在 build 阶段调用 notifyListeners 导致报错
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    // 调整边栏宽度以适配恢复后的窗口尺寸
+    // 空闲阶段同步执行，使首帧即生效；build/layout 阶段则延迟到帧结束，避免在 build 中调用 notifyListeners 报错
+    if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.idle) {
       onBeforeUnmaximize?.call();
-    });
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        onBeforeUnmaximize?.call();
+      });
+    }
   }
 
   // 窗口最小化时的回调
