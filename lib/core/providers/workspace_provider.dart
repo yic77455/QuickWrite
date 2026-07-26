@@ -21,6 +21,7 @@ import 'package:quick_write/core/services/cache_services/chapter_cursor_cache_se
 import 'package:quick_write/core/services/multi_window_service.dart';
 import 'package:quick_write/core/services/cache_services/window_cache_service.dart';
 import 'package:quick_write/core/services/workspace/book_folder_service.dart';
+import 'package:quick_write/core/services/workspace/custom_highlight_service.dart';
 import 'package:quick_write/core/services/workspace/volume_migration_service.dart';
 import 'package:quick_write/core/utils/editor_undo_manager.dart';
 import 'package:quick_write/core/utils/find_replace_target.dart';
@@ -82,6 +83,11 @@ class WorkspaceProvider extends WorkspaceStateBase
   /// 上方工具栏是否展开，默认展开
   bool _isToolbarExpanded = true;
 
+  // ================= 自定义高亮配置 =================
+
+  /// 自定义高亮服务（按书籍独立加载，配置持久化到书籍根目录）
+  final CustomHighlightService _customHighlightService = CustomHighlightService();
+
   // ================= Getters =================
 
   bool get isLeftSidebarExpanded => _isLeftSidebarExpanded;
@@ -91,6 +97,9 @@ class WorkspaceProvider extends WorkspaceStateBase
   double get rightSidebarWidth => _rightSidebarWidth;
   RightSidebarType get rightSidebarType => _rightSidebarType;
   bool get isToolbarExpanded => _isToolbarExpanded;
+
+  /// 获取自定义高亮服务
+  CustomHighlightService get customHighlightService => _customHighlightService;
 
   // ================= 初始化方法 =================
 
@@ -164,6 +173,9 @@ class WorkspaceProvider extends WorkspaceStateBase
 
     // 确保书籍文件夹结构完整（包括设定文件夹）
     await _bookFolderService.ensureBookFolderStructure(_currentBook!);
+
+    // 加载自定义高亮配置（持久化在书籍根目录下）
+    await _customHighlightService.load(bookFolderPath);
 
     _isInitialized = true;
     notifyListeners();
@@ -365,6 +377,9 @@ class WorkspaceProvider extends WorkspaceStateBase
 
     // 释放编辑器域资源（含自动保存定时器、会话追踪器、备份计时器、标签页资源）
     disposeEditorResources();
+
+    // 释放自定义高亮服务
+    _customHighlightService.dispose();
 
     // 调用父类的 dispose 方法
     super.dispose();

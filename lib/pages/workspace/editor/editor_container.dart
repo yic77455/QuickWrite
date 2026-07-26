@@ -7,7 +7,7 @@ import 'package:quick_write/core/services/backup_service.dart';
 import 'package:quick_write/core/services/cache_services/chapter_cursor_cache_service.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
-import 'package:quick_write/core/utils/dialogue_highlight_controller.dart';
+import 'package:quick_write/core/utils/text_highlight_controller.dart';
 import 'package:quick_write/core/utils/editor_undo_manager.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/find_replace_bar.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_editor_widgets.dart';
@@ -63,7 +63,9 @@ class _EditorContainerState extends State<EditorContainer> {
       _loadingTabId = currentTab.id;
       _isLoading = true;
 
-      currentTab.textController = DialogueHighlightController();
+      currentTab.textController = TextHighlightController(
+        customHighlightService: workspaceProvider.customHighlightService,
+      );
       // 备份预览标签页不需要章节标题控制器
       if (currentTab.type != EditorTabType.backupPreview) {
         currentTab.chapterTitleController = TextEditingController();

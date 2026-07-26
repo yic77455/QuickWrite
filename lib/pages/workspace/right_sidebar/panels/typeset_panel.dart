@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/color_utils.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/dialogs/color_picker_dialog.dart';
 import 'package:quick_write/shared/widgets/segmented_control.dart';
 import '../widgets/right_sidebar_widgets.dart';
+import '../widgets/custom_highlight_dialog.dart';
 
 /// 排版设置面板
 /// 
@@ -250,10 +253,12 @@ class _TypesetPanelState extends State<TypesetPanel> {
           },
         ),
         // 仅在对话高亮开启时显示颜色选项
-        if (dialogueHighlightEnabled) ...[
-          const SettingDivider(),
+        if (dialogueHighlightEnabled) 
           _buildDialogueHighlightColorItem(context),
-        ],
+        const SizedBox(height: 4),
+        const SettingDivider(),
+        // 自定义高亮入口（点击打开设置对话框）
+        _buildCustomHighlightEntry(context),
       ],
     );
   }
@@ -277,6 +282,43 @@ class _TypesetPanelState extends State<TypesetPanel> {
       onColorSelected: (colorHex) {
         ColorUtils.updateDialogueHighlightColorForTheme(context, colorHex);
         setState(() {});
+      },
+    );
+  }
+
+  /// 构建自定义高亮入口项
+  Widget _buildCustomHighlightEntry(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final service = context.read<WorkspaceProvider>().customHighlightService;
+    final count = service.items.length;
+
+    return InkWellSettingItem(
+      icon: Icons.highlight_rounded,
+      label: '自定义高亮',
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 15),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 关键词数量提示（无关键词时不显示）
+          if (count > 0)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: Text(
+                '$count 项',
+                style: context.bodySmall?.copyWith(
+                  color: service.enabled
+                      ? colorScheme.primary
+                      : colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          Icon(Icons.chevron_right_rounded, size: 18, color: colorScheme.onSurfaceVariant),
+        ],
+      ),
+      onTap: () async {
+        await showCustomHighlightDialog(context: context, service: service);
+        // 对话框关闭后刷新数量显示
+        if (mounted) setState(() {});
       },
     );
   }

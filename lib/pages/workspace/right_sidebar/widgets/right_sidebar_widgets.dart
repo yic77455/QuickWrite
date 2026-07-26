@@ -344,6 +344,75 @@ class SettingItem extends StatelessWidget {
   }
 }
 
+/// 基于 InkWell 的通用可点击设置项
+///
+/// 自带 Material 悬停水波效果，支持两种用法：
+/// - 三段结构：传入 [icon]、[label]、[trailing] 自动组合为「图标 + 文字 + 右侧内容」
+/// - 框架模式：传入 [child] 完全自定义内部内容
+class InkWellSettingItem extends StatelessWidget {
+  /// 左侧图标（三段结构模式，可选）
+  final IconData? icon;
+
+  /// 标签文字（三段结构模式，可选）
+  final String? label;
+
+  /// 右侧内容（三段结构模式，可选）
+  final Widget? trailing;
+
+  /// 自定义子组件（传入时忽略 icon/label/trailing）
+  final Widget? child;
+
+  /// 点击回调
+  final VoidCallback? onTap;
+
+  /// 内边距
+  final EdgeInsetsGeometry padding;
+
+  const InkWellSettingItem({
+    super.key,
+    this.icon,
+    this.label,
+    this.trailing,
+    this.child,
+    this.onTap,
+    this.padding = const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(6),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: Padding(
+          padding: padding,
+          child: child ??
+              Row(
+                children: [
+                  if (icon != null) ...[
+                    Icon(icon, size: 18, color: colorScheme.onSurfaceVariant),
+                    const SizedBox(width: 10),
+                  ],
+                  if (label != null)
+                    Expanded(
+                      child: Text(
+                        label!,
+                        style: context.titleSmall?.copyWith(color: colorScheme.onSurface),
+                      ),
+                    ),
+                  ?trailing,
+                ],
+              ),
+        ),
+      ),
+    );
+  }
+}
+
 /// 带悬停效果的备份记录项
 ///
 /// 鼠标悬停时显示高亮背景，点击时打开预览窗口

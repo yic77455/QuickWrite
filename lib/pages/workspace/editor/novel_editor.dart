@@ -9,9 +9,10 @@ import 'package:quick_write/core/constants/constants.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/providers/window_provider.dart';
 import 'package:quick_write/core/services/settings_service.dart';
+import 'package:quick_write/core/services/workspace/custom_highlight_service.dart';
 import 'package:quick_write/core/utils/clean_scroll.dart';
 import 'package:quick_write/core/utils/clipboard_state_cache.dart';
-import 'package:quick_write/core/utils/dialogue_highlight_controller.dart';
+import 'package:quick_write/core/utils/text_highlight_controller.dart';
 import 'package:quick_write/core/utils/editor_scroll_helper.dart';
 import 'package:quick_write/core/utils/editor_undo_manager.dart';
 import 'package:quick_write/core/utils/paragraph_formatter.dart';
@@ -120,6 +121,12 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
 
   /// 窗口缩放防抖定时器
   Timer? _resizeDebounceTimer;
+
+  /// 自定义高亮服务引用（用于监听配置变化触发重建）
+  ///
+  /// 在 didChangeDependencies 中从 WorkspaceProvider 获取，
+  /// 配置变化时通过 _onSettingsChanged 触发编辑器重建以刷新高亮渲染。
+  CustomHighlightService? _customHighlightService;
 
   /// 记录当前帧 Layout 阶段锚点修正是否成功
   ///
@@ -230,6 +237,13 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     super.didChangeDependencies();
     // 监听设置变化
     SettingsService.instance.addListener(_onSettingsChanged);
+    // 监听自定义高亮配置变化（service 随书籍工作台绑定，切换书籍时需重新绑定）
+    final newService = context.read<WorkspaceProvider>().customHighlightService;
+    if (!identical(newService, _customHighlightService)) {
+      _customHighlightService?.removeListener(_onSettingsChanged);
+      _customHighlightService = newService;
+      _customHighlightService!.addListener(_onSettingsChanged);
+    }
   }
 
   @override
@@ -242,6 +256,8 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     _resizeDebounceTimer?.cancel(); // 取消定时器
     // 取消监听设置变化
     SettingsService.instance.removeListener(_onSettingsChanged);
+    // 取消监听自定义高亮配置变化
+    _customHighlightService?.removeListener(_onSettingsChanged);
     _scrollController.dispose();
     _focusNode.dispose();
     // 释放行间线排版缓存中持有的 TextPainter 资源
@@ -404,8 +420,8 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     // 在 build 阶段直接设置字段值（不触发 notifyListeners），
     // 后续 TextField 重建时会读取最新值以渲染高亮
     final workspaceProvider = context.read<WorkspaceProvider>();
-    if (widget.controller is DialogueHighlightController) {
-      final controller = widget.controller as DialogueHighlightController;
+    if (widget.controller is TextHighlightController) {
+      final controller = widget.controller as TextHighlightController;
       controller.findMatches = workspaceProvider.findMatches;
       controller.currentMatchIndex = workspaceProvider.currentMatchIndex;
     }
