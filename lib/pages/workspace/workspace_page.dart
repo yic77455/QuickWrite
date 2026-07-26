@@ -361,7 +361,7 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
                   provider: provider,
                   title: '返回书架',
                   descriptionTemplate: '有 {n} 个标签页的修改尚未保存，是否在返回前保存？',
-                  saveText: '保存并返回',
+                  saveText: '保存',
                 );
                 if (!shouldReturn) return;
                 // 保存所有打开标签页的光标位置到缓存

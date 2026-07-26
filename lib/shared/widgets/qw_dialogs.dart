@@ -402,11 +402,6 @@ class _InputDialogContentState extends State<_InputDialogContent> {
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              TextButton(
-                onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
-                child: Text(widget.cancelText),
-              ),
-              const SizedBox(width: 12),
               FilledButton(
                 onPressed: _isLoading ? null : _handleConfirm,
                 child: _isLoading
@@ -416,6 +411,11 @@ class _InputDialogContentState extends State<_InputDialogContent> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : Text(widget.confirmText,textAlign: TextAlign.center,),
+              ),
+              const SizedBox(width: 12),
+              TextButton(
+                onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
+                child: Text(widget.cancelText),
               ),
             ],
           ),
@@ -460,7 +460,7 @@ Future<void> showConfirmDialog({
   return showDialogBase(
     context: context,
     title: '',
-    width: 340,
+    width: 420,
     height: 300,
     showCloseButton: false,
     adaptiveHeight: true,
@@ -566,7 +566,7 @@ class _ConfirmDialogContent extends StatelessWidget {
             textAlign: TextAlign.center,
             style: context.bodyLarge?.copyWith(
               height: 1.5,
-              color: colorScheme.onSurface.withValues(alpha: 0.7),
+              color: colorScheme.onSurface.withValues(alpha: 0.85),
             ),
           ),
           const SizedBox(height: 20),
@@ -574,16 +574,6 @@ class _ConfirmDialogContent extends StatelessWidget {
           cancelText != null
               ? Row(
                   children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                        ),
-                        child: Text(cancelText!),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
                     Expanded(
                       child: FilledButton(
                         onPressed: () {
@@ -595,6 +585,16 @@ class _ConfirmDialogContent extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(vertical: 10),
                         ),
                         child: Text(confirmText),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                        child: Text(cancelText!),
                       ),
                     ),
                   ],
@@ -656,7 +656,7 @@ Future<UnsavedConfirmResult> showUnsavedConfirmDialog({
   final result = await showDialogBase<UnsavedConfirmResult>(
     context: context,
     title: '',
-    width: 360,
+    width: 420,
     height: 280,
     showCloseButton: false,
     adaptiveHeight: true,
@@ -724,22 +724,22 @@ class _UnsavedConfirmDialogContent extends StatelessWidget {
             textAlign: TextAlign.center,
             style: context.bodyLarge?.copyWith(
               height: 1.5,
-              color: colorScheme.onSurface.withValues(alpha: 0.7),
+              color: colorScheme.onSurface.withValues(alpha: 0.85),
             ),
           ),
           const SizedBox(height: 20),
-          // 三按钮组：取消 / 不保存 / 保存
+          // 三按钮组：保存 / 不保存 / 取消
           Row(
             children: [
-              // 取消按钮（最左侧，弱化样式）
+              // 保存按钮（主操作，填充色突出）
               Expanded(
-                child: OutlinedButton(
+                child: FilledButton(
                   onPressed: () =>
-                      Navigator.of(context).pop(UnsavedConfirmResult.cancel),
-                  style: OutlinedButton.styleFrom(
+                      Navigator.of(context).pop(UnsavedConfirmResult.save),
+                  style: FilledButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 10),
                   ),
-                  child: Text(cancelText),
+                  child: Text(saveText),
                 ),
               ),
               const SizedBox(width: 8),
@@ -756,15 +756,15 @@ class _UnsavedConfirmDialogContent extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
-              // 保存按钮（主操作，填充色突出）
+              // 取消按钮（弱化样式）
               Expanded(
-                child: FilledButton(
+                child: OutlinedButton(
                   onPressed: () =>
-                      Navigator.of(context).pop(UnsavedConfirmResult.save),
-                  style: FilledButton.styleFrom(
+                      Navigator.of(context).pop(UnsavedConfirmResult.cancel),
+                  style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 10),
                   ),
-                  child: Text(saveText),
+                  child: Text(cancelText),
                 ),
               ),
             ],
