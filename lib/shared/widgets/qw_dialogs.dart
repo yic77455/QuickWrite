@@ -619,6 +619,162 @@ class _ConfirmDialogContent extends StatelessWidget {
   }
 }
 
+// ================= 未保存确认对话框 =================
+
+/// 未保存确认对话框结果
+///
+/// 用于在关闭标签页或关闭窗口前，让用户决定如何处理未保存的内容
+enum UnsavedConfirmResult {
+  /// 保存内容后继续关闭
+  save,
+  /// 不保存直接关闭（放弃修改）
+  discard,
+  /// 取消关闭操作
+  cancel,
+}
+
+/// 显示未保存内容确认对话框
+///
+/// 当标签页或窗口存在未保存的修改时弹窗询问用户处理方式，
+/// 提供三个按钮：保存、不保存、取消。
+///
+/// [context] 弹窗上下文
+/// [title] 标题
+/// [description] 描述文字
+/// [saveText] 保存按钮文字
+/// [discardText] 不保存按钮文字
+/// [cancelText] 取消按钮文字
+/// 返回用户选择的结果；若用户通过遮罩或 ESC 关闭则视为 [UnsavedConfirmResult.cancel]
+Future<UnsavedConfirmResult> showUnsavedConfirmDialog({
+  required BuildContext context,
+  required String title,
+  required String description,
+  String saveText = '保存',
+  String discardText = '不保存',
+  String cancelText = '取消',
+}) async {
+  final result = await showDialogBase<UnsavedConfirmResult>(
+    context: context,
+    title: '',
+    width: 360,
+    height: 280,
+    showCloseButton: false,
+    adaptiveHeight: true,
+    barrierDismissible: false,
+    content: _UnsavedConfirmDialogContent(
+      title: title,
+      description: description,
+      saveText: saveText,
+      discardText: discardText,
+      cancelText: cancelText,
+    ),
+  );
+  return result ?? UnsavedConfirmResult.cancel;
+}
+
+/// 未保存确认对话框内容组件
+class _UnsavedConfirmDialogContent extends StatelessWidget {
+  final String title;
+  final String description;
+  final String saveText;
+  final String discardText;
+  final String cancelText;
+
+  const _UnsavedConfirmDialogContent({
+    required this.title,
+    required this.description,
+    required this.saveText,
+    required this.discardText,
+    required this.cancelText,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 图标（警告色，提示存在未保存内容）
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: colorScheme.tertiaryContainer.withValues(alpha: 0.5),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.warning_amber_outlined,
+              size: 24,
+              color: colorScheme.tertiary,
+            ),
+          ),
+          const SizedBox(height: 16),
+          // 标题
+          Text(
+            title,
+            style: context.titleLarge?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          // 描述
+          Text(
+            description,
+            textAlign: TextAlign.center,
+            style: context.bodyLarge?.copyWith(
+              height: 1.5,
+              color: colorScheme.onSurface.withValues(alpha: 0.7),
+            ),
+          ),
+          const SizedBox(height: 20),
+          // 三按钮组：取消 / 不保存 / 保存
+          Row(
+            children: [
+              // 取消按钮（最左侧，弱化样式）
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () =>
+                      Navigator.of(context).pop(UnsavedConfirmResult.cancel),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                  child: Text(cancelText),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // 不保存按钮（中性样式，提示会丢失修改）
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () =>
+                      Navigator.of(context).pop(UnsavedConfirmResult.discard),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: colorScheme.error,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                  child: Text(discardText),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // 保存按钮（主操作，填充色突出）
+              Expanded(
+                child: FilledButton(
+                  onPressed: () =>
+                      Navigator.of(context).pop(UnsavedConfirmResult.save),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                  child: Text(saveText),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ================= 选择列表对话框 =================
 
 /// 选择项数据

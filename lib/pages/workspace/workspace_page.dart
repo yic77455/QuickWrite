@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/providers/window_provider.dart';
 import 'package:quick_write/core/services/cache_services/window_cache_service.dart';
+import 'package:quick_write/core/utils/tab_close_guard.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/utils/word_count_utils.dart';
 import 'package:quick_write/pages/workspace/left_sidebar/widgets/left_sidebar_expand_btn.dart';
@@ -57,22 +58,36 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
   // 上一次已知的可用宽度，避免重复更新
   double _lastKnownWidth = 0;
 
+  // 保存 WindowProvider 引用，便于在 dispose 中安全清空回调
+  // dispose 阶段 widget 已从树中移除，不能再通过 context.read 获取 Provider
+  WindowProvider? _windowProvider;
+
   @override
   void initState() {
     super.initState();
     // 初始化工作台数据
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<WorkspaceProvider>().initialize(
+      if (!mounted) return;
+
+      final workspaceProvider = context.read<WorkspaceProvider>();
+      _windowProvider = context.read<WindowProvider>();
+
+      workspaceProvider.initialize(
         widget.bookId,
         mainWindowId: widget.mainWindowId,
         onBookSaved: widget.onBookSaved,
       );
 
       // 设置窗口关闭前的清理回调
-      final workspaceProvider = context.read<WorkspaceProvider>();
-      context.read<WindowProvider>().onBeforeClose = () async {
-        // 先执行自动保存（保存所有已修改的标签页内容）
-        await workspaceProvider.flushAutoSave();
+      _windowProvider!.onBeforeClose = () async {
+        // 关闭窗口前检查未保存内容，让用户选择保存/不保存/取消
+        // 选择"保存"会保存所有未保存的标签页；选择"取消"则中止关闭流程
+        final shouldClose = await TabCloseGuard.confirmCloseWindow(
+          context: context,
+          provider: workspaceProvider,
+        );
+        if (!shouldClose) return false;
+
         // 保存所有的光标位置
         await workspaceProvider.saveAllCursorPositions();
         // 清空所有标签页
@@ -82,10 +97,9 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
 
       // 设置从最大化恢复时的回调
       // 在窗口恢复前将边栏宽度调整到恢复后窗口的安全范围内，避免溢出
-      final windowProvider = context.read<WindowProvider>();
-      windowProvider.onBeforeUnmaximize = () async {
+      _windowProvider!.onBeforeUnmaximize = () async {
         final cache = WindowCacheService.instance;
-        final restoredWidth = windowProvider.windowType == WindowType.workspace
+        final restoredWidth = _windowProvider!.windowType == WindowType.workspace
             ? cache.workspaceWindowSize.width
             : cache.mainWindowSize.width;
         workspaceProvider.clampSidebarsToWidth(restoredWidth);
@@ -111,10 +125,11 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
 
   @override
   void dispose() {
-    // 清理从最大化恢复时的回调
-    try {
-      context.read<WindowProvider>().onBeforeUnmaximize = null;
-    } catch (_) {}
+    // 使用 initState 中保存的引用清空回调，避免在 dispose 中使用已失效的 context
+    // 同窗口模式下从工作台返回书架时，WorkspacePage 会被卸载，
+    // 若不清空 onBeforeClose，下次关闭主窗口时会因使用失效的 context 而报错
+    _windowProvider?.onBeforeClose = null;
+    _windowProvider?.onBeforeUnmaximize = null;
     super.dispose();
   }
 
@@ -336,12 +351,19 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
           ? Padding(padding: const EdgeInsets.only(left: 8.0), child: Icon(Icons.book))
           : IconButton(
               icon: const Icon(Icons.arrow_back),
-              // 返回前先保存所有标签页的缓存（光标位置等）
+              // 返回书架前若存在未保存内容，弹窗让用户选择保存/不保存/取消
               onPressed: () async {
                 // 在 async gap 之前捕获 provider 引用，避免跨 async gap 使用 BuildContext
                 final provider = context.read<WorkspaceProvider>();
-                // 保存所有已修改的标签页内容
-                await provider.flushAutoSave();
+                // 返回书架前检查未保存内容，让用户选择保存/不保存/取消
+                final shouldReturn = await TabCloseGuard.confirmCloseWindow(
+                  context: context,
+                  provider: provider,
+                  title: '返回书架',
+                  descriptionTemplate: '有 {n} 个标签页的修改尚未保存，是否在返回前保存？',
+                  saveText: '保存并返回',
+                );
+                if (!shouldReturn) return;
                 // 保存所有打开标签页的光标位置到缓存
                 await provider.saveAllCursorPositions();
                 // 返回书架主界面

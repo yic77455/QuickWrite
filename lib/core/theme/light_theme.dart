@@ -52,8 +52,9 @@ class LightTheme {
 
         // ===== 第三颜色组 =====
         // 用于对比强调点：输入框光标、特殊标记、进度条等
-        tertiary: const Color(0xFF795E26),
+        tertiary: const Color(0xFFF05B13),
         onTertiary: Colors.white, // tertiary 背景上的内容
+        tertiaryContainer: const Color(0xFFF0E4D4), // 第三容器背景
 
         // ===== 错误颜色组 =====
         // 用于错误状态：错误提示文本、删除按钮、表单验证错误等

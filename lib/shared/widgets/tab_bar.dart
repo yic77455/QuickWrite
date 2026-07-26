@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:quick_write/core/constants/constants.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/theme/tab_colors.dart';
+import 'package:quick_write/core/utils/tab_close_guard.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/context_menu.dart';
 import 'package:quick_write/shared/widgets/toolbar_button.dart';
@@ -209,7 +210,12 @@ class _TabItemState extends State<TabItem> {
           onPointerDown: (event) {
             // 监听鼠标中键（滚轮）按下事件
             if (event.buttons == kMiddleMouseButton) {
-              widget.provider.closeTab(widget.tab.id);
+              // 中键关闭同样需要走未保存确认流程
+              TabCloseGuard.confirmCloseTab(
+                context: context,
+                provider: widget.provider,
+                tabId: widget.tab.id,
+              );
             }
           },
           child: GestureDetector(
@@ -288,7 +294,14 @@ class _TabItemState extends State<TabItem> {
                     isTabHovered: _isHovered,
                     normalColor: widget.isSelected ? colors.selectedFg : colors.modifiedMark,
                     hoverColor: colors.closeHoverBg,
-                    onClose: () => widget.provider.closeTab(widget.tab.id),
+                    // 关闭按钮：若标签页已修改，弹窗确认是否保存
+                    onClose: () {
+                      TabCloseGuard.confirmCloseTab(
+                        context: context,
+                        provider: widget.provider,
+                        tabId: widget.tab.id,
+                      );
+                    },
                   ),
                 ],
               ),
@@ -310,8 +323,18 @@ class _TabItemState extends State<TabItem> {
     final tabFilePath = provider.getTabFilePath(tab);
 
     return [
-      // 关闭
-      ContextMenuItem(labelText: '关闭', icon: Icons.close, onTap: () => provider.closeTab(tab.id)),
+      // 关闭（若标签页已修改，弹窗确认是否保存）
+      ContextMenuItem(
+        labelText: '关闭',
+        icon: Icons.close,
+        onTap: () {
+          TabCloseGuard.confirmCloseTab(
+            context: context,
+            provider: provider,
+            tabId: tab.id,
+          );
+        },
+      ),
       // 关闭其他
       ContextMenuItem(
         labelText: '关闭其他',
