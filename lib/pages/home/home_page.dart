@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/providers/home_state_provider.dart';
+import 'package:quick_write/core/providers/cloud_sync_provider.dart';
 import 'package:quick_write/core/providers/recycle_bin_provider.dart';
 import 'package:quick_write/core/providers/home_sidebar_provider.dart';
 import 'package:quick_write/core/providers/theme_provider.dart';
 import 'package:quick_write/pages/home/bookshelf/bookshelf.dart';
+import 'package:quick_write/pages/home/cloud_sync/cloud_sync_page.dart';
 import 'package:quick_write/pages/home/recycle_bin/recycle_bin_page.dart';
 import 'package:quick_write/pages/home/settings/settings_page.dart';
 import 'package:quick_write/pages/home/statistics/stats_page.dart';
@@ -60,7 +62,11 @@ class HomePage extends StatelessWidget {
         // 注册回收站 Provider，管理回收站数据
         ChangeNotifierProvider(create: (context) => RecycleBinProvider(), child: const RecycleBinPage()),
 
-        // Index 3: 全局设置
+        // Index 3: 云同步
+        // 注册云同步 Provider，管理连接状态与同步设置
+        ChangeNotifierProvider(create: (context) => CloudSyncProvider(), child: const CloudSyncPage()),
+
+        // Index 4: 全局设置
         const SettingsPage(),
       ],
     );

@@ -71,16 +71,28 @@ class SidebarWidget extends StatelessWidget {
             ),
           ),
 
-          // 底部固定区域：设置
+          // 底部固定区域：云同步与设置
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
-            child: _buildNavItem(
-              context,
-              sidebarProvider,
-              homeStateProvider,
-              3,
-              Icons.settings_rounded,
-              '设置',
+            child: Column(
+              children: [
+                _buildNavItem(
+                  context,
+                  sidebarProvider,
+                  homeStateProvider,
+                  3,
+                  Icons.cloud_outlined,
+                  '云同步',
+                ),
+                _buildNavItem(
+                  context,
+                  sidebarProvider,
+                  homeStateProvider,
+                  4,
+                  Icons.settings_rounded,
+                  '设置',
+                ),
+              ],
             ),
           ),
         ],

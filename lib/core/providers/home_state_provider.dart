@@ -5,7 +5,8 @@ enum HomePageEnum {
   bookshelf(0, '书架'),
   stats(1, '码字统计'),
   recycle(2, '回收站'),
-  settings(3, '设置');
+  cloudSync(3, '云同步'),
+  settings(4, '设置');
 
   final int pageIndex;  // 页面索引
   final String title;  // 页面标题
