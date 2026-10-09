@@ -9,7 +9,7 @@ import 'package:quick_write/core/services/cache_services/cache_service.dart';
 ///
 /// 缓存内容包括：
 /// - 书架上当前选中的分组 ID
-/// - 每本书的未分卷组折叠状态
+/// - 每本书的未分卷组、未分组设定组折叠状态
 /// - 新建章节、设定时分卷或分组选择记忆
 /// - 章节、设定列表是否倒序排列
 /// - 统计界面是否包含粘贴字数
@@ -84,6 +84,22 @@ class MiscCacheService extends CacheService<MiscCacheData> {
     final bookCache = _data.books[bookUuid] ?? const BookGroupExpandCache();
     final newBooks = Map<String, BookGroupExpandCache>.from(_data.books);
     newBooks[bookUuid] = bookCache.copyWith(isUnassignedCollapsed: collapsed);
+    _data = _data.copyWith(books: newBooks);
+    return await save(_data);
+  }
+
+  // ================= 未分组设定组折叠状态 =================
+
+  /// 获取指定书籍的未分组设定组是否折叠
+  bool isSettingUnassignedCollapsed(String bookUuid) {
+    return _data.books[bookUuid]?.isSettingUnassignedCollapsed ?? false;
+  }
+
+  /// 保存指定书籍的未分组设定组折叠状态
+  Future<bool> saveSettingUnassignedCollapsed(String bookUuid, bool collapsed) async {
+    final bookCache = _data.books[bookUuid] ?? const BookGroupExpandCache();
+    final newBooks = Map<String, BookGroupExpandCache>.from(_data.books);
+    newBooks[bookUuid] = bookCache.copyWith(isSettingUnassignedCollapsed: collapsed);
     _data = _data.copyWith(books: newBooks);
     return await save(_data);
   }

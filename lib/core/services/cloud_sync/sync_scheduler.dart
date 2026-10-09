@@ -17,7 +17,7 @@ class SyncScheduler {
   /// 本地内容变化后需要静置的时长
   ///
   /// 编辑过程中会持续保存，等待内容稳定后再同步可以避免无谓的传输
-  static const Duration debounceDuration = Duration(seconds: 10);
+  static const Duration debounceDuration = Duration(seconds: 60);
 
   /// 触发同步的动作
   final Future<void> Function() _onTrigger;

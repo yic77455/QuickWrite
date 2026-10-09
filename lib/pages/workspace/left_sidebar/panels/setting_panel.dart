@@ -115,7 +115,7 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
     final provider = context.read<WorkspaceProvider>();
     final bookUuid = provider.currentBook?.uuid;
     if (bookUuid != null) {
-      _isUnassignedCollapsed = MiscCacheService.instance.isUnassignedCollapsed(bookUuid);
+      _isUnassignedCollapsed = MiscCacheService.instance.isSettingUnassignedCollapsed(bookUuid);
       _currentBookUuid = bookUuid;
     } else {
       _isUnassignedCollapsed = false;
@@ -130,7 +130,7 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
   void _saveUnassignedCollapsedState() {
     final bookUuid = _currentBookUuid;
     if (bookUuid == null) return;
-    MiscCacheService.instance.saveUnassignedCollapsed(bookUuid, _isUnassignedCollapsed);
+    MiscCacheService.instance.saveSettingUnassignedCollapsed(bookUuid, _isUnassignedCollapsed);
   }
 
   /// 保存设定排序方式到缓存
@@ -190,7 +190,7 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
     if (bookUuid != _currentBookUuid) {
       _currentBookUuid = bookUuid;
       if (bookUuid != null) {
-        _isUnassignedCollapsed = MiscCacheService.instance.isUnassignedCollapsed(bookUuid);
+        _isUnassignedCollapsed = MiscCacheService.instance.isSettingUnassignedCollapsed(bookUuid);
       } else {
         _isUnassignedCollapsed = false;
       }

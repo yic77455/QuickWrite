@@ -105,6 +105,9 @@ class BookGroupExpandCache {
   /// 未分卷组是否折叠
   final bool isUnassignedCollapsed;
 
+  /// 未分组设定组是否折叠
+  final bool isSettingUnassignedCollapsed;
+
   /// 已展开的设定分类 ID 列表
   final List<String> expandedCategories;
 
@@ -120,6 +123,7 @@ class BookGroupExpandCache {
 
   const BookGroupExpandCache({
     this.isUnassignedCollapsed = false,
+    this.isSettingUnassignedCollapsed = false,
     this.expandedCategories = const [],
     this.lastSelectedVolume = '',
     this.lastSelectedSettingGroup = '',
@@ -129,6 +133,8 @@ class BookGroupExpandCache {
   factory BookGroupExpandCache.fromJson(Map<String, dynamic> json) {
     return BookGroupExpandCache(
       isUnassignedCollapsed: json['isUnassignedCollapsed'] as bool? ?? false,
+      isSettingUnassignedCollapsed:
+          json['isSettingUnassignedCollapsed'] as bool? ?? false,
       expandedCategories: (json['expandedCategories'] as List<dynamic>?)
               ?.map((e) => e as String)
               .toList() ??
@@ -142,6 +148,7 @@ class BookGroupExpandCache {
   Map<String, dynamic> toJson() {
     return {
       'isUnassignedCollapsed': isUnassignedCollapsed,
+      'isSettingUnassignedCollapsed': isSettingUnassignedCollapsed,
       'expandedCategories': expandedCategories,
       'lastSelectedVolume': lastSelectedVolume,
       'lastSelectedSettingGroup': lastSelectedSettingGroup,
@@ -151,12 +158,15 @@ class BookGroupExpandCache {
   /// 创建副本
   BookGroupExpandCache copyWith({
     bool? isUnassignedCollapsed,
+    bool? isSettingUnassignedCollapsed,
     List<String>? expandedCategories,
     String? lastSelectedVolume,
     String? lastSelectedSettingGroup,
   }) {
     return BookGroupExpandCache(
       isUnassignedCollapsed: isUnassignedCollapsed ?? this.isUnassignedCollapsed,
+      isSettingUnassignedCollapsed:
+          isSettingUnassignedCollapsed ?? this.isSettingUnassignedCollapsed,
       expandedCategories: expandedCategories ?? this.expandedCategories,
       lastSelectedVolume: lastSelectedVolume ?? this.lastSelectedVolume,
       lastSelectedSettingGroup: lastSelectedSettingGroup ?? this.lastSelectedSettingGroup,
