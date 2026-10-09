@@ -3913,11 +3913,12 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     final colorScheme = widget.colorScheme;
 
     // 检测窗口从最小化恢复的情况，开启滚动保护防止 TextField 自动滚动到光标位置
-    final windowProvider = context.watch<WindowProvider>();
-    if (_wasMinimized && !windowProvider.isMinimized) {
+    // 仅监听最小化状态，窗口其他状态变化时不重建大纲编辑器
+    final bool isMinimized = context.select<WindowProvider, bool>((p) => p.isMinimized);
+    if (_wasMinimized && !isMinimized) {
       _scrollGuard.protect(const Duration(milliseconds: 150));
     }
-    _wasMinimized = windowProvider.isMinimized;
+    _wasMinimized = isMinimized;
 
     // 监听查找匹配状态变化，仅在匹配项或当前索引变化时重建
     // 使用哈希摘要避免在字数更新等无关通知时重建整个大纲

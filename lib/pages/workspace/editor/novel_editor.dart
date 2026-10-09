@@ -393,8 +393,9 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     // 检测窗口从最小化恢复的情况，请求编辑器焦点
-    final windowProvider = context.watch<WindowProvider>();
-    if (_wasMinimized && !windowProvider.isMinimized && widget.isActive) {
+    // 仅监听最小化状态，窗口其他状态变化时不重建编辑器
+    final bool isMinimized = context.select<WindowProvider, bool>((p) => p.isMinimized);
+    if (_wasMinimized && !isMinimized && widget.isActive) {
       // 窗口从最小化恢复，且当前标签页处于激活状态，请求焦点
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && !_focusNode.hasFocus) {
@@ -403,7 +404,7 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
         }
       });
     }
-    _wasMinimized = windowProvider.isMinimized;
+    _wasMinimized = isMinimized;
 
     // 监听查找匹配状态变化，仅在匹配项或当前索引变化时重建
     // 使用哈希摘要避免在字数更新等无关通知时重建编辑器

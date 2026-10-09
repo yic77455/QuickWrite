@@ -327,6 +327,9 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
     // 有分卷时，按分卷分组显示
     final volumeGroups = _groupChaptersByVolume(chapters, volumes);
 
+    // 构建分卷索引表，避免循环内重复线性查找分卷
+    final volumeIndex = _buildVolumeIndex(volumes);
+
     // 构建卷内章节原始序号映射
     for (final entry in volumeGroups.entries) {
       final volumeChapters = entry.value;
@@ -368,15 +371,13 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
       if (isUnassigned && volumeChapters.isEmpty) continue;
 
       // 未分卷组使用特殊键追踪折叠状态：存在于集合中表示折叠，不存在表示展开
-      final isExpanded = isUnassigned
-          ? !_isUnassignedCollapsed
-          : (workspaceProvider.volumes.where((v) => v.uuid == volumeUuid).firstOrNull?.isExpanded ?? true);
+      final isExpanded = _isGroupExpanded(volumeUuid, volumeIndex);
 
       // 记录该分组的偏移信息（供滚动监听查表使用）
       _groupOffsets.add((uuid: volumeUuid, startOffset: currentOffset, isExpanded: isExpanded));
 
       // 获取分卷名称
-      final volumeName = isUnassigned ? '' : workspaceProvider.getVolumeName(volumeUuid);
+      final volumeName = isUnassigned ? '' : (volumeIndex[volumeUuid]?.name ?? '');
 
       // 构建分组标题组件
       final headerWidget = _isBatchMode
@@ -707,6 +708,23 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
     return groups;
   }
 
+  /// 构建分卷 UUID 到分卷对象的索引表
+  ///
+  /// 供列表构建、偏移计算等循环场景做 O(1) 查找，
+  /// 避免在循环内重复遍历分卷列表造成 O(n·v) 开销。
+  Map<String, VolumeModel> _buildVolumeIndex(List<VolumeModel> volumes) {
+    return {for (final volume in volumes) volume.uuid: volume};
+  }
+
+  /// 获取指定分组的展开状态
+  ///
+  /// [volumeUuid] 为空表示未分卷组，其折叠状态由本地 [_isUnassignedCollapsed] 维护；
+  /// 其余分组从索引表读取 [VolumeModel.isExpanded]，索引缺省时视为展开。
+  bool _isGroupExpanded(String volumeUuid, Map<String, VolumeModel> volumeIndex) {
+    if (volumeUuid.isEmpty) return !_isUnassignedCollapsed;
+    return volumeIndex[volumeUuid]?.isExpanded ?? true;
+  }
+
   /// 构建当前显示顺序的扁平化章节列表（跨分卷，仅包含展开分卷中的章节）
   /// 用于 Shift+点击范围选择时计算章节在可视列表中的位置
   List<ChapterModel> _buildFlatDisplayChapters(List<ChapterModel> chapters, List<VolumeModel> volumes) {
@@ -717,6 +735,9 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
 
     // 有分卷时，按显示顺序拼接所有展开分卷的章节
     final volumeGroups = _groupChaptersByVolume(chapters, volumes);
+
+    // 构建分卷索引表，避免循环内重复线性查找分卷
+    final volumeIndex = _buildVolumeIndex(volumes);
     final volumeEntries = volumeGroups.entries.toList();
     final assignedEntries = volumeEntries.where((e) => e.key.isNotEmpty).toList();
     final unassignedEntry = volumeEntries.where((e) => e.key.isEmpty).firstOrNull;
@@ -743,9 +764,7 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
       if (isUnassigned && volumeChapters.isEmpty) continue;
 
       // 跳过折叠的分卷（不在可视列表中）
-      final isExpanded = isUnassigned
-          ? !_isUnassignedCollapsed
-          : (volumes.where((v) => v.uuid == volumeUuid).firstOrNull?.isExpanded ?? true);
+      final isExpanded = _isGroupExpanded(volumeUuid, volumeIndex);
       if (!isExpanded) continue;
 
       // 卷内章节按倒序设置反转
@@ -1202,6 +1221,9 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
       // 有分卷时，按分组计算偏移
       final volumeGroups = _groupChaptersByVolume(chapters, volumes);
 
+      // 构建分卷索引表，避免循环内重复线性查找分卷
+      final volumeIndex = _buildVolumeIndex(volumes);
+
       // 构建显示用的分卷遍历顺序（与 _buildChapterList 保持一致）
       final volumeEntries = volumeGroups.entries.toList();
       final assignedEntries = volumeEntries.where((e) => e.key.isNotEmpty).toList();
@@ -1228,9 +1250,7 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
         // 跳过没有章节的未分卷组
         if (isUnassigned && volumeChapters.isEmpty) continue;
 
-        final isExpanded = isUnassigned
-            ? !_isUnassignedCollapsed
-            : (volumes.where((v) => v.uuid == volumeUuid).firstOrNull?.isExpanded ?? true);
+        final isExpanded = _isGroupExpanded(volumeUuid, volumeIndex);
 
         // 分组标题高度
         targetOffset += _groupHeaderExtent;
@@ -1258,9 +1278,7 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
         final isUnassigned = volumeUuid.isEmpty;
         if (isUnassigned && volumeChapters.isEmpty) continue;
 
-        final isExpanded = isUnassigned
-            ? !_isUnassignedCollapsed
-            : (volumes.where((v) => v.uuid == volumeUuid).firstOrNull?.isExpanded ?? true);
+        final isExpanded = _isGroupExpanded(volumeUuid, volumeIndex);
 
         totalContentHeight += _groupHeaderExtent;
         if (isExpanded) totalContentHeight += volumeChapters.length * _chapterItemExtent;

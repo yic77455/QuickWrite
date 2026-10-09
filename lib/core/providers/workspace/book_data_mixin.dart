@@ -52,8 +52,6 @@ mixin BookDataMixin on WorkspaceStateBase {
         .bookUuidEqualTo(_currentBook!.uuid)
         .sortByOrderIndex()
         .findAll();
-
-    debugPrint('已加载 ${_chapters.length} 个章节');
   }
 
   /// 加载当前书籍的分卷列表
@@ -65,8 +63,6 @@ mixin BookDataMixin on WorkspaceStateBase {
         .bookUuidEqualTo(_currentBook!.uuid)
         .sortByOrderIndex()
         .findAll();
-
-    debugPrint('已加载 ${_volumes.length} 个分卷');
   }
 
   /// 加载当前书籍的设定分组列表
@@ -78,8 +74,6 @@ mixin BookDataMixin on WorkspaceStateBase {
         .bookUuidEqualTo(_currentBook!.uuid)
         .sortByOrderIndex()
         .findAll();
-
-    debugPrint('已加载 ${_settingGroups.length} 个设定分组');
   }
 
   /// 加载当前书籍的设定项列表
@@ -91,8 +85,6 @@ mixin BookDataMixin on WorkspaceStateBase {
         .bookUuidEqualTo(_currentBook!.uuid)
         .sortByOrderIndex()
         .findAll();
-
-    debugPrint('已加载 ${_settingItems.length} 个设定项');
   }
 
   // ================= 路径辅助 =================

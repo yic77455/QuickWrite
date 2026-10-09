@@ -65,6 +65,15 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
   /// 获取码字会话追踪器
   WritingSessionTracker? get sessionTracker => _sessionTracker;
 
+  // ================= 字数统计通知 =================
+
+  /// 字数/统计更新通知器
+  ///
+  /// 独立于 WorkspaceProvider 的全局 notifyListeners，编辑器内容变化时
+  /// 仅通知底部状态栏等依赖字数的局部 UI 刷新，避免打字时高频触发
+  /// 整棵工作台组件树重建。
+  final ValueNotifier<int> wordCountNotifier = ValueNotifier<int>(0);
+
   // ================= Getters =================
 
   bool get isFindReplaceVisible => _isFindReplaceVisible;
@@ -1142,9 +1151,11 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
 
   /// 通知字数统计更新
   ///
-  /// 当编辑器内容变化时调用，触发 UI 更新底部状态栏的字数显示
+  /// 当编辑器内容变化时调用，通过 [wordCountNotifier] 局部通知底部状态栏
+  /// 刷新字数显示，不触发全局 notifyListeners。
   void notifyWordCountUpdated() {
-    notifyListeners();
+    if (_isDisposed) return;
+    wordCountNotifier.value++;
   }
 
   // ================= 标签页保存方法 =================
@@ -1503,5 +1514,8 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
       tab.undoManager?.dispose();
     }
     _openedTabs.clear();
+
+    // 释放字数统计通知器
+    wordCountNotifier.dispose();
   }
 }

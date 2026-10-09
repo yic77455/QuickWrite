@@ -41,7 +41,6 @@ class CustomHighlightService extends ChangeNotifier {
         final content = await file.readAsString();
         final jsonMap = json.decode(content) as Map<String, dynamic>;
         _config = CustomHighlightConfig.fromJson(jsonMap);
-        debugPrint('已加载自定义高亮配置: ${_config.items.length} 项');
       } else {
         // 文件不存在时使用空配置，不主动创建文件，待用户首次保存时再写入
         _config = CustomHighlightConfig.empty;

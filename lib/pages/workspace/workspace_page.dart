@@ -232,14 +232,6 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
     final workspaceProvider = context.watch<WorkspaceProvider>();
     final currentTab = workspaceProvider.currentTab;
 
-    // 获取当前章节字数
-    final currentWordCount = currentTab?.wordCount ?? 0;
-    // 获取选中字数通知器（为空时直接显示总字数，无需监听）
-    final selectedWordCountNotifier = currentTab?.selectedWordCountNotifier;
-    // 大纲类型标签页使用独立的统计格式
-    final isOutlineTab = currentTab?.usesOutlineEditor ?? false;
-    final topicCount = currentTab?.topicCount ?? 0;
-
     return Container(
       height: 28,
       margin: const EdgeInsets.fromLTRB(2, 0, 2, 2),
@@ -255,47 +247,65 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
           const Spacer(),
 
           // 中间：统计信息
-          // 大纲标签页额外显示主题数，正文标签页仅显示字数
-          // 字数统计通过 ValueListenableBuilder 只监听选中字数变化，
-          // 选区变化时仅重建此处文本，避免整个状态栏与编辑器重建
-          if (isOutlineTab) ...[
-            MouseRegion(
-              cursor: SystemMouseCursors.click,
-              child: Row(
+          // 通过 ListenableBuilder 监听专用的字数通知器，编辑器内容变化时仅重建此统计区域；
+          // 内部再以 ValueListenableBuilder 监听选中字数变化，避免整个状态栏与编辑器重建
+          ListenableBuilder(
+            listenable: workspaceProvider.wordCountNotifier,
+            builder: (context, _) {
+              // 大纲类型标签页使用独立的统计格式
+              final isOutlineTab = currentTab?.usesOutlineEditor ?? false;
+              final topicCount = currentTab?.topicCount ?? 0;
+              // 获取当前章节字数
+              final currentWordCount = currentTab?.wordCount ?? 0;
+              // 获取选中字数通知器（为空时直接显示总字数，无需监听）
+              final selectedWordCountNotifier = currentTab?.selectedWordCountNotifier;
+
+              return Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.account_tree_outlined, size: 14),
-                  const SizedBox(width: 4),
-                  Text('主题：$topicCount', style: context.bodySmall),
-                ],
-              ),
-            ),
-            const SizedBox(width: 16),
-          ],
-          MouseRegion(
-            cursor: SystemMouseCursors.click,
-            child: GestureDetector(
-              onTap: () => _showWordCountDialog(context, workspaceProvider),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.text_fields, size: 14),
-                  const SizedBox(width: 4),
-                  if (selectedWordCountNotifier == null)
-                    Text('字数：$currentWordCount 字', style: context.bodySmall)
-                  else
-                    ValueListenableBuilder<int>(
-                      valueListenable: selectedWordCountNotifier,
-                      builder: (context, selectedWordCount, _) {
-                        final wordCountText = selectedWordCount > 0
-                            ? '字数：$selectedWordCount/$currentWordCount 字'
-                            : '字数：$currentWordCount 字';
-                        return Text(wordCountText, style: context.bodySmall);
-                      },
+                  // 大纲标签页额外显示主题数，正文标签页仅显示字数
+                  if (isOutlineTab) ...[
+                    MouseRegion(
+                      cursor: SystemMouseCursors.click,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.account_tree_outlined, size: 14),
+                          const SizedBox(width: 4),
+                          Text('主题：$topicCount', style: context.bodySmall),
+                        ],
+                      ),
                     ),
+                    const SizedBox(width: 16),
+                  ],
+                  MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
+                      onTap: () => _showWordCountDialog(context, workspaceProvider),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.text_fields, size: 14),
+                          const SizedBox(width: 4),
+                          if (selectedWordCountNotifier == null)
+                            Text('字数：$currentWordCount 字', style: context.bodySmall)
+                          else
+                            ValueListenableBuilder<int>(
+                              valueListenable: selectedWordCountNotifier,
+                              builder: (context, selectedWordCount, _) {
+                                final wordCountText = selectedWordCount > 0
+                                    ? '字数：$selectedWordCount/$currentWordCount 字'
+                                    : '字数：$currentWordCount 字';
+                                return Text(wordCountText, style: context.bodySmall);
+                              },
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ],
-              ),
-            ),
+              );
+            },
           ),
 
           const SizedBox(width: 16),
