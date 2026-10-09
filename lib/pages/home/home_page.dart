@@ -19,24 +19,28 @@ class HomePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      // 最外层放弃用 appBar，直接用 Row 铺满全屏，解决之前的溢出问题
-      body: Row(
-        children: [
-          // 左侧侧边栏
-          // 不再需要传递 selectedIndex 和 onIndexChanged，状态由 Provider 管理
-          // 注册侧边栏状态 Provider，管理侧边栏的展开/收起状态
-          ChangeNotifierProvider(create: (context) => HomeSidebarProvider(), child: const SidebarWidget()),
-          // 右侧主区域，Expanded 极其重要：它约束了右侧区域的宽度，防止内部组件引发无限尺寸错误，狗日的溢出错误卡了我两个多小时
-          Expanded(
-            child: Scaffold(
-              // 标题栏放在内部 Scaffold 中，给侧边栏让出左侧空间
-              appBar: _homeTitleBar(context),
-              // 根据选中索引，显示右侧内容
-              body: _buildMainContent(context),
+    // 云同步 Provider 提升到主页面层级，使侧边栏的待确认角标与云同步页面共享同一状态
+    return ChangeNotifierProvider(
+      create: (context) => CloudSyncProvider(),
+      child: Scaffold(
+        // 最外层放弃用 appBar，直接用 Row 铺满全屏，解决之前的溢出问题
+        body: Row(
+          children: [
+            // 左侧侧边栏
+            // 不再需要传递 selectedIndex 和 onIndexChanged，状态由 Provider 管理
+            // 注册侧边栏状态 Provider，管理侧边栏的展开/收起状态
+            ChangeNotifierProvider(create: (context) => HomeSidebarProvider(), child: const SidebarWidget()),
+            // 右侧主区域，Expanded 极其重要：它约束了右侧区域的宽度，防止内部组件引发无限尺寸错误，狗日的溢出错误卡了我两个多小时
+            Expanded(
+              child: Scaffold(
+                // 标题栏放在内部 Scaffold 中，给侧边栏让出左侧空间
+                appBar: _homeTitleBar(context),
+                // 根据选中索引，显示右侧内容
+                body: _buildMainContent(context),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -62,9 +66,8 @@ class HomePage extends StatelessWidget {
         // 注册回收站 Provider，管理回收站数据
         ChangeNotifierProvider(create: (context) => RecycleBinProvider(), child: const RecycleBinPage()),
 
-        // Index 3: 云同步
-        // 注册云同步 Provider，管理连接状态与同步设置
-        ChangeNotifierProvider(create: (context) => CloudSyncProvider(), child: const CloudSyncPage()),
+        // Index 3: 云同步（Provider 已在主页面层级注册，侧边栏的待确认角标需要共用）
+        const CloudSyncPage(),
 
         // Index 4: 全局设置
         const SettingsPage(),

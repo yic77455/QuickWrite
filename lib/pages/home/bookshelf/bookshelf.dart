@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/providers/bookshelf_provider.dart';
 import 'package:quick_write/core/providers/writing_stats_provider.dart';
+import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
 import 'package:quick_write/shared/dialogs/integrity_check_dialog.dart';
 import 'widgets/widgets.dart';
@@ -21,8 +22,8 @@ class BookshelfPage extends StatefulWidget {
 class _BookshelfPageState extends State<BookshelfPage> {
   // 用于控制首帧后才真正渲染拖拽网格，避免在数据加载前就渲染拖拽网格，导致异常行为
   bool _isReady = false;
-  // 是否已显示过校验对话框
-  bool _hasShownIntegrityDialog = false;
+  // 最近一次已经反映到界面的同步轮次，用于识别同步是否带来了新数据
+  int _syncedRevision = CloudSyncService.instance.syncRevision;
 
   @override
   void initState() {
@@ -30,12 +31,21 @@ class _BookshelfPageState extends State<BookshelfPage> {
     
     // 设置书籍更新回调：当工作台保存章节后，自动刷新书架数据和码字统计数据
     MultiWindowService.instance.onBookUpdated = () {
+      // 工作台保存的内容需要在静置后推送到云端
+      CloudSyncService.instance.notifyLocalChange();
+
       // 确保在 Widget 生命周期内才执行刷新
       if (mounted) {
         context.read<BookshelfProvider>().refresh();
         context.read<WritingStatsProvider>().refresh();
       }
     };
+
+    // 自动同步会在后台改写数据库，完成后需要重新加载书架与统计数据
+    CloudSyncService.instance.addListener(_onCloudSyncChanged);
+
+    // 上次选择稍后处理时，重新进入界面按最新文件状态再次检测并提示
+    context.read<BookshelfProvider>().refreshIntegrityPrompt();
     
     // 首帧渲染完成后的回调
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -45,6 +55,26 @@ class _BookshelfPageState extends State<BookshelfPage> {
         });
       }
     });
+  }
+
+  @override
+  void dispose() {
+    CloudSyncService.instance.removeListener(_onCloudSyncChanged);
+    super.dispose();
+  }
+
+  /// 响应云同步状态变化
+  ///
+  /// 仅在同步结束（轮次增加）时刷新数据，同步进度等信息无需触发刷新
+  void _onCloudSyncChanged() {
+    final service = CloudSyncService.instance;
+    if (service.syncRevision == _syncedRevision) return;
+
+    _syncedRevision = service.syncRevision;
+    if (!mounted) return;
+
+    context.read<BookshelfProvider>().refresh();
+    context.read<WritingStatsProvider>().refresh();
   }
 
   @override
@@ -59,20 +89,21 @@ class _BookshelfPageState extends State<BookshelfPage> {
     }
 
     // 检查是否需要显示数据完整性校验对话框
-    if (!_hasShownIntegrityDialog && provider.integrityCheckResult != null) {
+    // 是否提示由 Provider 记录：用户选择稍后处理时，重新进入界面才会再次提示
+    if (provider.shouldShowIntegrityDialog) {
       final result = provider.integrityCheckResult!;
-      // 只要有问题就显示对话框
-      if (result.missingFolderBooks.isNotEmpty ||
-          result.missingFileChapters.isNotEmpty ||
-          result.orphanChapters.isNotEmpty) {
-        // 延迟显示对话框，避免在 build 中直接显示
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted && !_hasShownIntegrityDialog) {
-            _hasShownIntegrityDialog = true;
-            showIntegrityCheckDialog(context, provider.isar, result);
-          }
-        });
-      }
+      // 延迟显示对话框，避免在 build 中直接显示
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted || !provider.shouldShowIntegrityDialog) return;
+
+        provider.beginIntegrityPrompt();
+        final resolved = await showIntegrityCheckDialog(
+          context,
+          provider.isar,
+          result,
+        );
+        provider.completeIntegrityPrompt(resolved: resolved);
+      });
     }
 
     final books = provider.books;

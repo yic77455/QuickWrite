@@ -8,9 +8,22 @@ import 'package:quick_write/core/providers/theme_provider.dart';
 import 'package:quick_write/core/providers/window_provider.dart';
 import 'package:quick_write/core/providers/writing_stats_provider.dart';
 import 'package:quick_write/core/router/router.dart';
+import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
 import 'package:quick_write/core/theme/app_theme.dart';
 import 'package:quick_write/pages/workspace/workspace_page.dart';
+import 'package:window_manager/window_manager.dart';
+
+/// 主窗口关闭后的收尾：先把窗口藏起来，在后台完成退出同步
+///
+/// 隐藏窗口后同步在后台静默进行，界面不再占用桌面；同步结束后
+/// 窗口流程才真正关闭应用，因此用户感受不到等待过程
+Future<void> _handleMainWindowExit() async {
+  if (!CloudSyncService.instance.willSyncOnExit) return;
+
+  await windowManager.hide();
+  await CloudSyncService.instance.handleAppExit();
+}
 
 /// 主应用（书架页面）
 class MyWriterApp extends StatelessWidget {
@@ -22,7 +35,13 @@ class MyWriterApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         // 注册窗口状态 Provider，管理窗口的最大化/最小化状态
-        ChangeNotifierProvider(create: (_) => WindowProvider()),
+        // 主窗口界面不直接读取该 Provider，需立即创建才能注册窗口监听并拦截关闭
+        ChangeNotifierProvider(
+          lazy: false,
+          create: (_) => WindowProvider()
+            // 关闭确认后先隐藏窗口，在后台完成退出同步
+            ..onCloseConfirmed = _handleMainWindowExit,
+        ),
         // 注册主题状态 Provider，管理应用的主题模式
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         // 注册书架 Provider，管理书籍列表

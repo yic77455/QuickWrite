@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/providers/bookshelf_provider.dart';
@@ -7,6 +8,11 @@ import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/pages/home/home_page.dart';
 import 'package:quick_write/pages/workspace/workspace_page.dart';
 
+/// 应用根导航器的键
+///
+/// 供脱离页面上下文弹窗的场景使用（如同步风险确认），不依赖具体页面是否打开
+final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
+
 /// 全局路由实例
 /// 
 /// 负责管理应用的路由配置，包括：
@@ -14,6 +20,7 @@ import 'package:quick_write/pages/workspace/workspace_page.dart';
 /// - 处理路由跳转
 /// - 注册 Provider，用于管理应用状态
 final GoRouter appRouter = GoRouter(
+  navigatorKey: appNavigatorKey,
   initialLocation: '/', // 软件启动后的第一个页面路径
   routes: [
     // 路由1：书架页 (根路径)

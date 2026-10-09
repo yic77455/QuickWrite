@@ -33,4 +33,31 @@ class WritingStatModel {
   DateTime updatedAt = DateTime.now();
 
   WritingStatModel(); // 默认构造函数，Isar 强制要求有
+
+  /// 转换为 JSON
+  Map<String, dynamic> toJson() {
+    return {
+      'bookUuid': bookUuid,
+      'date': date.toIso8601String(),
+      'wordsAdded': wordsAdded,
+      'typedWords': typedWords,
+      'durationSeconds': durationSeconds,
+      'updatedAt': updatedAt.toIso8601String(),
+    };
+  }
+
+  /// 从 JSON 创建
+  factory WritingStatModel.fromJson(Map<String, dynamic> json) {
+    return WritingStatModel()
+      ..bookUuid = json['bookUuid'] as String? ?? ''
+      ..date = json['date'] != null
+          ? DateTime.parse(json['date'] as String)
+          : DateTime.now()
+      ..wordsAdded = json['wordsAdded'] as int? ?? 0
+      ..typedWords = json['typedWords'] as int? ?? 0
+      ..durationSeconds = json['durationSeconds'] as int? ?? 0
+      ..updatedAt = json['updatedAt'] != null
+          ? DateTime.parse(json['updatedAt'] as String)
+          : DateTime.now();
+  }
 }

@@ -41,6 +41,18 @@ class _ConnectionSectionState extends State<ConnectionSection> {
   // ================= 生命周期 =================
 
   @override
+  void initState() {
+    super.initState();
+    // 回填已保存的连接配置，便于快速重连
+    final provider = context.read<CloudSyncProvider>();
+    _serverUrlController.text = provider.serverUrl;
+    _usernameController.text = provider.username;
+    if (provider.remoteDir.isNotEmpty) {
+      _remoteDirController.text = provider.remoteDir;
+    }
+  }
+
+  @override
   void dispose() {
     // 释放输入控制器，避免内存泄漏
     _serverUrlController.dispose();
@@ -54,7 +66,7 @@ class _ConnectionSectionState extends State<ConnectionSection> {
 
   @override
   Widget build(BuildContext context) {
-    final isConnected = context.watch<CloudSyncProvider>().isConnected;
+    final provider = context.watch<CloudSyncProvider>();
 
     return SettingSectionCard(
       title: '服务连接',
@@ -64,7 +76,7 @@ class _ConnectionSectionState extends State<ConnectionSection> {
         _buildUsernameTile(),
         _buildPasswordTile(),
         _buildRemoteDirTile(),
-        _buildActionRow(context, isConnected),
+        _buildActionRow(context, provider.isConnected, provider.isBusy),
       ],
     );
   }
@@ -138,15 +150,23 @@ class _ConnectionSectionState extends State<ConnectionSection> {
   }
 
   /// 底部操作按钮行：未连接时提供测试与连接，已连接时提供断开
-  Widget _buildActionRow(BuildContext context, bool isConnected) {
+  Widget _buildActionRow(BuildContext context, bool isConnected, bool isBusy) {
+    /// 操作进行中显示的加载指示器
+    const loadingIndicator = SizedBox(
+      width: 16,
+      height: 16,
+      child: CircularProgressIndicator(strokeWidth: 2),
+    );
+
     if (isConnected) {
       return Padding(
         padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
+            if (isBusy) ...[loadingIndicator, const SizedBox(width: 12)],
             OutlinedButton.icon(
-              onPressed: () => _disconnect(context),
+              onPressed: isBusy ? null : () => _disconnect(context),
               icon: const Icon(Icons.link_off, size: 16),
               label: const Text('断开连接'),
             ),
@@ -160,14 +180,15 @@ class _ConnectionSectionState extends State<ConnectionSection> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
+          if (isBusy) ...[loadingIndicator, const SizedBox(width: 12)],
           OutlinedButton.icon(
-            onPressed: () => _testConnection(context),
+            onPressed: isBusy ? null : () => _testConnection(context),
             icon: const Icon(Icons.wifi_tethering, size: 16),
             label: const Text('测试连接'),
           ),
           const SizedBox(width: 12),
           FilledButton.icon(
-            onPressed: () => _connect(context),
+            onPressed: isBusy ? null : () => _connect(context),
             icon: const Icon(Icons.link, size: 16),
             label: const Text('连接'),
           ),
@@ -179,13 +200,27 @@ class _ConnectionSectionState extends State<ConnectionSection> {
   // ================= 操作处理 =================
 
   /// 测试连接：验证服务器地址与账号密码是否可用
-  void _testConnection(BuildContext context) {
-    SnackBarService.show(context, '云同步功能正在开发中，敬请期待');
+  Future<void> _testConnection(BuildContext context) async {
+    final result = await context.read<CloudSyncProvider>().testConnection(
+          serverUrl: _serverUrlController.text,
+          username: _usernameController.text,
+          password: _passwordController.text,
+          remoteDir: _remoteDirController.text,
+        );
+    if (!context.mounted) return;
+    SnackBarService.show(context, result.message);
   }
 
   /// 建立连接：保存配置并连接云服务
-  void _connect(BuildContext context) {
-    SnackBarService.show(context, '云同步功能正在开发中，敬请期待');
+  Future<void> _connect(BuildContext context) async {
+    final result = await context.read<CloudSyncProvider>().connect(
+          serverUrl: _serverUrlController.text,
+          username: _usernameController.text,
+          password: _passwordController.text,
+          remoteDir: _remoteDirController.text,
+        );
+    if (!context.mounted) return;
+    SnackBarService.show(context, result.message);
   }
 
   /// 断开连接：清除连接状态
@@ -198,7 +233,7 @@ class _ConnectionSectionState extends State<ConnectionSection> {
       confirmText: '断开',
       cancelText: '取消',
       onConfirm: () {
-        context.read<CloudSyncProvider>().setConnected(false);
+        context.read<CloudSyncProvider>().disconnect();
       },
     );
   }

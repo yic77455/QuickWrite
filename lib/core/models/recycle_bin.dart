@@ -110,7 +110,8 @@ class RecycleBinModel {
       ..synopsis = synopsis
       ..wordCount = wordCount
       ..latestChapter = latestChapter
-      ..updatedAt = updatedAt
+      // 恢复本身即一次修改，修改时间需更新，否则会被判定为早于删除记录
+      ..updatedAt = DateTime.now()
       ..createdAt = createdAt
       ..orderIndex = newOrderIndex ?? orderIndex
       ..groupId = groupId;

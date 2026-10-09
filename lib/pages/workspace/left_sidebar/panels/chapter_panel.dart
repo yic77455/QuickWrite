@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +8,7 @@ import 'package:quick_write/core/models/volume.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/services/cache_services/misc_cache_service.dart';
 import 'package:quick_write/core/utils/chapter_number_utils.dart';
+import 'package:quick_write/core/utils/file_explorer.dart';
 import 'package:quick_write/core/utils/reorder_utils.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/dialogs/new_chapter_dialog.dart';
@@ -1046,18 +1046,7 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
       const ContextMenuItem.divider(),
       ContextMenuItem(
         labelText: '在文件资源管理器中显示',
-        onTap: () async {
-          final filePath = provider.getChapterFilePath(chapter);
-          final file = File(filePath);
-          if (await file.exists()) {
-            Process.run('explorer', ['/select,', filePath]);
-          } else {
-            final dir = file.parent;
-            if (await dir.exists()) {
-              Process.run('explorer', [dir.path]);
-            }
-          }
-        },
+        onTap: () => FileExplorer.revealAll([provider.getChapterFilePath(chapter)]),
       ),
       ContextMenuItem(
         labelText: '导出本章',

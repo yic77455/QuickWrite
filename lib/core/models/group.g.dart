@@ -32,8 +32,13 @@ const GroupModelSchema = CollectionSchema(
       name: r'orderIndex',
       type: IsarType.long,
     ),
-    r'uuid': PropertySchema(
+    r'updatedAt': PropertySchema(
       id: 3,
+      name: r'updatedAt',
+      type: IsarType.dateTime,
+    ),
+    r'uuid': PropertySchema(
+      id: 4,
       name: r'uuid',
       type: IsarType.string,
     )
@@ -86,7 +91,8 @@ void _groupModelSerialize(
   writer.writeDateTime(offsets[0], object.createdAt);
   writer.writeString(offsets[1], object.name);
   writer.writeLong(offsets[2], object.orderIndex);
-  writer.writeString(offsets[3], object.uuid);
+  writer.writeDateTime(offsets[3], object.updatedAt);
+  writer.writeString(offsets[4], object.uuid);
 }
 
 GroupModel _groupModelDeserialize(
@@ -100,7 +106,8 @@ GroupModel _groupModelDeserialize(
   object.id = id;
   object.name = reader.readString(offsets[1]);
   object.orderIndex = reader.readLong(offsets[2]);
-  object.uuid = reader.readString(offsets[3]);
+  object.updatedAt = reader.readDateTime(offsets[3]);
+  object.uuid = reader.readString(offsets[4]);
   return object;
 }
 
@@ -118,6 +125,8 @@ P _groupModelDeserializeProp<P>(
     case 2:
       return (reader.readLong(offset)) as P;
     case 3:
+      return (reader.readDateTime(offset)) as P;
+    case 4:
       return (reader.readString(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -606,6 +615,60 @@ extension GroupModelQueryFilter
     });
   }
 
+  QueryBuilder<GroupModel, GroupModel, QAfterFilterCondition> updatedAtEqualTo(
+      DateTime value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'updatedAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<GroupModel, GroupModel, QAfterFilterCondition>
+      updatedAtGreaterThan(
+    DateTime value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'updatedAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<GroupModel, GroupModel, QAfterFilterCondition> updatedAtLessThan(
+    DateTime value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'updatedAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<GroupModel, GroupModel, QAfterFilterCondition> updatedAtBetween(
+    DateTime lower,
+    DateTime upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'updatedAt',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+
   QueryBuilder<GroupModel, GroupModel, QAfterFilterCondition> uuidEqualTo(
     String value, {
     bool caseSensitive = true,
@@ -781,6 +844,18 @@ extension GroupModelQuerySortBy
     });
   }
 
+  QueryBuilder<GroupModel, GroupModel, QAfterSortBy> sortByUpdatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'updatedAt', Sort.asc);
+    });
+  }
+
+  QueryBuilder<GroupModel, GroupModel, QAfterSortBy> sortByUpdatedAtDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'updatedAt', Sort.desc);
+    });
+  }
+
   QueryBuilder<GroupModel, GroupModel, QAfterSortBy> sortByUuid() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'uuid', Sort.asc);
@@ -844,6 +919,18 @@ extension GroupModelQuerySortThenBy
     });
   }
 
+  QueryBuilder<GroupModel, GroupModel, QAfterSortBy> thenByUpdatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'updatedAt', Sort.asc);
+    });
+  }
+
+  QueryBuilder<GroupModel, GroupModel, QAfterSortBy> thenByUpdatedAtDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'updatedAt', Sort.desc);
+    });
+  }
+
   QueryBuilder<GroupModel, GroupModel, QAfterSortBy> thenByUuid() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'uuid', Sort.asc);
@@ -878,6 +965,12 @@ extension GroupModelQueryWhereDistinct
     });
   }
 
+  QueryBuilder<GroupModel, GroupModel, QDistinct> distinctByUpdatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'updatedAt');
+    });
+  }
+
   QueryBuilder<GroupModel, GroupModel, QDistinct> distinctByUuid(
       {bool caseSensitive = true}) {
     return QueryBuilder.apply(this, (query) {
@@ -909,6 +1002,12 @@ extension GroupModelQueryProperty
   QueryBuilder<GroupModel, int, QQueryOperations> orderIndexProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'orderIndex');
+    });
+  }
+
+  QueryBuilder<GroupModel, DateTime, QQueryOperations> updatedAtProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'updatedAt');
     });
   }
 

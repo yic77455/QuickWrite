@@ -11,11 +11,11 @@ import 'package:quick_write/core/models/chapter.dart';
 import 'package:quick_write/core/models/volume.dart';
 import 'package:quick_write/core/models/setting_group.dart';
 import 'package:quick_write/core/models/setting_item.dart';
-import 'package:quick_write/core/models/writing_stat.dart';
-import 'package:quick_write/core/models/recycle_item.dart';
 import 'package:quick_write/core/providers/writing_session_tracker.dart';
 import 'package:quick_write/core/services/app_paths.dart';
+import 'package:quick_write/core/services/database_service.dart';
 import 'package:quick_write/core/services/backup_service.dart';
+import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 import 'package:quick_write/core/services/recycle_item_service.dart';
 import 'package:quick_write/core/services/cache_services/chapter_cursor_cache_service.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
@@ -120,21 +120,8 @@ class WorkspaceProvider extends WorkspaceStateBase
       await AppPaths.instance.initialize();
     }
 
-    // 打开 Isar 数据库
-    // 尝试获取已存在的 Isar 实例，避免重复打开数据库
-    _isar = Isar.getInstance(AppPaths.instance.databaseName) ?? await Isar.open(
-      [
-        BookModelSchema,
-        ChapterModelSchema,
-        VolumeModelSchema,
-        SettingGroupModelSchema,
-        SettingItemModelSchema,
-        WritingStatModelSchema,
-        RecycleItemModelSchema
-      ],
-      directory: AppPaths.instance.databaseDirectory,
-      name: AppPaths.instance.databaseName,
-    );
+    // 打开数据库（已打开时复用现有实例）
+    _isar = await DatabaseService.instance.open();
 
     // 初始化分卷数据迁移服务（依赖 Isar 与文件夹路径服务）
     _volumeMigrationService = VolumeMigrationService(_isar, _bookFolderService);

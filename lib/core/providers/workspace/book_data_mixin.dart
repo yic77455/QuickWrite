@@ -211,14 +211,7 @@ mixin BookDataMixin on WorkspaceStateBase {
       await _loadChapters();
 
       // 通知刷新书架（更新最近编辑显示）
-      // 两种模式二选一：独立窗口走 MultiWindowService 通信，同窗口走回调
-      if (_mainWindowId != null) {
-        // 独立窗口模式：通过窗口间消息通知主窗口
-        await MultiWindowService.instance.notifyBookUpdated(_mainWindowId!);
-      } else if (_onBookSaved != null) {
-        // 同窗口模式：直接调用回调通知 BookshelfProvider 刷新
-        _onBookSaved!();
-      }
+      _notifyBookshelfRefresh();
 
       debugPrint('章节保存成功: ${chapter.title}, 字数: $wordCount');
 
@@ -388,11 +381,7 @@ mixin BookDataMixin on WorkspaceStateBase {
     await _loadChapters();
 
     // 通知刷新书架（更新最近编辑显示）
-    if (_mainWindowId != null) {
-      await MultiWindowService.instance.notifyBookUpdated(_mainWindowId!);
-    } else if (_onBookSaved != null) {
-      _onBookSaved!();
-    }
+    _notifyBookshelfRefresh();
 
     notifyListeners();
 
@@ -1336,11 +1325,7 @@ mixin BookDataMixin on WorkspaceStateBase {
       await _loadSettingItems();
 
       // 通知刷新书架
-      if (_mainWindowId != null) {
-        await MultiWindowService.instance.notifyBookUpdated(_mainWindowId!);
-      } else if (_onBookSaved != null) {
-        _onBookSaved!();
-      }
+      _notifyBookshelfRefresh();
 
       debugPrint('设定项保存成功: ${item.title}, 字数: $wordCount');
       return true;

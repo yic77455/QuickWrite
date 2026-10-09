@@ -140,6 +140,41 @@ class DataIntegrityService {
     }
   }
 
+  /// 复核书籍文件夹是否仍然缺失
+  ///
+  /// 应用启动同步等流程可能在用户处理校验提示前补齐缺失文件，
+  /// 清理前按最新的文件状态重新确认，返回当前仍缺失文件夹的书籍
+  Future<List<BookModel>> filterStillMissingFolderBooks(
+      List<BookModel> books) async {
+    if (books.isEmpty) return const [];
+
+    final worksPath = await AppPaths.instance.getBooksPath();
+    final stillMissing = <BookModel>[];
+    for (final book in books) {
+      final bookFolderPath = '$worksPath${Platform.pathSeparator}${book.title}';
+      if (!await Directory(bookFolderPath).exists()) {
+        stillMissing.add(book);
+      }
+    }
+    return stillMissing;
+  }
+
+  /// 复核章节文件是否仍然缺失
+  ///
+  /// 清理前按最新的文件状态重新确认，返回当前仍缺失文件的章节
+  Future<List<ChapterModel>> filterStillMissingFileChapters(
+      List<MissingChapterInfo> infos) async {
+    if (infos.isEmpty) return const [];
+
+    final stillMissing = <ChapterModel>[];
+    for (final info in infos) {
+      if (!await File(info.expectedPath).exists()) {
+        stillMissing.add(info.chapter);
+      }
+    }
+    return stillMissing;
+  }
+
   /// 清理丢失文件夹的书籍（从数据库删除）
   ///
   /// [isar] 数据库实例

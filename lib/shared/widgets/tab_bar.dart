@@ -1,9 +1,9 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:quick_write/core/constants/constants.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/theme/tab_colors.dart';
+import 'package:quick_write/core/utils/file_explorer.dart';
 import 'package:quick_write/core/utils/tab_close_guard.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/context_menu.dart';
@@ -364,7 +364,7 @@ class _TabItemState extends State<TabItem> {
         labelText: '在文件资源管理器中显示',
         icon: Icons.folder_open,
         enabled: tabFilePath != null,
-        onTap: () => _handleShowInExplorer(tabFilePath!),
+        onTap: () => FileExplorer.revealAll([tabFilePath!]),
       ),
       // 固定（仅预览模式可用）
       ContextMenuItem(
@@ -431,19 +431,6 @@ class _TabItemState extends State<TabItem> {
       );
     } else {
       provider.closeAllTabs();
-    }
-  }
-
-  /// 在文件资源管理器中显示
-  Future<void> _handleShowInExplorer(String filePath) async {
-    final file = File(filePath);
-    if (await file.exists()) {
-      Process.run('explorer', ['/select,', filePath]);
-    } else {
-      final dir = file.parent;
-      if (await dir.exists()) {
-        Process.run('explorer', [dir.path]);
-      }
     }
   }
 }

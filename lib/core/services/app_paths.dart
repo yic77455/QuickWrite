@@ -47,6 +47,9 @@ class AppPaths {
   /// 备份目录名
   static const String _backupsDirName = 'backups';
 
+  /// 云同步目录名
+  static const String _syncDirName = 'sync';
+
   // ================= 状态属性 =================
   
   /// 应用根目录（文档目录下的 QuickWrite 文件夹）
@@ -217,5 +220,24 @@ class AppPaths {
     }
     
     return backupPath;
+  }
+
+  /// 获取云同步目录路径
+  /// 
+  /// 用于存储本机云同步的配置与同步状态
+  /// 该目录属于设备私有数据，不参与云端同步
+  /// 如果目录不存在会自动创建
+  Future<String> getSyncPath() async {
+    _assertInitialized();
+    
+    final syncPath = '$_appRootPath${Platform.pathSeparator}$_syncDirName';
+    final syncDir = Directory(syncPath);
+    
+    if (!await syncDir.exists()) {
+      await syncDir.create(recursive: true);
+      debugPrint('已创建云同步目录: $syncPath');
+    }
+    
+    return syncPath;
   }
 }

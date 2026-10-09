@@ -223,7 +223,8 @@ class RecycleItemModel {
       ..wordCount = wordCount
       ..filePath = filePath
       ..createdAt = createdAt
-      ..updatedAt = updatedAt;
+      // 恢复本身即一次修改，修改时间需更新，否则会被判定为早于删除记录
+      ..updatedAt = DateTime.now();
   }
 
   /// 转换为 SettingItemModel（用于恢复）
@@ -246,7 +247,8 @@ class RecycleItemModel {
       ..wordCount = wordCount
       ..filePath = filePath
       ..createdAt = createdAt
-      ..updatedAt = updatedAt;
+      // 恢复本身即一次修改，修改时间需更新，否则会被判定为早于删除记录
+      ..updatedAt = DateTime.now();
   }
 
   // ==========================================

@@ -6,5 +6,6 @@ library;
 export 'cloud_manage_section.dart';
 export 'connection_section.dart';
 export 'setting_input_tile.dart';
+export 'sync_risk_banner.dart';
 export 'sync_settings_section.dart';
 export 'sync_status_section.dart';

@@ -23,6 +23,9 @@ class CloudSyncPage extends StatelessWidget {
         _buildPageHeader(context, colorScheme),
         const SizedBox(height: 28),
 
+        // 同步待确认提示：同步被风险预检暂停时置顶说明原因
+        const SyncRiskBanner(),
+
         // 服务连接分组
         const ConnectionSection(),
         const SizedBox(height: 20),

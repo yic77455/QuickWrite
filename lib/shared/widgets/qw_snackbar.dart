@@ -25,17 +25,29 @@ class SnackBarService {
   /// [message] 提示消息
   /// [duration] 显示时长，默认 3 秒
   static void show(BuildContext context, String message, {Duration? duration}) {
+    showOnOverlay(Overlay.of(context), message, duration: duration);
+  }
+
+  /// 在指定的 Overlay 上显示浮动提示
+  ///
+  /// 适用于没有页面上下文的场景（如通过根导航器从服务层发起提示），
+  /// 此时无法通过 [show] 查找 Overlay
+  static void showOnOverlay(
+    OverlayState overlay,
+    String message, {
+    Duration? duration,
+  }) {
     // 立即清除当前显示的提示
     _dismissCurrent();
-    
+
     // 创建 OverlayEntry
     _currentEntry = OverlayEntry(
       builder: (context) => _SnackBarOverlay(message: message),
     );
-    
+
     // 插入 Overlay
-    Overlay.of(context).insert(_currentEntry!);
-    
+    overlay.insert(_currentEntry!);
+
     // 设置自动消失定时器
     _currentTimer = Timer(duration ?? const Duration(seconds: 3), () {
       _dismissCurrent();

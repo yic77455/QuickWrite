@@ -106,10 +106,7 @@ class _DraggableDialogState extends State<_DraggableDialog> {
       // 自适应高度模式使用 Center + Transform.translate，初始偏移为零即可实现居中
       // 锚定顶部模式下使用 Positioned 绝对定位，需要预计算居中位置
       if (!widget.adaptiveHeight || widget.anchorTop) {
-        _position = Offset(
-          (size.width - widget.width) / 2,
-          (size.height - widget.height) / 2,
-        );
+        _position = Offset((size.width - widget.width) / 2, (size.height - widget.height) / 2);
       }
       _isInitialized = true;
     }
@@ -132,13 +129,7 @@ class _DraggableDialogState extends State<_DraggableDialog> {
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(widget.borderRadius),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.3),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
-          ),
-        ],
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 20, offset: const Offset(0, 10))],
       ),
       child: Column(
         mainAxisSize: widget.adaptiveHeight ? MainAxisSize.min : MainAxisSize.max,
@@ -152,10 +143,7 @@ class _DraggableDialogState extends State<_DraggableDialog> {
                   Expanded(
                     child: Text(
                       widget.title,
-                      style: context.titleLarge?.copyWith(
-                        fontSize: widget.titleFontSize,
-                        fontWeight: FontWeight.w600,
-                      ),
+                      style: context.titleLarge?.copyWith(fontSize: widget.titleFontSize, fontWeight: FontWeight.w600),
                     ),
                   ),
                   if (widget.showCloseButton)
@@ -184,10 +172,7 @@ class _DraggableDialogState extends State<_DraggableDialog> {
             ),
           // 内容区域
           Flexible(
-            child: Material(
-              color: Colors.transparent,
-              child: widget.content,
-            ),
+            child: Material(color: Colors.transparent, child: widget.content),
           ),
         ],
       ),
@@ -335,16 +320,16 @@ class _InputDialogContentState extends State<_InputDialogContent> {
 
   Future<void> _handleConfirm() async {
     final value = _controller.text.trim();
-    
+
     if (value.isEmpty) {
       setState(() => _errorMessage = '请输入内容');
       return;
     }
-    
+
     setState(() => _isLoading = true);
-    
+
     final error = await widget.onConfirm(value);
-    
+
     if (mounted) {
       if (error != null) {
         setState(() {
@@ -372,10 +357,7 @@ class _InputDialogContentState extends State<_InputDialogContent> {
               controller: _controller,
               focusNode: _focusNode,
               autofocus: true,
-              decoration: InputDecoration(
-                hintText: widget.hintText,
-                errorText: _errorMessage,
-              ),
+              decoration: InputDecoration(hintText: widget.hintText, errorText: _errorMessage),
               onChanged: (_) {
                 if (_errorMessage != null) {
                   setState(() => _errorMessage = null);
@@ -389,7 +371,7 @@ class _InputDialogContentState extends State<_InputDialogContent> {
             Align(
               alignment: Alignment.centerLeft,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(6,12,0,0),
+                padding: const EdgeInsets.fromLTRB(6, 12, 0, 0),
                 child: Text(
                   widget.subtitle!,
                   style: context.bodySmall?.copyWith(
@@ -405,12 +387,8 @@ class _InputDialogContentState extends State<_InputDialogContent> {
               FilledButton(
                 onPressed: _isLoading ? null : _handleConfirm,
                 child: _isLoading
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Text(widget.confirmText,textAlign: TextAlign.center,),
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : Text(widget.confirmText, textAlign: TextAlign.center),
               ),
               const SizedBox(width: 12),
               TextButton(
@@ -431,8 +409,10 @@ class _InputDialogContentState extends State<_InputDialogContent> {
 enum ConfirmType {
   /// 删除类型（红色警告）
   delete,
+
   /// 警告类型（蓝色提示）
   warning,
+
   /// 信息类型（普通提示）
   info,
 }
@@ -447,7 +427,10 @@ enum ConfirmType {
 /// [cancelText] 取消按钮文字（为空则只显示确认按钮）
 /// [icon] 自定义图标
 /// [onConfirm] 确认回调
-Future<void> showConfirmDialog({
+/// [barrierDismissible] 是否允许点击弹窗外部关闭，默认允许
+///
+/// 返回用户的选择：点击确认按钮返回 true，取消或直接关闭返回 false
+Future<bool> showConfirmDialog({
   required BuildContext context,
   required String title,
   required String description,
@@ -456,14 +439,16 @@ Future<void> showConfirmDialog({
   String? cancelText,
   IconData? icon,
   VoidCallback? onConfirm,
-}) {
-  return showDialogBase(
+  bool barrierDismissible = true,
+}) async {
+  final confirmed = await showDialogBase<bool>(
     context: context,
     title: '',
     width: 420,
-    height: 300,
+    height: 310,
     showCloseButton: false,
     adaptiveHeight: true,
+    barrierDismissible: barrierDismissible,
     content: _ConfirmDialogContent(
       title: title,
       description: description,
@@ -474,6 +459,7 @@ Future<void> showConfirmDialog({
       onConfirm: onConfirm,
     ),
   );
+  return confirmed ?? false;
 }
 
 /// 确认对话框内容
@@ -547,27 +533,18 @@ class _ConfirmDialogContent extends StatelessWidget {
           Container(
             width: 48,
             height: 48,
-            decoration: BoxDecoration(
-              color: _getIconBackgroundColor(colorScheme),
-              shape: BoxShape.circle,
-            ),
+            decoration: BoxDecoration(color: _getIconBackgroundColor(colorScheme), shape: BoxShape.circle),
             child: Icon(_getIcon(), size: 24, color: _getIconColor(colorScheme)),
           ),
           const SizedBox(height: 16),
           // 标题
-          Text(
-            title,
-            style: context.titleLarge?.copyWith(fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 8),
+          Text(title, style: context.titleLarge?.copyWith(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 16),
           // 描述
           Text(
             description,
             textAlign: TextAlign.center,
-            style: context.bodyLarge?.copyWith(
-              height: 1.5,
-              color: colorScheme.onSurface.withValues(alpha: 0.85),
-            ),
+            style: context.bodyLarge?.copyWith(height: 1.5, color: colorScheme.onSurface.withValues(alpha: 0.85)),
           ),
           const SizedBox(height: 20),
           // 按钮
@@ -577,7 +554,7 @@ class _ConfirmDialogContent extends StatelessWidget {
                     Expanded(
                       child: FilledButton(
                         onPressed: () {
-                          Navigator.of(context).pop();
+                          Navigator.of(context).pop(true);
                           onConfirm?.call();
                         },
                         style: FilledButton.styleFrom(
@@ -590,10 +567,8 @@ class _ConfirmDialogContent extends StatelessWidget {
                     const SizedBox(width: 12),
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: () => Navigator.of(context).pop(),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                        ),
+                        onPressed: () => Navigator.of(context).pop(false),
+                        style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 10)),
                         child: Text(cancelText!),
                       ),
                     ),
@@ -603,7 +578,7 @@ class _ConfirmDialogContent extends StatelessWidget {
                   width: double.infinity,
                   child: FilledButton(
                     onPressed: () {
-                      Navigator.of(context).pop();
+                      Navigator.of(context).pop(true);
                       onConfirm?.call();
                     },
                     style: FilledButton.styleFrom(
@@ -627,8 +602,10 @@ class _ConfirmDialogContent extends StatelessWidget {
 enum UnsavedConfirmResult {
   /// 保存内容后继续关闭
   save,
+
   /// 不保存直接关闭（放弃修改）
   discard,
+
   /// 取消关闭操作
   cancel,
 }
@@ -705,27 +682,17 @@ class _UnsavedConfirmDialogContent extends StatelessWidget {
               color: colorScheme.tertiaryContainer.withValues(alpha: 0.5),
               shape: BoxShape.circle,
             ),
-            child: Icon(
-              Icons.warning_amber_outlined,
-              size: 24,
-              color: colorScheme.tertiary,
-            ),
+            child: Icon(Icons.warning_amber_outlined, size: 24, color: colorScheme.tertiary),
           ),
           const SizedBox(height: 16),
           // 标题
-          Text(
-            title,
-            style: context.titleLarge?.copyWith(fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 8),
+          Text(title, style: context.titleLarge?.copyWith(fontWeight: FontWeight.w600)),
+          const SizedBox(height: 16),
           // 描述
           Text(
             description,
             textAlign: TextAlign.center,
-            style: context.bodyLarge?.copyWith(
-              height: 1.5,
-              color: colorScheme.onSurface.withValues(alpha: 0.85),
-            ),
+            style: context.bodyLarge?.copyWith(height: 1.5, color: colorScheme.onSurface.withValues(alpha: 0.85)),
           ),
           const SizedBox(height: 20),
           // 三按钮组：保存 / 不保存 / 取消
@@ -734,11 +701,8 @@ class _UnsavedConfirmDialogContent extends StatelessWidget {
               // 保存按钮（主操作，填充色突出）
               Expanded(
                 child: FilledButton(
-                  onPressed: () =>
-                      Navigator.of(context).pop(UnsavedConfirmResult.save),
-                  style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                  ),
+                  onPressed: () => Navigator.of(context).pop(UnsavedConfirmResult.save),
+                  style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 10)),
                   child: Text(saveText),
                 ),
               ),
@@ -746,8 +710,7 @@ class _UnsavedConfirmDialogContent extends StatelessWidget {
               // 不保存按钮（中性样式，提示会丢失修改）
               Expanded(
                 child: OutlinedButton(
-                  onPressed: () =>
-                      Navigator.of(context).pop(UnsavedConfirmResult.discard),
+                  onPressed: () => Navigator.of(context).pop(UnsavedConfirmResult.discard),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: colorScheme.error,
                     padding: const EdgeInsets.symmetric(vertical: 10),
@@ -759,11 +722,8 @@ class _UnsavedConfirmDialogContent extends StatelessWidget {
               // 取消按钮（弱化样式）
               Expanded(
                 child: OutlinedButton(
-                  onPressed: () =>
-                      Navigator.of(context).pop(UnsavedConfirmResult.cancel),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                  ),
+                  onPressed: () => Navigator.of(context).pop(UnsavedConfirmResult.cancel),
+                  style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 10)),
                   child: Text(cancelText),
                 ),
               ),
@@ -781,22 +741,20 @@ class _UnsavedConfirmDialogContent extends StatelessWidget {
 class SelectItem {
   /// 显示文字
   final String label;
+
   /// 图标
   final IconData? icon;
+
   /// 是否禁用
   final bool disabled;
+
   /// 是否选中
   final bool selected;
+
   /// 关联的数据
   final String value;
 
-  const SelectItem({
-    required this.label,
-    required this.value,
-    this.icon,
-    this.disabled = false,
-    this.selected = false,
-  });
+  const SelectItem({required this.label, required this.value, this.icon, this.disabled = false, this.selected = false});
 }
 
 /// 显示选择列表对话框
@@ -893,18 +851,11 @@ class _SelectDialogContent extends StatelessWidget {
                           item.label,
                           style: context.titleLarge?.copyWith(
                             fontSize: 15,
-                            color: item.disabled
-                                ? colorScheme.onSurface.withValues(alpha: 0.3)
-                                : colorScheme.onSurface,
+                            color: item.disabled ? colorScheme.onSurface.withValues(alpha: 0.3) : colorScheme.onSurface,
                           ),
                         ),
                         const Spacer(),
-                        if (item.selected)
-                          Icon(
-                            Icons.check,
-                            size: 20,
-                            color: colorScheme.primary,
-                          ),
+                        if (item.selected) Icon(Icons.check, size: 20, color: colorScheme.primary),
                       ],
                     ),
                   ),
@@ -918,10 +869,7 @@ class _SelectDialogContent extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
           child: SizedBox(
             width: double.infinity,
-            child: TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('取消'),
-            ),
+            child: TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('取消')),
           ),
         ),
       ],
@@ -939,10 +887,7 @@ class _SelectDialogContent extends StatelessWidget {
 /// [context] 构建上下文
 /// [message] 加载提示文字
 /// 返回一个用于关闭弹窗的函数，调用者需在操作完成后手动调用以关闭弹窗
-void Function() showLoadingDialog({
-  required BuildContext context,
-  required String message,
-}) {
+void Function() showLoadingDialog({required BuildContext context, required String message}) {
   showDialog(
     context: context,
     barrierDismissible: false,
@@ -951,37 +896,26 @@ void Function() showLoadingDialog({
       // 只能由调用者通过返回的 dismissLoading 函数来关闭
       canPop: false,
       child: Center(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
-        decoration: BoxDecoration(
-          color: Theme.of(context).colorScheme.surface,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.2),
-              blurRadius: 16,
-              offset: const Offset(0, 4),
-            ),
-          ],
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surface,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withValues(alpha: 0.2), blurRadius: 16, offset: const Offset(0, 4)),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 转圈加载动画
+              const SizedBox(width: 32, height: 32, child: CircularProgressIndicator(strokeWidth: 2.5)),
+              const SizedBox(height: 16),
+              // 提示文字
+              Text(message, style: Theme.of(context).textTheme.bodyMedium),
+            ],
+          ),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // 转圈加载动画
-            const SizedBox(
-              width: 32,
-              height: 32,
-              child: CircularProgressIndicator(strokeWidth: 2.5),
-            ),
-            const SizedBox(height: 16),
-            // 提示文字
-            Text(
-              message,
-              style: Theme.of(context).textTheme.bodyMedium,
-            ),
-          ],
-        ),
-      ),
       ),
     ),
   );

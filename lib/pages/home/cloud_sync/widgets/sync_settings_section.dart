@@ -9,7 +9,6 @@ import 'package:quick_write/shared/widgets/widgets.dart';
 /// 提供自动同步行为配置：
 /// - 自动同步开关与执行间隔
 /// - 启动、退出时的自动同步开关
-/// - 备份目录是否纳入同步范围
 class SyncSettingsSection extends StatelessWidget {
   const SyncSettingsSection({super.key});
 
@@ -31,7 +30,6 @@ class SyncSettingsSection extends StatelessWidget {
         _buildIntervalTile(provider),
         _buildStartupTile(provider),
         _buildExitTile(provider),
-        _buildBackupTile(provider),
       ],
     );
   }
@@ -95,19 +93,6 @@ class SyncSettingsSection extends StatelessWidget {
       trailing: QwSwitch(
         value: provider.syncOnExit,
         onChanged: (value) => provider.setSyncOnExit(value),
-      ),
-    );
-  }
-
-  /// 同步备份目录：将本地历史备份一并纳入同步范围
-  Widget _buildBackupTile(CloudSyncProvider provider) {
-    return SettingTile(
-      icon: Icons.history_edu_outlined,
-      title: '同步备份目录',
-      subtitle: '备份文件会随时间不断增长，开启后将占用更多网盘空间',
-      trailing: QwSwitch(
-        value: provider.syncBackups,
-        onChanged: (value) => provider.setSyncBackups(value),
       ),
     );
   }

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:quick_write/core/constants/constants.dart';
+import 'package:quick_write/core/providers/cloud_sync_provider.dart';
 import 'package:quick_write/core/providers/home_state_provider.dart';
 import 'package:quick_write/core/providers/home_sidebar_provider.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
@@ -83,6 +84,8 @@ class SidebarWidget extends StatelessWidget {
                   3,
                   Icons.cloud_outlined,
                   '云同步',
+                  // 存在待用户确认的高风险同步时显示角标，提醒用户前往处理
+                  showBadge: context.watch<CloudSyncProvider>().pendingRisk != null,
                 ),
                 _buildNavItem(
                   context,
@@ -175,8 +178,9 @@ class SidebarWidget extends StatelessWidget {
     HomeStateProvider homeStateProvider,
     int index,
     IconData icon,
-    String title,
-  ) {
+    String title, {
+    bool showBadge = false,
+  }) {
     // 使用 Provider 获取当前选中的页面索引
     final isSelected = homeStateProvider.selectedIndex == index;
     final colorScheme = Theme.of(context).colorScheme;
@@ -219,6 +223,7 @@ class SidebarWidget extends StatelessWidget {
                     ? colorScheme.primary
                     : colorScheme.onSurfaceVariant,
                 isExpanded: sidebarProvider.isExpanded,
+                showBadge: showBadge,
               ),
             ),
           ),
@@ -236,13 +241,19 @@ class SidebarWidget extends StatelessWidget {
     required String title,
     Color? color,
     required bool isExpanded,
+    bool showBadge = false,
   }) {
     return Row(
       children: [
         SizedBox(
           width: 48, // 固定宽度的图标区 (64 - 16 padding = 48)
           child: Center(
-            child: Icon(icon, color: color, size: isExpanded ? 20 : 24),
+            // 角标用于提示存在待用户确认的内容，需要提醒时才显示
+            child: Badge(
+              isLabelVisible: showBadge,
+              smallSize: 8,
+              child: Icon(icon, color: color, size: isExpanded ? 20 : 24),
+            ),
           ),
         ),
         // 文字区域 (使用 SingleChildScrollView + NeverScrollableScrollPhysics 解决动画溢出报错)

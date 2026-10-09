@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -14,6 +13,7 @@ import 'package:quick_write/shared/dialogs/export_dialog.dart';
 import 'package:quick_write/core/utils/reorder_utils.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/utils/batch_selection_controller.dart';
+import 'package:quick_write/core/utils/file_explorer.dart';
 import '../widgets/contents_list_widgets.dart';
 import '../widgets/contents_top_bar.dart';
 
@@ -1031,18 +1031,7 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
       const ContextMenuItem.divider(),
       ContextMenuItem(
         labelText: '在文件资源管理器中显示',
-        onTap: () async {
-          final filePath = provider.getSettingItemFilePath(item);
-          final file = File(filePath);
-          if (await file.exists()) {
-            Process.run('explorer', ['/select,', filePath]);
-          } else {
-            final dir = file.parent;
-            if (await dir.exists()) {
-              Process.run('explorer', [dir.path]);
-            }
-          }
-        },
+        onTap: () => FileExplorer.revealAll([provider.getSettingItemFilePath(item)]),
       ),
       ContextMenuItem(
         labelText: '导出设定',

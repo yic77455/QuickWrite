@@ -40,6 +40,12 @@ class WindowProvider extends ChangeNotifier with WindowListener {
   /// 关闭前回调，如果返回 false，则取消关闭
   Future<bool> Function()? onBeforeClose;
 
+  /// 关闭确认后的回调，用于执行不可取消的收尾操作（如退出同步）
+  ///
+  /// 与 [onBeforeClose] 分开保存：窗口被多处复用时（如工作台与书架共用一个主窗口），
+  /// 各处的关闭守卫只占用 [onBeforeClose]，收尾操作不会相互覆盖
+  Future<void> Function()? onCloseConfirmed;
+
   /// 从最大化恢复时的回调，用于在窗口恢复前调整布局
   Future<void> Function()? onBeforeUnmaximize;
 
@@ -144,6 +150,9 @@ class WindowProvider extends ChangeNotifier with WindowListener {
       final shouldClose = await onBeforeClose!();
       if (!shouldClose) return;
     }
+
+    // 关闭已确认，执行不可取消的收尾操作
+    await onCloseConfirmed?.call();
 
     // 只有工作台窗口需要特殊处理（通知主窗口后再关闭）
     if (_windowType == WindowType.workspace && _bookId != null && _mainWindowId != null) {

@@ -5,17 +5,30 @@ import 'package:quick_write/core/models/book.dart';
 import 'package:quick_write/core/models/chapter.dart';
 import 'package:quick_write/core/models/group.dart';
 import 'package:quick_write/core/models/recycle_bin.dart';
-import 'package:quick_write/core/models/recycle_item.dart';
 import 'package:quick_write/core/models/volume.dart';
-import 'package:quick_write/core/models/setting_group.dart';
-import 'package:quick_write/core/models/setting_item.dart';
-import 'package:quick_write/core/models/writing_stat.dart';
 import 'package:quick_write/core/services/app_paths.dart';
+import 'package:quick_write/core/services/database_service.dart';
 import 'package:quick_write/core/services/book_import_service.dart';
+import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 import 'package:quick_write/core/services/data_integrity_service.dart';
 import 'package:isar/isar.dart';
 import 'package:uuid/uuid.dart';
 import 'package:path/path.dart' as p;
+
+/// 数据完整性校验提示的推进状态
+enum _IntegrityPromptState {
+  /// 存在问题时可以弹出提示
+  ready,
+
+  /// 提示已弹出，避免重复弹出
+  showing,
+
+  /// 用户选择稍后处理，重新进入界面时再次提示
+  deferred,
+
+  /// 用户已完成处理，本次启动不再提示
+  resolved,
+}
 
 /// 书架状态管理 Provider
 /// 
@@ -37,6 +50,43 @@ class BookshelfProvider extends ChangeNotifier {
   /// 数据完整性校验结果（启动时检测）
   IntegrityCheckResult? _integrityCheckResult;
   IntegrityCheckResult? get integrityCheckResult => _integrityCheckResult;
+
+  /// 完整性校验提示的推进状态
+  _IntegrityPromptState _integrityPromptState = _IntegrityPromptState.ready;
+
+  /// 是否仍需向用户提示校验结果
+  ///
+  /// 用户选择稍后处理时会暂停提示，待重新进入界面并重新检测后再提示
+  bool get shouldShowIntegrityDialog =>
+      _integrityPromptState == _IntegrityPromptState.ready &&
+      (_integrityCheckResult?.hasIssues ?? false);
+
+  /// 标记校验提示已弹出
+  void beginIntegrityPrompt() {
+    _integrityPromptState = _IntegrityPromptState.showing;
+  }
+
+  /// 结束本轮校验提示
+  ///
+  /// [resolved] 为 true 表示用户已完成清理或恢复，本次启动不再提示；
+  /// 为 false 表示用户选择稍后处理，重新进入界面时会重新检测并再次提示
+  void completeIntegrityPrompt({required bool resolved}) {
+    _integrityPromptState = resolved
+        ? _IntegrityPromptState.resolved
+        : _IntegrityPromptState.deferred;
+  }
+
+  /// 重新进入界面时刷新校验结果
+  ///
+  /// 仅在上次选择稍后处理时重新检测，使再次提示反映期间同步等操作后的最新状态
+  Future<void> refreshIntegrityPrompt() async {
+    if (_integrityPromptState != _IntegrityPromptState.deferred) return;
+
+    _integrityCheckResult =
+        await DataIntegrityService.instance.checkIntegrity(_isar);
+    _integrityPromptState = _IntegrityPromptState.ready;
+    notifyListeners();
+  }
 
   /// 安全移动文件夹
   /// 
@@ -112,25 +162,21 @@ class BookshelfProvider extends ChangeNotifier {
       await AppPaths.instance.initialize();
     }
 
-    // 尝试获取已存在的 Isar 实例，避免重复打开数据库
-    _isar = Isar.getInstance(AppPaths.instance.databaseName) ?? await Isar.open(
-      [BookModelSchema, GroupModelSchema, RecycleBinModelSchema, RecycleItemModelSchema, ChapterModelSchema, VolumeModelSchema, SettingGroupModelSchema, SettingItemModelSchema, WritingStatModelSchema],
-      directory: AppPaths.instance.databaseDirectory,
-      name: AppPaths.instance.databaseName,
-      // 启动时自动压缩数据库（只要有空闲空间就压缩）
-      compactOnLaunch: const CompactCondition(
-        minBytes: 1, // 只要超过 1 字节就压缩
-      ),
-    );
-
-    // 执行数据完整性校验
-    _integrityCheckResult = await DataIntegrityService.instance.checkIntegrity(_isar);
+    // 打开数据库（已打开时复用现有实例）
+    _isar = await DatabaseService.instance.open();
 
     // 从数据库中拉取所有数据
     await _loadBooks();
     await _loadGroups();
 
     _isInitialized = true;
+    notifyListeners();
+
+    // 启动同步会从云端补齐本地缺失的文件，校验需等其结束再进行，
+    // 否则会读到同步前的过期状态，导致缺失项已被恢复却仍被提示
+    await CloudSyncService.instance.awaitStartupSync();
+
+    _integrityCheckResult = await DataIntegrityService.instance.checkIntegrity(_isar);
     notifyListeners();
   }
 
@@ -553,11 +599,13 @@ class BookshelfProvider extends ChangeNotifier {
     }
 
     final newUuid = const Uuid().v4();
+    final now = DateTime.now();
     final newGroup = GroupModel()
       ..uuid = newUuid
       ..name = name
       ..orderIndex = _allGroups.length
-      ..createdAt = DateTime.now();
+      ..createdAt = now
+      ..updatedAt = now;
 
     await _isar.writeTxn(() async {
       await _isar.groupModels.put(newGroup);
@@ -589,6 +637,7 @@ class BookshelfProvider extends ChangeNotifier {
     }
 
     group.name = newName;
+    group.updatedAt = DateTime.now();
     await _isar.writeTxn(() async {
       await _isar.groupModels.put(group);
     });
@@ -614,9 +663,11 @@ class BookshelfProvider extends ChangeNotifier {
 
     // 处理分组内的书籍
     if (moveBooksToUngrouped) {
-      // 将书籍移到"未分组"
+      // 将书籍移到"未分组"，并更新修改时间以便同步时识别该变更
+      final now = DateTime.now();
       for (final book in _allBooks.where((b) => b.groupId == groupUuid)) {
         book.groupId = '';
+        book.updatedAt = now;
       }
       await _isar.writeTxn(() async {
         for (final book in _allBooks.where((b) => b.groupId == '')) {
@@ -626,8 +677,10 @@ class BookshelfProvider extends ChangeNotifier {
     }
 
     // 重新整理分组序号
+    final reorderTime = DateTime.now();
     for (int i = 0; i < _allGroups.length; i++) {
       _allGroups[i].orderIndex = i;
+      _allGroups[i].updatedAt = reorderTime;
     }
     await _isar.writeTxn(() async {
       await _isar.groupModels.putAll(_allGroups);
@@ -641,9 +694,12 @@ class BookshelfProvider extends ChangeNotifier {
   /// [bookUuids] 要移动的书籍 UUID 列表
   /// [groupUuid] 目标分组 UUID，空字符串表示"未分组"
   Future<void> moveBooksToGroup(List<String> bookUuids, String groupUuid) async {
+    // 更新修改时间，使分组变更能被同步识别
+    final now = DateTime.now();
     for (final uuid in bookUuids) {
       final book = _allBooks.firstWhere((b) => b.uuid == uuid);
       book.groupId = groupUuid;
+      book.updatedAt = now;
     }
 
     await _isar.writeTxn(() async {
@@ -700,8 +756,10 @@ class BookshelfProvider extends ChangeNotifier {
 
   /// 重排分组顺序
   Future<void> reorderGroups(List<GroupModel> newOrderedGroups) async {
+    final now = DateTime.now();
     for (int i = 0; i < newOrderedGroups.length; i++) {
       newOrderedGroups[i].orderIndex = i;
+      newOrderedGroups[i].updatedAt = now;
     }
 
     await _isar.writeTxn(() async {

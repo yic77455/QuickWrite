@@ -1,15 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:isar/isar.dart';
-import 'package:quick_write/core/models/book.dart';
-import 'package:quick_write/core/models/chapter.dart';
-import 'package:quick_write/core/models/group.dart';
-import 'package:quick_write/core/models/recycle_bin.dart';
-import 'package:quick_write/core/models/recycle_item.dart';
-import 'package:quick_write/core/models/setting_group.dart';
-import 'package:quick_write/core/models/setting_item.dart';
-import 'package:quick_write/core/models/volume.dart';
 import 'package:quick_write/core/models/writing_stat.dart';
-import 'package:quick_write/core/services/app_paths.dart';
+import 'package:quick_write/core/services/database_service.dart';
 
 /// 单日码字统计结果
 class DailyStat {
@@ -104,27 +96,11 @@ class WritingStatsService {
 
   /// 获取 Isar 实例
   ///
-  /// 优先使用缓存；其次复用已打开的实例；若不存在则按全量 Schema 打开。
+  /// 优先使用缓存；其次复用已打开的实例；若不存在则打开数据库
   Future<Isar> _getIsar() async {
     if (_isar != null) return _isar!;
 
-    final name = AppPaths.instance.databaseName;
-    _isar = Isar.getInstance(name) ??
-        await Isar.open(
-          [
-            BookModelSchema,
-            GroupModelSchema,
-            RecycleBinModelSchema,
-            RecycleItemModelSchema,
-            ChapterModelSchema,
-            VolumeModelSchema,
-            SettingGroupModelSchema,
-            SettingItemModelSchema,
-            WritingStatModelSchema,
-          ],
-          directory: AppPaths.instance.databaseDirectory,
-          name: name,
-        );
+    _isar = await DatabaseService.instance.open();
     return _isar!;
   }
 

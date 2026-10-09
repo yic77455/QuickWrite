@@ -22,6 +22,9 @@ class GroupModel {
   /// 创建时间
   DateTime createdAt = DateTime.now();
 
+  /// 最后修改时间
+  DateTime updatedAt = DateTime.now();
+
   GroupModel();
 
   /// 创建副本
@@ -30,13 +33,15 @@ class GroupModel {
     String? uuid,
     int? orderIndex,
     DateTime? createdAt,
+    DateTime? updatedAt,
   }) {
     return GroupModel()
       ..id = id
       ..name = name ?? this.name
       ..uuid = uuid ?? this.uuid
       ..orderIndex = orderIndex ?? this.orderIndex
-      ..createdAt = createdAt ?? this.createdAt;
+      ..createdAt = createdAt ?? this.createdAt
+      ..updatedAt = updatedAt ?? this.updatedAt;
   }
 
   /// 转换为 JSON
@@ -46,6 +51,7 @@ class GroupModel {
       'name': name,
       'orderIndex': orderIndex,
       'createdAt': createdAt.toIso8601String(),
+      'updatedAt': updatedAt.toIso8601String(),
     };
   }
 
@@ -57,6 +63,9 @@ class GroupModel {
       ..orderIndex = json['orderIndex'] as int? ?? 0
       ..createdAt = json['createdAt'] != null
           ? DateTime.parse(json['createdAt'] as String)
+          : DateTime.now()
+      ..updatedAt = json['updatedAt'] != null
+          ? DateTime.parse(json['updatedAt'] as String)
           : DateTime.now();
   }
 }
