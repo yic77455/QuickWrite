@@ -155,7 +155,7 @@ class _SnackBarOverlayState extends State<_SnackBarOverlay>
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
               decoration: BoxDecoration(
-                color: colorScheme.surfaceDim,
+                color: colorScheme.surfaceContainerHigh,
                 borderRadius: BorderRadius.circular(24),
                 boxShadow: [
                   BoxShadow(

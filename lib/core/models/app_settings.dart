@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:quick_write/core/theme/custom_theme.dart';
 
 /// 应用全局设置模型类
 /// 
@@ -12,6 +14,13 @@ class AppSettings {
   /// true: 暗色模式下封面会添加遮罩变暗
   /// false: 封面保持原样
   final bool dimCoverInDarkMode;
+
+  /// 当前激活的自定义主题 ID
+  /// null 表示使用内置主题（跟随系统/亮色/暗色）
+  final String? activeCustomThemeId;
+
+  /// 已保存的自定义主题列表
+  final List<CustomTheme> customThemes;
 
   // ================= 多窗口设置 =================
   /// 是否在新窗口中打开工作台
@@ -174,6 +183,9 @@ class AppSettings {
     this.themeMode = 'system',
     // 暗色模式下封面变暗
     this.dimCoverInDarkMode = false,
+    // 自定义主题
+    this.activeCustomThemeId,
+    this.customThemes = const [],
     // 多窗口设置
     this.openWorkspaceInNewWindow = false,
     // 工作台布局设置
@@ -251,6 +263,10 @@ class AppSettings {
       // 主题设置（全局）
       themeMode: themeJson['mode'] as String? ?? defaults.themeMode,
       dimCoverInDarkMode: themeJson['dimCoverInDarkMode'] as bool? ?? defaults.dimCoverInDarkMode,
+      activeCustomThemeId: themeJson['activeCustomThemeId'] as String?,
+      customThemes: (themeJson['customThemes'] as List<dynamic>? ?? [])
+          .map((e) => CustomTheme.fromJson(e as Map<String, dynamic>))
+          .toList(),
       
       // 多窗口设置（全局）
       openWorkspaceInNewWindow: globalJson['openWorkspaceInNewWindow'] as bool? ?? defaults.openWorkspaceInNewWindow,
@@ -319,6 +335,8 @@ class AppSettings {
         'theme': {
           'mode': themeMode,
           'dimCoverInDarkMode': dimCoverInDarkMode,
+          'activeCustomThemeId': activeCustomThemeId,
+          'customThemes': customThemes.map((e) => e.toJson()).toList(),
         },
         // 多窗口设置
         'openWorkspaceInNewWindow': openWorkspaceInNewWindow,
@@ -406,6 +424,9 @@ class AppSettings {
     String? themeMode,
     // 暗色模式下封面变暗
     bool? dimCoverInDarkMode,
+    // 自定义主题
+    Object? activeCustomThemeId = _unset,
+    List<CustomTheme>? customThemes,
     // 多窗口设置
     bool? openWorkspaceInNewWindow,
     // 布局设置（右侧边栏 - 布局设置面板）
@@ -459,6 +480,9 @@ class AppSettings {
       themeMode: themeMode ?? this.themeMode,
       // 暗色模式下封面变暗
       dimCoverInDarkMode: dimCoverInDarkMode ?? this.dimCoverInDarkMode,
+      // 自定义主题
+      activeCustomThemeId: activeCustomThemeId == _unset ? this.activeCustomThemeId : activeCustomThemeId as String?,
+      customThemes: customThemes ?? this.customThemes,
       // 多窗口设置
       openWorkspaceInNewWindow: openWorkspaceInNewWindow ?? this.openWorkspaceInNewWindow,
       // 布局设置（右侧边栏 - 布局设置面板）
@@ -549,6 +573,8 @@ class AppSettings {
     return other is AppSettings && 
            other.themeMode == themeMode &&
            other.dimCoverInDarkMode == dimCoverInDarkMode &&
+           other.activeCustomThemeId == activeCustomThemeId &&
+           listEquals(other.customThemes, customThemes) &&
            other.openWorkspaceInNewWindow == openWorkspaceInNewWindow &&
            // 布局设置（右侧边栏 - 布局设置面板）
            other.showChapterTitle == showChapterTitle &&
@@ -607,6 +633,8 @@ class AppSettings {
         themeMode, 
         dimCoverInDarkMode,
         openWorkspaceInNewWindow,
+        activeCustomThemeId,
+        Object.hashAll(customThemes),
       ),
       // 布局设置（右侧边栏 - 布局设置面板）
       Object.hash(

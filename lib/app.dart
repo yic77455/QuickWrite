@@ -10,7 +10,6 @@ import 'package:quick_write/core/providers/writing_stats_provider.dart';
 import 'package:quick_write/core/router/router.dart';
 import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
-import 'package:quick_write/core/theme/app_theme.dart';
 import 'package:quick_write/pages/workspace/workspace_page.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -65,8 +64,8 @@ class MyWriterApp extends StatelessWidget {
             // 强制中文
             locale: const Locale('zh', 'CN'),
             title: GlobalConstants.appTitle,
-            theme: AppTheme.lightTheme,
-            darkTheme: AppTheme.darkTheme,
+            theme: themeProvider.lightTheme,
+            darkTheme: themeProvider.darkTheme,
             themeMode: themeProvider.themeMode,
             debugShowCheckedModeBanner: false,
             routerConfig: appRouter,
@@ -111,12 +110,20 @@ class _WorkspaceAppState extends State<WorkspaceApp> {
         _themeProvider!.updateThemeFromMain(themeModeName);
       }
     };
+
+    // 设置自定义主题配置变化回调
+    MultiWindowService.instance.onThemeConfigChanged = (configJson) {
+      if (_themeProvider != null) {
+        _themeProvider!.updateThemeConfigFromMain(configJson);
+      }
+    };
   }
 
   @override
   void dispose() {
     // 清理回调
     MultiWindowService.instance.onThemeChanged = null;
+    MultiWindowService.instance.onThemeConfigChanged = null;
     super.dispose();
   }
 
@@ -144,8 +151,8 @@ class _WorkspaceAppState extends State<WorkspaceApp> {
         builder: (context, themeProvider, child) {
           return MaterialApp(
             title: '${GlobalConstants.appTitle} - 工作台',
-            theme: AppTheme.lightTheme,
-            darkTheme: AppTheme.darkTheme,
+            theme: themeProvider.lightTheme,
+            darkTheme: themeProvider.darkTheme,
             themeMode: themeProvider.themeMode,
             debugShowCheckedModeBanner: false,
             home: WorkspacePage(bookId: widget.bookId, mainWindowId: widget.mainWindowId),

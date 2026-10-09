@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:quick_write/core/providers/theme_provider.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
+import 'package:quick_write/pages/home/settings/custom_theme_list.dart';
 import 'package:quick_write/pages/home/settings/setting_widgets.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 
@@ -80,8 +81,8 @@ class AppearanceSection extends StatelessWidget {
     showDialogBase(
       context: context,
       title: '选择主题',
-      width: 380,
-      height: 200,
+      width: 400,
+      height: 540,
       adaptiveHeight: true,
       borderRadius: 18,
       titleFontSize: 15,
@@ -95,7 +96,8 @@ class AppearanceSection extends StatelessWidget {
 
 /// 主题选择对话框的内容区域
 ///
-/// 以三列卡片形式展示主题选项，点击卡片即应用并关闭
+/// 上方以三列卡片形式展示明暗模式选项，点击卡片即应用并关闭；
+/// 下方为自定义主题区域，可管理并激活自定义配色方案。
 class _ThemePickerContent extends StatelessWidget {
   /// 当前主题模式
   final ThemeMode currentMode;
@@ -110,40 +112,49 @@ class _ThemePickerContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-      child: Row(
-        children: [
-          Expanded(
-            child: _ThemeCard(
-              mode: ThemeMode.system,
-              label: '跟随系统',
-              icon: Icons.settings_suggest,
-              selected: currentMode == ThemeMode.system,
-              onSelected: onSelected,
+    return SingleChildScrollView(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: _ThemeCard(
+                    mode: ThemeMode.system,
+                    label: '跟随系统',
+                    icon: Icons.settings_suggest,
+                    selected: currentMode == ThemeMode.system,
+                    onSelected: onSelected,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _ThemeCard(
+                    mode: ThemeMode.light,
+                    label: '浅色',
+                    icon: Icons.light_mode,
+                    selected: currentMode == ThemeMode.light,
+                    onSelected: onSelected,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _ThemeCard(
+                    mode: ThemeMode.dark,
+                    label: '深色',
+                    icon: Icons.dark_mode,
+                    selected: currentMode == ThemeMode.dark,
+                    onSelected: onSelected,
+                  ),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _ThemeCard(
-              mode: ThemeMode.light,
-              label: '浅色',
-              icon: Icons.light_mode,
-              selected: currentMode == ThemeMode.light,
-              onSelected: onSelected,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _ThemeCard(
-              mode: ThemeMode.dark,
-              label: '深色',
-              icon: Icons.dark_mode,
-              selected: currentMode == ThemeMode.dark,
-              onSelected: onSelected,
-            ),
-          ),
-        ],
+            // 自定义主题区域
+            const CustomThemeSection(),
+          ],
+        ),
       ),
     );
   }

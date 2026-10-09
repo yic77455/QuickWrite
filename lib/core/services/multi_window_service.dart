@@ -25,6 +25,9 @@ class MultiWindowService {
   /// 主题变化方法名称
   static const String _methodThemeChanged = 'theme_changed';
 
+  /// 自定义主题配置变化方法名称
+  static const String _methodThemeConfigChanged = 'theme_config_changed';
+
   /// 书籍更新方法名称（工作台保存章节后通知主窗口刷新书架）
   static const String _methodBookUpdated = 'book_updated';
 
@@ -49,6 +52,9 @@ class MultiWindowService {
 
   /// 主题变化回调（子窗口设置此回调来响应主窗口的主题变化）
   void Function(String themeMode)? onThemeChanged;
+
+  /// 自定义主题配置变化回调（子窗口设置此回调来响应主窗口的自定义主题变化）
+  void Function(String configJson)? onThemeConfigChanged;
 
   /// 书籍更新回调（主窗口设置此回调来响应工作台的书籍更新通知）
   /// 当工作台保存章节后，会调用此回通知书架刷新
@@ -99,6 +105,12 @@ class MultiWindowService {
         if (themeMode != null && onThemeChanged != null) {
           debugPrint('收到主题变化事件: $themeMode');
           onThemeChanged!(themeMode);
+        }
+      } else if (call.method == _methodThemeConfigChanged) {
+        final configJson = call.arguments as String?;
+        if (configJson != null && onThemeConfigChanged != null) {
+          debugPrint('收到自定义主题配置变化事件');
+          onThemeConfigChanged!(configJson);
         }
       } else if (call.method == _methodFocusWindow) {
         // 收到主窗口的聚焦请求，使用 window_manager 让自己获得焦点
@@ -222,6 +234,20 @@ class MultiWindowService {
       }
     }
     debugPrint('已广播主题变化到 ${_workspaceWindowControllers.length} 个子窗口');
+  }
+
+  /// 广播自定义主题配置变化到所有子窗口（主窗口调用）
+  ///
+  /// [configJson] 主题配置 JSON（含激活主题 ID 与自定义主题列表）
+  Future<void> broadcastThemeConfig(String configJson) async {
+    for (final controller in _workspaceWindowControllers.values) {
+      try {
+        await controller.invokeMethod(_methodThemeConfigChanged, configJson);
+      } catch (e) {
+        debugPrint('广播自定义主题配置失败: $e');
+      }
+    }
+    debugPrint('已广播自定义主题配置到 ${_workspaceWindowControllers.length} 个子窗口');
   }
 
   /// 检查指定书籍的窗口是否已打开

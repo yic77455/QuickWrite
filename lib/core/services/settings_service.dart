@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/models/app_settings.dart';
+import 'package:quick_write/core/theme/custom_theme.dart';
 import 'app_paths.dart';
 
 /// 设置服务类
@@ -205,7 +206,37 @@ class SettingsService extends ChangeNotifier {
     return success;
   }
 
-  // ================= 多窗口设置相关 =================
+  // ================= 自定义主题设置相关 =================
+
+  /// 获取当前激活的自定义主题 ID（null 表示使用内置主题）
+  String? get activeCustomThemeId => _settings.activeCustomThemeId;
+
+  /// 获取已保存的自定义主题列表
+  List<CustomTheme> get customThemes => _settings.customThemes;
+
+  /// 获取当前激活的自定义主题对象
+  /// 未激活或激活的主题已被删除时返回 null
+  CustomTheme? get activeCustomTheme {
+    final id = _settings.activeCustomThemeId;
+    if (id == null) return null;
+    for (final theme in _settings.customThemes) {
+      if (theme.id == id) return theme;
+    }
+    return null;
+  }
+
+  /// 更新已保存的自定义主题列表
+  Future<bool> updateCustomThemes(List<CustomTheme> themes) async {
+    final newSettings = _settings.copyWith(customThemes: themes);
+    return updateSettings(newSettings);
+  }
+
+  /// 更新当前激活的自定义主题 ID
+  /// [id] 传入 null 表示切换回内置主题
+  Future<bool> updateActiveCustomThemeId(String? id) async {
+    final newSettings = _settings.copyWith(activeCustomThemeId: id);
+    return updateSettings(newSettings);
+  }
   
   /// 获取是否在新窗口中打开工作台
   bool get openWorkspaceInNewWindow => _settings.openWorkspaceInNewWindow;
