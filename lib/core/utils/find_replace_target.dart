@@ -1,4 +1,6 @@
 import 'package:flutter/widgets.dart';
+import 'package:quick_write/core/utils/code_line_selection_utils.dart';
+import 'package:re_editor/re_editor.dart';
 
 /// 查找替换目标抽象接口
 ///
@@ -42,13 +44,13 @@ abstract class FindReplaceTarget {
   void notifyContentChanged();
 }
 
-/// 基于 TextEditingController 的查找替换目标
+/// 基于 re_editor 行编辑控制器的查找替换目标
 ///
 /// 用于只有一个文本控制器的编辑器（如小说编辑器），
-/// 直接代理控制器的文本和选区操作，滚动与焦点通过回调委托给编辑器状态。
-class TextControllerFindReplaceTarget implements FindReplaceTarget {
-  /// 被代理的文本控制器
-  final TextEditingController controller;
+/// 以扁平偏移量代理控制器的文本与选区操作，滚动与焦点通过回调委托给编辑器状态。
+class CodeLineFindReplaceTarget implements FindReplaceTarget {
+  /// 被代理的编辑控制器
+  final CodeLineEditingController controller;
 
   /// 滚动到选区的回调（由编辑器状态提供）
   final VoidCallback onScrollToSelection;
@@ -56,7 +58,7 @@ class TextControllerFindReplaceTarget implements FindReplaceTarget {
   /// 请求焦点的回调（由编辑器状态提供）
   final VoidCallback onRequestFocus;
 
-  TextControllerFindReplaceTarget({
+  CodeLineFindReplaceTarget({
     required this.controller,
     required this.onScrollToSelection,
     required this.onRequestFocus,
@@ -66,18 +68,23 @@ class TextControllerFindReplaceTarget implements FindReplaceTarget {
   String get text => controller.text;
 
   @override
-  TextSelection get selection => controller.selection;
+  TextSelection get selection =>
+      CodeLineSelectionUtils.flatSelectionOf(controller.text, controller.selection);
 
   @override
   set selection(TextSelection value) {
-    controller.selection = value;
+    controller.selection =
+        CodeLineSelectionUtils.selectionFromTextSelection(controller.text, value);
   }
 
   @override
   void replaceRange(int start, int end, String replacement) {
     final text = controller.text;
     if (start < 0 || end > text.length || start > end) return;
-    controller.text = text.substring(0, start) + replacement + text.substring(end);
+    controller.replaceSelection(
+      replacement,
+      CodeLineSelectionUtils.selectionFromFlat(text, start, end),
+    );
   }
 
   @override
@@ -86,12 +93,14 @@ class TextControllerFindReplaceTarget implements FindReplaceTarget {
     // 从后往前替换，避免偏移量变化影响后续匹配的位置
     final sortedMatches = List<TextSelection>.from(matches)
       ..sort((a, b) => b.start.compareTo(a.start));
-    var text = controller.text;
     for (final match in sortedMatches) {
+      final text = controller.text;
       if (match.start < 0 || match.end > text.length) continue;
-      text = text.substring(0, match.start) + replacement + text.substring(match.end);
+      controller.replaceSelection(
+        replacement,
+        CodeLineSelectionUtils.selectionFromFlat(text, match.start, match.end),
+      );
     }
-    controller.text = text;
   }
 
   @override

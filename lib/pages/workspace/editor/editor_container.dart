@@ -6,14 +6,15 @@ import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/services/backup_service.dart';
 import 'package:quick_write/core/services/cache_services/chapter_cursor_cache_service.dart';
 import 'package:quick_write/core/services/settings_service.dart';
+import 'package:quick_write/core/utils/code_line_selection_utils.dart';
+import 'package:quick_write/core/utils/re_editor_span_builder.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
-import 'package:quick_write/core/utils/text_highlight_controller.dart';
-import 'package:quick_write/core/utils/editor_undo_manager.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/find_replace_bar.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_editor_widgets.dart';
 import 'package:quick_write/pages/workspace/editor/novel_editor.dart';
 import 'package:quick_write/pages/workspace/editor/outline_editor.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
+import 'package:re_editor/re_editor.dart';
 
 /// 工作区容器
 /// 
@@ -63,14 +64,18 @@ class _EditorContainerState extends State<EditorContainer> {
       _loadingTabId = currentTab.id;
       _isLoading = true;
 
-      currentTab.textController = TextHighlightController(
+      final spanBuilder = ReEditorSpanBuilder(
         customHighlightService: workspaceProvider.customHighlightService,
+      );
+      currentTab.spanBuilder = spanBuilder;
+      currentTab.textController = CodeLineEditingController(
+        options: const CodeLineOptions(lineBreak: TextLineBreak.lf),
+        spanBuilder: spanBuilder.call,
       );
       // 备份预览标签页不需要章节标题控制器
       if (currentTab.type != EditorTabType.backupPreview) {
         currentTab.chapterTitleController = TextEditingController();
       }
-      currentTab.undoManager = EditorUndoManager(controller: currentTab.textController!);
       
       // 异步加载内容
       _loadTabContent(currentTab, workspaceProvider);
@@ -117,60 +122,54 @@ class _EditorContainerState extends State<EditorContainer> {
       
       // 更新控制器内容（如果标签页还是当前的）
       if (mounted && tab.textController != null) {
-        tab.textController!.text = content;
-        
-        // 备份预览标签页：光标置于开头
+        // 程序化载入内容，不产生编辑事件
+        NovelEditorState.runSilently(() {
+          tab.textController!.text = content;
+        });
+
+        // 计算初始光标位置：
+        // 备份预览标签页置于开头；其余标签页按用户设置的「打开章节时」模式决定
+        int caretOffset;
         if (tab.type == EditorTabType.backupPreview) {
-          tab.textController!.selection = const TextSelection.collapsed(offset: 0);
+          caretOffset = 0;
         } else {
-          // 根据用户设置的「打开章节时」模式决定光标位置
           final cursorMode = SettingsService.instance.openChapterCursorMode;
           if (cursorMode == 'end') {
             // 定位至章末
-            final textLength = tab.textController!.text.length;
-            tab.textController!.selection = TextSelection.collapsed(offset: textLength);
+            caretOffset = content.length;
           } else if (cursorMode == 'lastEdit') {
             // 上一次编辑位置：从缓存中读取光标位置
             final bookUuid = provider.currentBook?.uuid;
-            if (bookUuid != null) {
-              final cachedPosition = ChapterCursorCacheService.instance.getCursorPosition(
-                bookUuid: bookUuid,
-                chapterUuid: tab.id,
-              );
-              
-              if (cachedPosition != null) {
-                final textLength = tab.textController!.text.length;
-                final offset = cachedPosition.offset.clamp(0, textLength);
-                tab.textController!.selection = TextSelection.collapsed(offset: offset);
-                debugPrint('恢复章节光标位置: ${tab.title}, offset: $offset');
-              } else {
-                // 无缓存，定位至章节开头，跳过首行缩进
-                tab.textController!.selection = TextSelection.collapsed(
-                  offset: _skipFirstLineIndent(content),
-                );
-              }
+            final cachedPosition = bookUuid == null
+                ? null
+                : ChapterCursorCacheService.instance.getCursorPosition(
+                    bookUuid: bookUuid,
+                    chapterUuid: tab.id,
+                  );
+            if (cachedPosition != null) {
+              caretOffset = cachedPosition.offset.clamp(0, content.length);
+              debugPrint('恢复章节光标位置: ${tab.title}, offset: $caretOffset');
             } else {
-              // 无书籍信息，定位至章节开头，跳过首行缩进
-              tab.textController!.selection = TextSelection.collapsed(
-                offset: _skipFirstLineIndent(content),
-              );
+              // 无缓存，定位至章节开头，跳过首行缩进
+              caretOffset = _skipFirstLineIndent(content);
             }
           } else {
             // 默认模式：定位至章节开头，跳过首行缩进
-            tab.textController!.selection = TextSelection.collapsed(
-              offset: _skipFirstLineIndent(content),
-            );
+            caretOffset = _skipFirstLineIndent(content);
           }
         }
-        tab.cursorPosition = tab.textController!.selection;
-        
+
+        tab.textController!.selection =
+            CodeLineSelectionUtils.collapsedSelection(content, caretOffset);
+        tab.cursorPosition = TextSelection.collapsed(offset: caretOffset);
+
         // 设置章节标题（备份预览标签页不需要）
         if (tab.chapterTitleController != null) {
           tab.chapterTitleController!.text = tab.title;
         }
-        
+
         // 清空撤销栈，防止把"加载初始内容"当作第一次输入可以被撤销
-        tab.undoManager?.clearHistory();
+        tab.textController!.clearHistory();
 
         // 加载完成后更新字数统计
         tab.updateWordCount();
@@ -188,9 +187,14 @@ class _EditorContainerState extends State<EditorContainer> {
       debugPrint('加载内容失败: $e');
       // 加载失败时使用默认内容
       if (tab.textController != null) {
-        tab.textController!.text = _getDefaultContent(tab);
-        tab.textController!.selection = const TextSelection.collapsed(offset: 0);
-        tab.cursorPosition = tab.textController!.selection;
+        final String fallbackText = _getDefaultContent(tab);
+        // 程序化载入内容，不产生编辑事件
+        NovelEditorState.runSilently(() {
+          tab.textController!.text = fallbackText;
+          tab.textController!.selection =
+              CodeLineSelectionUtils.collapsedSelection(fallbackText, 0);
+        });
+        tab.cursorPosition = const TextSelection.collapsed(offset: 0);
         // 加载失败同样需要初始化基线，避免后续编辑统计错乱
         tab.updateWordCount();
         tab.sessionBaselineWordCount = tab.wordCount;
@@ -418,8 +422,8 @@ class _EditorContainerState extends State<EditorContainer> {
           key: tab.editorKey,
           isActive: provider.currentTabIndex == index,
           controller: tab.textController!,
+          spanBuilder: tab.spanBuilder,
           chapterTitleController: tab.chapterTitleController,
-          undoManager: tab.undoManager,
           colorScheme: colorScheme,
           initialSelection: tab.cursorPosition,
           readOnly: tab.isReadOnly,

@@ -122,7 +122,7 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
   /// 获取当前标签页对应的查找替换目标
   ///
   /// 大纲编辑器标签页返回 [OutlineEditorState]（直接实现 [FindReplaceTarget]）；
-  /// 小说编辑器标签页返回 [TextControllerFindReplaceTarget]（包装 [TextEditingController]）。
+  /// 小说编辑器标签页返回 [CodeLineFindReplaceTarget]（包装行编辑控制器）。
   FindReplaceTarget? get _currentFindReplaceTarget {
     final tab = currentTab;
     if (tab == null) return null;
@@ -136,7 +136,7 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
 
     // 小说编辑器标签页：用适配器包装文本控制器
     if (tab.textController == null) return null;
-    return TextControllerFindReplaceTarget(
+    return CodeLineFindReplaceTarget(
       controller: tab.textController!,
       onScrollToSelection: () {
         final editorState = tab.editorKey.currentState;
@@ -699,9 +699,10 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
         caseSensitive: _globalSearchCaseSensitive,
       );
       if (match != null && match.start < lineEnd) {
-        controller.selection = TextSelection(
-          baseOffset: match.start,
-          extentOffset: match.start + match.length,
+        controller.selection = CodeLineSelectionUtils.selectionFromFlat(
+          controller.text,
+          match.start,
+          match.start + match.length,
         );
         // 通知小说编辑器滚动到新选区位置
         final editorState = tab.editorKey.currentState;
@@ -848,7 +849,6 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
     // 释放资源
     tab.textController?.dispose();
     tab.chapterTitleController?.dispose();
-    tab.undoManager?.dispose();
   }
 
   /// 关闭标签页
@@ -968,7 +968,6 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
 
     for (final tab in _openedTabs) {
       tab.textController?.dispose();
-      tab.undoManager?.dispose();
     }
     _openedTabs.clear();
     _currentTabIndex = -1;
@@ -995,7 +994,6 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
 
     for (final tab in tabsToRemove) {
       tab.textController?.dispose();
-      tab.undoManager?.dispose();
     }
     _openedTabs.removeWhere((t) => t.id != tabId);
     _currentTabIndex = _openedTabs.isEmpty ? -1 : 0;
@@ -1022,7 +1020,6 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
 
     for (final tab in tabsToRemove) {
       tab.textController?.dispose();
-      tab.undoManager?.dispose();
     }
     _openedTabs.removeWhere((t) => !t.isModified);
     if (_currentTabIndex >= _openedTabs.length) {
@@ -1054,7 +1051,6 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
 
     for (final tab in tabsToRemove) {
       tab.textController?.dispose();
-      tab.undoManager?.dispose();
     }
     _openedTabs.removeRange(index + 1, _openedTabs.length);
     // 如果当前选中的标签页被关闭了，调整索引
@@ -1421,10 +1417,13 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
 
     // 章节类型：通过文本控制器恢复
     if (tab.type == EditorTabType.chapter && tab.textController != null) {
-      tab.textController!.text = content;
+      // 程序化改写全文，不产生编辑事件
+      NovelEditorState.runSilently(() {
+        tab.textController!.text = content;
+        tab.textController!.selection =
+            CodeLineSelectionUtils.collapsedSelection(content, content.length);
+      });
       tab.isModified = true;
-      tab.textController!.selection =
-          TextSelection.collapsed(offset: content.length);
       tab.updateWordCount();
       notifyListeners();
       return;
@@ -1453,10 +1452,13 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
     if (chapterIndex != -1) {
       final chapterTab = _openedTabs[chapterIndex];
       if (chapterTab.textController != null) {
-        chapterTab.textController!.text = content;
+        // 程序化改写全文，不产生编辑事件
+        NovelEditorState.runSilently(() {
+          chapterTab.textController!.text = content;
+          chapterTab.textController!.selection =
+              CodeLineSelectionUtils.collapsedSelection(content, content.length);
+        });
         chapterTab.isModified = true;
-        chapterTab.textController!.selection =
-            TextSelection.collapsed(offset: content.length);
         chapterTab.updateWordCount();
       }
 
@@ -1511,7 +1513,6 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
     // 释放所有标签页的资源（文本控制器、撤销管理器等）
     for (final tab in _openedTabs) {
       tab.textController?.dispose();
-      tab.undoManager?.dispose();
     }
     _openedTabs.clear();
 

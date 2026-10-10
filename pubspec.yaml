@@ -57,6 +57,7 @@ dependencies:
   crypto: ^3.0.7  # 用于计算文件哈希
   dio: ^5.11.1  # HTTP 客户端，WebDAV 依赖
   ffi: ^2.2.0
+  re_editor: ^0.10.0  # 超长文本编辑器，自研排版与输入，用于替代 TextField 解决长文本卡顿
 
 dev_dependencies:
   flutter_test:
@@ -70,6 +71,11 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   isar_generator: ^3.1.0+1
   build_runner: ^2.4.13
+
+# 本地 fork 的 re_editor（源码位于 third_party/re_editor，附带自定义补丁）
+dependency_overrides:
+  re_editor:
+    path: third_party/re_editor
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

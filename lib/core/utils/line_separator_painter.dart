@@ -140,14 +140,12 @@ class LineSeparatorLayoutCache {
 
 /// 行间线前景绘制器
 ///
-/// 继承自 Flutter 的 CustomPainter，作为 CustomPaint 的 foregroundPainter 使用，
-/// 在编辑器文字层之上绘制行间分隔线。
+/// 继承自 Flutter 的 CustomPainter，作为 CustomPaint 的 painter 使用，
+/// 与正文同处滚动内容之中，按内容坐标系直接绘制行间分隔线。
 ///
 /// 性能优化点：
 /// - 通过 [cache] 复用 TextPainter 实例并缓存排版结果，
 ///   避免每次 paint 都重新对全文排版
-/// - 通过 [scrollController] 作为 repaint Listenable，滚动时自动触发重绘
-/// - 仅绘制视口可见区域内的行，长文本下避免绘制数万行不可见线
 class LineSeparatorPainter extends CustomPainter {
   /// 文本内容
   final String text;
@@ -163,6 +161,11 @@ class LineSeparatorPainter extends CustomPainter {
 
   /// 内容区域可用宽度（用于 TextPainter 布局计算自动换行）
   final double contentWidth;
+
+  /// 正文在内容坐标系中的顶部偏移（章节标题区域及其下间距）
+  ///
+  /// 编辑器顶部留白会整体下移正文，行间线的行位置需同步下移才能与文字对齐。
+  final double contentTopInset;
 
   /// 字体大小
   final double fontSize;
@@ -182,14 +185,13 @@ class LineSeparatorPainter extends CustomPainter {
   /// 是否斜体
   final bool isItalic;
 
-  /// 底部边距比例（0.0 ~ 1.0），用于将行间线延伸至底部边距区域
-  final double bottomMarginRatio;
+  /// 底部边距高度（像素）
+  ///
+  /// 行间线在最后一行之下继续按行高延伸，覆盖底部边距这一安全距离区域。
+  final double bottomMargin;
 
   /// 排版缓存，复用 TextPainter 实例与排版结果
   final LineSeparatorLayoutCache cache;
-
-  /// 滚动控制器，作为 repaint Listenable 让滚动时自动触发重绘，并提供视口信息
-  final ScrollController? scrollController;
 
   /// 虚线模式下每段划线的长度（像素）
   static const double _dashLength = 6.0;
@@ -206,6 +208,7 @@ class LineSeparatorPainter extends CustomPainter {
     required this.style,
     required this.opacity,
     required this.contentWidth,
+    this.contentTopInset = 0.0,
     required this.fontSize,
     required this.lineHeight,
     required this.letterSpacing,
@@ -213,9 +216,8 @@ class LineSeparatorPainter extends CustomPainter {
     required this.isBold,
     required this.isItalic,
     required this.cache,
-    this.scrollController,
-    this.bottomMarginRatio = 0.0,
-  }) : super(repaint: scrollController);
+    this.bottomMargin = 0.0,
+  }) : super();
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -243,56 +245,42 @@ class LineSeparatorPainter extends CustomPainter {
 
     final double lineStride = cache.cachedLineStride;
 
-    // 计算可见区域的纵向范围
-    // 多预留一行作为缓冲，避免边缘抖动时出现缝隙
-    final bool hasViewport = scrollController?.hasClients == true;
-    final double viewportTop =
-        hasViewport ? scrollController!.offset - lineStride : double.negativeInfinity;
-    final double viewportBottom = hasViewport
-        ? scrollController!.offset + scrollController!.position.viewportDimension + lineStride
-        : double.infinity;
+    // 裁剪到绘制区域，避免行位置越出编辑器（如纸张）范围
+    canvas.save();
+    canvas.clipRect(Offset.zero & size);
 
-    // 在每行底部绘制水平线（仅可见区域内的行）
+    // 在每行底部绘制水平线
     for (final lineY in lineBottoms) {
-      if (lineY < viewportTop || lineY > viewportBottom) continue;
-      _drawHorizontalLine(canvas, paint, size.width, lineY);
+      _drawHorizontalLine(canvas, paint, size.width, lineY + contentTopInset);
     }
 
-    // 根据底部边距比例计算需要延伸到的总高度
-    // canvasHeight 是 TextField 内容高度，乘以 (1 + bottomMarginRatio) 得到包含底部边距的总高度
-    final double totalHeight = bottomMarginRatio > 0
-        ? size.height * (1.0 + bottomMarginRatio)
-        : size.height;
-
-    // 如果最后一行底部未超出目标高度，继续按行高间隔向下延伸绘制
-    // 这样可以覆盖底部边距区域和末尾空白区域
-    if (totalHeight < double.infinity && totalHeight > lineBottoms.last) {
-      double nextY = lineBottoms.last + lineStride;
-      while (nextY < totalHeight) {
-        if (nextY >= viewportTop && nextY <= viewportBottom) {
-          _drawHorizontalLine(canvas, paint, size.width, nextY);
-        }
-        nextY += lineStride;
-      }
+    // 行间线向下延伸覆盖底部边距区域：以最后一行底部为起点按行高间隔继续绘制
+    final double fillEnd = lineBottoms.last + contentTopInset + bottomMargin;
+    double nextY = lineBottoms.last + contentTopInset + lineStride;
+    while (nextY <= fillEnd) {
+      _drawHorizontalLine(canvas, paint, size.width, nextY);
+      nextY += lineStride;
     }
+
+    canvas.restore();
   }
 
   @override
   bool shouldRepaint(covariant LineSeparatorPainter oldDelegate) {
-    // scrollController 由父类 repaint Listenable 处理，无需在此比较
     // 缓存命中由 cache 内部判断，文本变化通过 text 字段触发比较
     return oldDelegate.text != text ||
         oldDelegate.color != color ||
         oldDelegate.style != style ||
         oldDelegate.opacity != opacity ||
         oldDelegate.contentWidth != contentWidth ||
+        oldDelegate.contentTopInset != contentTopInset ||
         oldDelegate.fontSize != fontSize ||
         oldDelegate.lineHeight != lineHeight ||
         oldDelegate.letterSpacing != letterSpacing ||
         oldDelegate.fontFamily != fontFamily ||
         oldDelegate.isBold != isBold ||
         oldDelegate.isItalic != isItalic ||
-        oldDelegate.bottomMarginRatio != bottomMarginRatio;
+        oldDelegate.bottomMargin != bottomMargin;
   }
 
   /// 根据当前样式绘制一条水平线
@@ -330,9 +318,9 @@ LineSeparatorPainter createLineSeparatorPainter({
   required String text,
   required Color color,
   required double contentWidth,
+  double contentTopInset = 0.0,
   required LineSeparatorLayoutCache cache,
-  ScrollController? scrollController,
-  double bottomMarginRatio = 0.0,
+  double bottomMargin = 0.0,
 }) {
   final settings = SettingsService.instance;
   return LineSeparatorPainter(
@@ -341,14 +329,14 @@ LineSeparatorPainter createLineSeparatorPainter({
     style: settings.lineSeparatorStyle,
     opacity: settings.lineSeparatorOpacity,
     contentWidth: contentWidth,
+    contentTopInset: contentTopInset,
     fontSize: settings.fontSize,
     lineHeight: settings.lineHeight,
     letterSpacing: settings.letterSpacing,
     fontFamily: settings.fontFamily,
     isBold: settings.isBold,
     isItalic: settings.isItalic,
-    bottomMarginRatio: bottomMarginRatio,
+    bottomMargin: bottomMargin,
     cache: cache,
-    scrollController: scrollController,
   );
 }

@@ -12,6 +12,8 @@ analyzer:
     # 彻底忽略所有生成的文件！世界瞬间清静！
     - "**/*.g.dart"
     - "**/*.freezed.dart"
+    # 本地 fork 的第三方包，不参与本项目的静态检查
+    - "third_party/**"
 include: package:flutter_lints/flutter.yaml
 
 linter:

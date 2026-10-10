@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:isar/isar.dart';
+import 'package:re_editor/re_editor.dart';
 import 'package:quick_write/core/constants/constants.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:uuid/uuid.dart';
@@ -23,8 +24,9 @@ import 'package:quick_write/core/services/cache_services/window_cache_service.da
 import 'package:quick_write/core/services/workspace/book_folder_service.dart';
 import 'package:quick_write/core/services/workspace/custom_highlight_service.dart';
 import 'package:quick_write/core/services/workspace/volume_migration_service.dart';
-import 'package:quick_write/core/utils/editor_undo_manager.dart';
+import 'package:quick_write/core/utils/code_line_selection_utils.dart';
 import 'package:quick_write/core/utils/find_replace_target.dart';
+import 'package:quick_write/core/utils/re_editor_span_builder.dart';
 import 'package:quick_write/core/utils/search_query_parser.dart';
 import 'package:quick_write/core/utils/word_count_utils.dart';
 import 'package:quick_write/pages/workspace/editor/novel_editor.dart';
@@ -426,13 +428,18 @@ class EditorTab {
   double scrollOffset;
 
   /// 文本编辑控制器（保存光标位置、文本内容）
-  TextEditingController? textController;
+  ///
+  /// 使用 re_editor 的行编辑控制器；对外交互通过扁平偏移量表示的选区进行，
+  /// 由编辑器在选区变化时完成行模型与扁平偏移量之间的换算。
+  CodeLineEditingController? textController;
 
   /// 章节标题编辑控制器
   TextEditingController? chapterTitleController;
 
-  /// 撤销控制器（保存撤销/恢复历史）
-  EditorUndoManager? undoManager;
+  /// 行样式构建器（负责排版注入与高亮着色）
+  ///
+  /// 与 [textController] 一同创建，编辑器在构建时刷新其缓存并注入查找匹配。
+  ReEditorSpanBuilder? spanBuilder;
 
   /// 当前字数
   int wordCount;
@@ -492,7 +499,7 @@ class EditorTab {
     this.scrollOffset = 0.0,
     this.textController,
     this.chapterTitleController,
-    this.undoManager,
+    this.spanBuilder,
     this.wordCount = 0,
     this.topicCount = 0,
     this.backupFilePath,
@@ -529,10 +536,11 @@ class EditorTab {
     if (textController == null) return;
     _selectedWordCountTimer?.cancel();
     _selectedWordCountTimer = Timer(const Duration(milliseconds: 10), () {
-      final selection = textController!.selection;
+      final controller = textController!;
+      final selection = CodeLineSelectionUtils.flatSelectionOf(controller.text, controller.selection);
       if (selection.baseOffset != selection.extentOffset) {
         // 有选中内容：统计选区文本字数
-        final selectedText = textController!.text.substring(
+        final selectedText = controller.text.substring(
           selection.start,
           selection.end,
         );
@@ -560,7 +568,6 @@ class EditorTab {
   void dispose() {
     textController?.dispose();
     chapterTitleController?.dispose();
-    undoManager?.dispose();
     _selectedWordCountTimer?.cancel();
     selectedWordCountNotifier.dispose();
   }

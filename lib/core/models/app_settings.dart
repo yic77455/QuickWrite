@@ -206,7 +206,7 @@ class AppSettings {
     this.outlineNodeSpacing = 0.0, // 大纲编辑器节点间距（单位：像素）
     this.outlinePageViewMode = 'default', // 大纲编辑器页面视图模式
     // 工作台排版设置
-    this.letterSpacing = 0.5, // 字间距（单位：像素，负值表示紧凑）
+    this.letterSpacing = 0.7, // 字间距（单位：像素，负值表示紧凑）
     this.lineHeight = 1.8, // 行间距倍数（1.0 = 单倍行距）
     this.isFirstLineIndentEnabled = true, // 是否开启首行缩进
     this.autoLineBreak = true, // 是否开启自动空行

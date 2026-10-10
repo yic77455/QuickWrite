@@ -5,7 +5,9 @@ import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/services/font_service.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/color_utils.dart';
+import 'package:quick_write/core/utils/code_line_selection_utils.dart';
 import 'package:quick_write/core/utils/paragraph_formatter.dart';
+import 'package:quick_write/pages/workspace/editor/novel_editor.dart';
 import 'package:quick_write/pages/workspace/toolbar/widgets/chapter_title_format_panel.dart';
 import 'package:quick_write/shared/dialogs/color_picker_dialog.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
@@ -473,7 +475,11 @@ class _WorkspaceToolbarState extends State<WorkspaceToolbar> {
     final String formattedText = ParagraphFormatter.formatText(currentText);
     if (formattedText == currentText) return;
 
-    textController.value = TextEditingValue(text: formattedText, selection: TextSelection.collapsed(offset: 0));
+    // 程序化改写全文，不产生编辑事件
+    NovelEditorState.runSilently(() {
+      textController.text = formattedText;
+      textController.selection = CodeLineSelectionUtils.collapsedSelection(formattedText, 0);
+    });
 
     // 标记为已修改
     if (!currentTab.isModified) {
