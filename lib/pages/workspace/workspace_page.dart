@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/providers/window_provider.dart';
 import 'package:quick_write/core/services/cache_services/window_cache_service.dart';
+import 'package:quick_write/core/services/multi_window_service.dart';
 import 'package:quick_write/core/utils/tab_close_guard.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/utils/word_count_utils.dart';
@@ -62,6 +63,10 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
   // dispose 阶段 widget 已从树中移除，不能再通过 context.read 获取 Provider
   WindowProvider? _windowProvider;
 
+  // 关闭是否已确认并完成收尾
+  // 主窗口退出流程会先请求本窗口确认关闭，随后窗口自身关闭时不应再弹窗、再收尾
+  bool _closeConfirmed = false;
+
   @override
   void initState() {
     super.initState();
@@ -78,8 +83,11 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
         onBookSaved: widget.onBookSaved,
       );
 
-      // 设置窗口关闭前的清理回调
-      _windowProvider!.onBeforeClose = () async {
+      // 关闭前的确认与收尾：检查未保存内容，保存光标位置与标签页会话后清空标签页
+      // 已确认过时直接放行，避免主窗口退出流程与窗口自身关闭流程重复弹窗、重复收尾
+      Future<bool> confirmCloseAndCleanup() async {
+        if (_closeConfirmed) return true;
+
         // 关闭窗口前检查未保存内容，让用户选择保存/不保存/取消
         // 选择"保存"会保存所有未保存的标签页；选择"取消"则中止关闭流程
         final shouldClose = await TabCloseGuard.confirmCloseWindow(
@@ -94,8 +102,15 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
         await workspaceProvider.saveTabSession();
         // 清空所有标签页
         workspaceProvider.closeAllTabs();
+        _closeConfirmed = true;
         return true; // 允许关闭
-      };
+      }
+
+      // 设置窗口关闭前的清理回调
+      _windowProvider!.onBeforeClose = confirmCloseAndCleanup;
+
+      // 设置主窗口请求关闭时的回调：主窗口退出时先请求本窗口确认，再关闭本窗口
+      MultiWindowService.instance.onRequestClose = confirmCloseAndCleanup;
 
       // 设置从最大化恢复时的回调
       // 在窗口恢复前将边栏宽度调整到恢复后窗口的安全范围内，避免溢出
@@ -146,6 +161,7 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
     _windowProvider?.onBeforeUnmaximize = null;
     _windowProvider?.onAfterMaximize = null;
     _windowProvider?.onAfterUnmaximize = null;
+    MultiWindowService.instance.onRequestClose = null;
     super.dispose();
   }
 

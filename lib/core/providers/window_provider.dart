@@ -37,6 +37,12 @@ class WindowProvider extends ChangeNotifier with WindowListener {
   // 主窗口的ID（仅工作台窗口需要，用于通信）
   final String? _mainWindowId;
 
+  /// 关闭拦截回调，在 [onBeforeClose] 之前执行
+  ///
+  /// 返回 true 表示继续执行后续关闭流程，返回 false 表示已拦截关闭（如最小化至托盘），
+  /// 窗口保持打开状态
+  Future<bool> Function()? onCloseIntercept;
+
   /// 关闭前回调，如果返回 false，则取消关闭
   Future<bool> Function()? onBeforeClose;
 
@@ -162,6 +168,12 @@ class WindowProvider extends ChangeNotifier with WindowListener {
   // 当用户点击关闭按钮时，系统会调用此方法
   @override
   void onWindowClose() async {
+    // 先执行关闭拦截，决定是退出程序还是最小化至托盘
+    if (onCloseIntercept != null) {
+      final shouldContinue = await onCloseIntercept!();
+      if (!shouldContinue) return;
+    }
+
     // 允许通过回调执行清理操作
     if (onBeforeClose != null) {
       final shouldClose = await onBeforeClose!();

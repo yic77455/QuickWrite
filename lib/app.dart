@@ -10,6 +10,7 @@ import 'package:quick_write/core/providers/writing_stats_provider.dart';
 import 'package:quick_write/core/router/router.dart';
 import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
+import 'package:quick_write/core/services/tray_service.dart';
 import 'package:quick_write/pages/workspace/workspace_page.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -38,6 +39,8 @@ class MyWriterApp extends StatelessWidget {
         ChangeNotifierProvider(
           lazy: false,
           create: (_) => WindowProvider()
+            // 关闭拦截：按设置决定退出程序还是最小化至托盘
+            ..onCloseIntercept = TrayService.instance.handleCloseIntercept
             // 关闭确认后先隐藏窗口，在后台完成退出同步
             ..onCloseConfirmed = _handleMainWindowExit,
         ),

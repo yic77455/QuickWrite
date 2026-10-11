@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:isar/isar.dart';
@@ -12,6 +13,8 @@ import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 import 'package:quick_write/core/services/font_service.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
 import 'package:quick_write/core/services/settings_service.dart';
+import 'package:quick_write/core/services/single_instance_service.dart';
+import 'package:quick_write/core/services/tray_service.dart';
 import 'package:quick_write/core/services/cache_services/misc_cache_service.dart';
 import 'package:quick_write/core/services/window_service.dart';
 import 'package:quick_write/core/services/cache_services/window_cache_service.dart';
@@ -26,6 +29,25 @@ void main(List<String> args) async {
   // 初始化设置服务（必须在其他服务初始化之前）
   // 这会创建配置目录并加载用户设置
   await SettingsService.instance.initialize();
+
+  // 获取当前窗口控制器
+  final windowController = await WindowController.fromCurrentEngine();
+  
+  // 解析窗口参数
+  final arguments = _parseArguments(windowController.arguments);
+  final type = arguments['type'] as String?;
+  final bookId = arguments['bookId'] as String?;
+
+  // 限制同时只运行一个程序进程：若已有进程在运行，
+  // 则唤出对方主窗口并退出当前进程
+  // 工作台子窗口与主窗口同属一个进程，必须跳过该检查，避免误杀宿主进程
+  if (type != MultiWindowService.workspaceWindowType) {
+    if (!SingleInstanceService.instance.tryAcquire()) {
+      debugPrint('已检测到运行中的实例，唤出其主窗口后退出当前进程');
+      SingleInstanceService.instance.activateExistingMainWindow();
+      exit(0);
+    }
+  }
 
   // 初始化窗体缓存服务（用于独立管理窗体的临时性数据）
   // 包括：窗口大小、位置、最大化状态、侧边栏状态等
@@ -43,14 +65,6 @@ void main(List<String> args) async {
   // 初始化字体服务，加载系统字体列表
   await FontService().initialize();
 
-  // 获取当前窗口控制器
-  final windowController = await WindowController.fromCurrentEngine();
-  
-  // 解析窗口参数
-  final arguments = _parseArguments(windowController.arguments);
-  final type = arguments['type'] as String?;
-  final bookId = arguments['bookId'] as String?;
-  
   // 根据窗口类型运行不同的应用
   if (type == MultiWindowService.workspaceWindowType && bookId != null) {
     // 初始化工作台窗口
@@ -82,6 +96,10 @@ void main(List<String> args) async {
 
   // 初始化多窗口通信通道（主窗口负责监听子窗口的消息）
   await MultiWindowService.instance.initMethodChannel(windowController);
+
+  // 初始化系统托盘图标（仅主窗口常驻，用于最小化至托盘与快捷退出）
+  await TrayService.instance.initialize();
+
   // 后台异步清理过期备份
   BackupService.instance.cleanupExpiredBackups();
   runApp(const MyWriterApp());

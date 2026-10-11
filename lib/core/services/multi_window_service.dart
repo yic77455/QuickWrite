@@ -1,7 +1,20 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
+
+/// 打开工作台窗口的结果
+enum WorkspaceOpenResult {
+  /// 新建了工作台窗口，需等待"工作台就绪"通知
+  created,
+
+  /// 窗口已存在，已发送聚焦请求
+  focused,
+
+  /// 主窗口未就绪或窗口创建失败
+  failed,
+}
 
 /// 多窗口服务类
 ///
@@ -37,6 +50,9 @@ class MultiWindowService {
   /// 工作台就绪方法名称（子窗口初始化完成后通知主窗口）
   static const String _methodWorkspaceReady = 'workspace_ready';
 
+  /// 请求关闭方法名称（主窗口请求子窗口处理未保存内容并关闭自身）
+  static const String _methodRequestClose = 'request_close';
+
   // ================= 已打开窗口跟踪 =================
   
   /// 已打开的工作台窗口 bookId 集合（仅在主窗口中维护）
@@ -44,6 +60,9 @@ class MultiWindowService {
 
   /// 已打开的工作台窗口控制器映射（bookId -> WindowController）
   final Map<String, WindowController> _workspaceWindowControllers = {};
+
+  /// 等待关闭的工作台窗口（bookId -> Completer），收到窗口关闭通知时完成
+  final Map<String, Completer<void>> _pendingCloseWaiters = {};
 
   /// 主窗口ID（在主窗口初始化时设置）
   String? _mainWindowId;
@@ -64,6 +83,10 @@ class MultiWindowService {
   /// 主窗口收到此回调后应关闭加载弹窗
   VoidCallback? onWorkspaceReady;
 
+  /// 关闭请求回调（子窗口设置此回调来处理主窗口的关闭请求）
+  /// 返回 true 表示可以关闭，false 表示用户取消了关闭
+  Future<bool> Function()? onRequestClose;
+
   // ================= 窗口创建方法 =================
 
   /// 初始化方法通道监听（主窗口调用）
@@ -79,6 +102,8 @@ class MultiWindowService {
         if (bookId != null) {
           _openedBookIds.remove(bookId);
           _workspaceWindowControllers.remove(bookId);
+          // 完成该窗口的关闭等待，主窗口的退出流程依赖它确认子窗口已关闭
+          _pendingCloseWaiters.remove(bookId)?.complete();
           debugPrint('收到窗口关闭事件，bookId: $bookId');
         }
       } else if (call.method == _methodBookUpdated) {
@@ -117,6 +142,14 @@ class MultiWindowService {
         debugPrint('收到聚焦请求，激活窗口');
         await windowManager.show();
         await windowManager.focus();
+      } else if (call.method == _methodRequestClose) {
+        // 收到主窗口的关闭请求：先由页面处理未保存内容，确认后再关闭自身
+        final canClose = await onRequestClose?.call() ?? true;
+        if (canClose) {
+          // 窗口处于"阻止关闭"状态，此处的关闭会走完整的关闭流程
+          await windowManager.close();
+        }
+        return canClose;
       }
       return null;
     });
@@ -126,8 +159,8 @@ class MultiWindowService {
   /// 打开工作台窗口
   ///
   /// [bookId] 要打开的书籍ID
-  /// 如果该书籍的窗口已存在，则不会创建新窗口
-  Future<bool> openWorkspaceWindow(String bookId) async {
+  /// 返回本次打开的结果：若该书籍的窗口已存在则只聚焦已有窗口、不创建新窗口
+  Future<WorkspaceOpenResult> openWorkspaceWindow(String bookId) async {
     // 检查是否已经打开了该书籍的窗口
     if (_openedBookIds.contains(bookId)) {
       debugPrint('书籍 $bookId 的窗口已存在，发送聚焦请求');
@@ -136,12 +169,12 @@ class MultiWindowService {
       if (existingController != null) {
         await existingController.invokeMethod(_methodFocusWindow, null);
       }
-      return false;
+      return WorkspaceOpenResult.focused;
     }
 
     if (_mainWindowId == null) {
       debugPrint('主窗口ID未初始化，无法创建工作台窗口');
-      return false;
+      return WorkspaceOpenResult.failed;
     }
 
     try {
@@ -164,12 +197,12 @@ class MultiWindowService {
       _workspaceWindowControllers[bookId] = windowController;
       
       debugPrint('工作台窗口已创建，bookId: $bookId');
-      return true;
+      return WorkspaceOpenResult.created;
     } catch (e) {
       // 创建失败，移除标记
       _openedBookIds.remove(bookId);
       debugPrint('创建工作台窗口失败: $e');
-      return false;
+      return WorkspaceOpenResult.failed;
     }
   }
 
@@ -190,6 +223,54 @@ class MultiWindowService {
       // 如果主窗口不存在或通信失败，记录错误但不抛出异常
       // 这样调用方可以继续执行关闭操作
       debugPrint('发送窗口关闭事件失败（主窗口可能已关闭）: $e');
+    }
+  }
+
+  /// 关闭所有工作台窗口
+  ///
+  /// 依次请求每个工作台窗口关闭并等待其真正关闭后再处理下一个，
+  /// 子窗口若有未保存内容会自行弹窗确认。返回 false 表示某个子窗口的用户
+  /// 取消了关闭，调用方应中止后续的退出流程
+  Future<bool> closeAllWorkspaces() async {
+    for (final bookId in List<String>.from(_openedBookIds)) {
+      if (!await _requestWorkspaceClose(bookId)) return false;
+      await _waitForWorkspaceClosed(bookId);
+    }
+    return true;
+  }
+
+  /// 请求单个工作台窗口关闭，返回是否已确认关闭
+  ///
+  /// 窗口无法通信时视为已不存在，直接放行，避免退出流程被卡住
+  Future<bool> _requestWorkspaceClose(String bookId) async {
+    final controller = _workspaceWindowControllers[bookId];
+    if (controller == null) return true;
+
+    try {
+      // 先把子窗口带到前台，确保它弹出的未保存提示能被用户看到
+      await controller.invokeMethod(_methodFocusWindow, null);
+      final confirmed = await controller.invokeMethod(_methodRequestClose, null);
+      return confirmed == true;
+    } catch (e) {
+      debugPrint('请求工作台窗口关闭失败（窗口可能已不存在）: $e');
+      return true;
+    }
+  }
+
+  /// 等待工作台窗口关闭完成
+  ///
+  /// 依赖子窗口关闭时发来的通知；超时则放弃等待，避免退出流程停留过久
+  Future<void> _waitForWorkspaceClosed(String bookId) async {
+    if (!_openedBookIds.contains(bookId)) return;
+
+    final completer = Completer<void>();
+    _pendingCloseWaiters[bookId] = completer;
+    try {
+      await completer.future.timeout(const Duration(seconds: 5));
+    } on TimeoutException {
+      debugPrint('等待工作台窗口关闭超时，bookId: $bookId');
+    } finally {
+      _pendingCloseWaiters.remove(bookId);
     }
   }
 

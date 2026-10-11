@@ -28,6 +28,13 @@ class AppSettings {
   /// false: 工作台在当前窗口中打开
   final bool openWorkspaceInNewWindow;
 
+  /// 关闭主窗口时的行为
+  /// 'ask' - 每次关闭时询问
+  /// 'exit' - 直接退出程序
+  /// 'tray' - 最小化至托盘
+  /// 多窗口模式下该行为固定为 'tray'
+  final String closeWindowAction;
+
   // ================= 启动与恢复设置 =================
   /// 是否在启动时自动打开上一次编辑的作品
   final bool autoOpenLastWorkOnStartup;
@@ -197,7 +204,16 @@ class AppSettings {
   final bool previewModeEnabled;
 
   // ================= 默认配置常量 =================
-  
+
+  /// 关闭主窗口行为：每次询问
+  static const String closeActionAsk = 'ask';
+
+  /// 关闭主窗口行为：直接退出程序
+  static const String closeActionExit = 'exit';
+
+  /// 关闭主窗口行为：最小化至托盘
+  static const String closeActionTray = 'tray';
+
   /// 应用默认设置常量
   static const AppSettings defaults = AppSettings();
 
@@ -212,6 +228,7 @@ class AppSettings {
     this.customThemes = const [],
     // 多窗口设置
     this.openWorkspaceInNewWindow = false,
+    this.closeWindowAction = closeActionAsk, // 关闭主窗口时的行为
     // 启动与恢复设置
     this.autoOpenLastWorkOnStartup = false, // 是否在启动时自动打开上一次编辑的作品
     this.restoreTabsOnOpenWork = true, // 是否在打开作品时恢复上一次退出时的标签页
@@ -304,6 +321,7 @@ class AppSettings {
       
       // 多窗口设置（全局）
       openWorkspaceInNewWindow: globalJson['openWorkspaceInNewWindow'] as bool? ?? defaults.openWorkspaceInNewWindow,
+      closeWindowAction: globalJson['closeWindowAction'] as String? ?? defaults.closeWindowAction,
 
       // 启动与恢复设置（全局）
       autoOpenLastWorkOnStartup: globalJson['autoOpenLastWorkOnStartup'] as bool? ?? defaults.autoOpenLastWorkOnStartup,
@@ -384,6 +402,7 @@ class AppSettings {
         },
         // 多窗口设置
         'openWorkspaceInNewWindow': openWorkspaceInNewWindow,
+        'closeWindowAction': closeWindowAction,
         // 启动与恢复设置
         'autoOpenLastWorkOnStartup': autoOpenLastWorkOnStartup,
         'restoreTabsOnOpenWork': restoreTabsOnOpenWork,
@@ -484,6 +503,7 @@ class AppSettings {
     List<CustomTheme>? customThemes,
     // 多窗口设置
     bool? openWorkspaceInNewWindow,
+    String? closeWindowAction,
     // 启动与恢复设置
     bool? autoOpenLastWorkOnStartup,
     bool? restoreTabsOnOpenWork,
@@ -548,6 +568,7 @@ class AppSettings {
       customThemes: customThemes ?? this.customThemes,
       // 多窗口设置
       openWorkspaceInNewWindow: openWorkspaceInNewWindow ?? this.openWorkspaceInNewWindow,
+      closeWindowAction: closeWindowAction ?? this.closeWindowAction,
       // 启动与恢复设置
       autoOpenLastWorkOnStartup: autoOpenLastWorkOnStartup ?? this.autoOpenLastWorkOnStartup,
       restoreTabsOnOpenWork: restoreTabsOnOpenWork ?? this.restoreTabsOnOpenWork,
@@ -647,6 +668,7 @@ class AppSettings {
            other.activeCustomThemeId == activeCustomThemeId &&
            listEquals(other.customThemes, customThemes) &&
            other.openWorkspaceInNewWindow == openWorkspaceInNewWindow &&
+           other.closeWindowAction == closeWindowAction &&
            // 启动与恢复设置
            other.autoOpenLastWorkOnStartup == autoOpenLastWorkOnStartup &&
            other.restoreTabsOnOpenWork == restoreTabsOnOpenWork &&
@@ -712,6 +734,7 @@ class AppSettings {
         themeMode, 
         dimCoverInDarkMode,
         openWorkspaceInNewWindow,
+        closeWindowAction,
         activeCustomThemeId,
         Object.hashAll(customThemes),
         // 启动与恢复设置

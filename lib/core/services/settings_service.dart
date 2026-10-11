@@ -247,6 +247,26 @@ class SettingsService extends ChangeNotifier {
     return updateSettings(newSettings);
   }
 
+  // ================= 窗口关闭行为设置相关 =================
+
+  /// 是否处于多窗口模式（工作台在独立窗口中打开）
+  bool get isMultiWindowMode => _settings.openWorkspaceInNewWindow;
+
+  /// 获取关闭主窗口行为（用户设置值，见 AppSettings.closeActionXxx）
+  String get closeWindowAction => _settings.closeWindowAction;
+
+  /// 获取实际生效的关闭主窗口行为
+  /// 多窗口模式下多个窗口同属一个进程，关闭主窗口会连带退出所有窗口，
+  /// 因此该模式下固定为最小化至托盘，不允许用户修改
+  String get effectiveCloseWindowAction =>
+      isMultiWindowMode ? AppSettings.closeActionTray : _settings.closeWindowAction;
+
+  /// 更新关闭主窗口行为
+  Future<bool> updateCloseWindowAction(String value) async {
+    final newSettings = _settings.copyWith(closeWindowAction: value);
+    return updateSettings(newSettings);
+  }
+
   // ================= 启动与恢复设置相关 =================
 
   /// 获取是否在启动时自动打开上一次编辑的作品
