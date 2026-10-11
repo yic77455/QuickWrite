@@ -19,6 +19,8 @@ import 'package:quick_write/core/services/backup_service.dart';
 import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 import 'package:quick_write/core/services/recycle_item_service.dart';
 import 'package:quick_write/core/services/cache_services/chapter_cursor_cache_service.dart';
+import 'package:quick_write/core/services/cache_services/workspace_session_cache_service.dart';
+import 'package:quick_write/core/models/cache_models/workspace_session_cache.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
 import 'package:quick_write/core/services/cache_services/window_cache_service.dart';
 import 'package:quick_write/core/services/workspace/book_folder_service.dart';
@@ -165,6 +167,9 @@ class WorkspaceProvider extends WorkspaceStateBase
 
     // 加载自定义高亮配置（持久化在书籍根目录下）
     await _customHighlightService.load(bookFolderPath);
+
+    // 按设置恢复上次退出时打开的标签页
+    _restoreTabSessionIfEnabled();
 
     _isInitialized = true;
     notifyListeners();

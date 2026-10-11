@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/pages/home/settings/appearance_section.dart';
 import 'package:quick_write/pages/home/settings/data_management_section.dart';
+import 'package:quick_write/pages/home/settings/startup_section.dart';
 import 'package:quick_write/pages/home/settings/window_section.dart';
 
 /// 全局设置页面
@@ -9,6 +10,7 @@ import 'package:quick_write/pages/home/settings/window_section.dart';
 /// 包含以下分组：
 /// - 外观：主题切换、暗色模式下封面变暗
 /// - 窗口：是否在新窗口中打开工作台
+/// - 启动与恢复：启动时打开上次编辑的作品、打开作品时恢复标签页
 /// - 数据管理：数据目录、缓存目录、备份目录、重置统计、清除备份
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
@@ -30,6 +32,10 @@ class SettingsPage extends StatelessWidget {
 
         // 窗口设置分组
         const WindowSection(),
+        const SizedBox(height: 20),
+
+        // 启动与恢复设置分组
+        const StartupSection(),
         const SizedBox(height: 20),
 
         // 数据管理分组

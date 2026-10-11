@@ -247,6 +247,26 @@ class SettingsService extends ChangeNotifier {
     return updateSettings(newSettings);
   }
 
+  // ================= 启动与恢复设置相关 =================
+
+  /// 获取是否在启动时自动打开上一次编辑的作品
+  bool get autoOpenLastWorkOnStartup => _settings.autoOpenLastWorkOnStartup;
+
+  /// 更新是否在启动时自动打开上一次编辑的作品
+  Future<bool> updateAutoOpenLastWorkOnStartup(bool value) async {
+    final newSettings = _settings.copyWith(autoOpenLastWorkOnStartup: value);
+    return updateSettings(newSettings);
+  }
+
+  /// 获取是否在打开作品时恢复上一次退出时打开的标签页
+  bool get restoreTabsOnOpenWork => _settings.restoreTabsOnOpenWork;
+
+  /// 更新是否在打开作品时恢复上一次退出时打开的标签页
+  Future<bool> updateRestoreTabsOnOpenWork(bool value) async {
+    final newSettings = _settings.copyWith(restoreTabsOnOpenWork: value);
+    return updateSettings(newSettings);
+  }
+
   // ================= 暗色模式封面变暗设置相关 =================
   
   /// 获取暗色模式下是否让封面变暗

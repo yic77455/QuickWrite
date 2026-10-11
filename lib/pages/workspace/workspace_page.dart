@@ -90,6 +90,8 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
 
         // 保存所有的光标位置
         await workspaceProvider.saveAllCursorPositions();
+        // 保存标签页会话，供下次打开作品时恢复
+        await workspaceProvider.saveTabSession();
         // 清空所有标签页
         workspaceProvider.closeAllTabs();
         return true; // 允许关闭
@@ -373,6 +375,8 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
     if (!shouldReturn) return;
     // 保存所有打开标签页的光标位置到缓存
     await provider.saveAllCursorPositions();
+    // 保存标签页会话，供下次打开作品时恢复
+    await provider.saveTabSession();
     // 返回书架主界面
     if (!mounted) return;
     context.go('/');

@@ -28,6 +28,13 @@ class AppSettings {
   /// false: 工作台在当前窗口中打开
   final bool openWorkspaceInNewWindow;
 
+  // ================= 启动与恢复设置 =================
+  /// 是否在启动时自动打开上一次编辑的作品
+  final bool autoOpenLastWorkOnStartup;
+
+  /// 是否在打开作品时恢复上一次退出时打开的标签页
+  final bool restoreTabsOnOpenWork;
+
   // ================= 编辑器字体设置 =================
   
   /// 字体名称
@@ -205,6 +212,9 @@ class AppSettings {
     this.customThemes = const [],
     // 多窗口设置
     this.openWorkspaceInNewWindow = false,
+    // 启动与恢复设置
+    this.autoOpenLastWorkOnStartup = false, // 是否在启动时自动打开上一次编辑的作品
+    this.restoreTabsOnOpenWork = true, // 是否在打开作品时恢复上一次退出时的标签页
     // 工作台布局设置
     this.showChapterTitle = true, // 是否显示章节标题
     this.chapterTitleTopMargin = 16.0, // 章节标题顶边距（单位：像素）
@@ -294,6 +304,10 @@ class AppSettings {
       
       // 多窗口设置（全局）
       openWorkspaceInNewWindow: globalJson['openWorkspaceInNewWindow'] as bool? ?? defaults.openWorkspaceInNewWindow,
+
+      // 启动与恢复设置（全局）
+      autoOpenLastWorkOnStartup: globalJson['autoOpenLastWorkOnStartup'] as bool? ?? defaults.autoOpenLastWorkOnStartup,
+      restoreTabsOnOpenWork: globalJson['restoreTabsOnOpenWork'] as bool? ?? defaults.restoreTabsOnOpenWork,
       
       // 布局设置（编辑器）
       showChapterTitle: chapterTitleJson['show'] as bool? ?? defaults.showChapterTitle,
@@ -370,6 +384,9 @@ class AppSettings {
         },
         // 多窗口设置
         'openWorkspaceInNewWindow': openWorkspaceInNewWindow,
+        // 启动与恢复设置
+        'autoOpenLastWorkOnStartup': autoOpenLastWorkOnStartup,
+        'restoreTabsOnOpenWork': restoreTabsOnOpenWork,
       },
       // 编辑器设置
       'editor': {
@@ -467,6 +484,9 @@ class AppSettings {
     List<CustomTheme>? customThemes,
     // 多窗口设置
     bool? openWorkspaceInNewWindow,
+    // 启动与恢复设置
+    bool? autoOpenLastWorkOnStartup,
+    bool? restoreTabsOnOpenWork,
     // 布局设置（右侧边栏 - 布局设置面板）
     bool? showChapterTitle,
     double? chapterTitleTopMargin,
@@ -528,6 +548,9 @@ class AppSettings {
       customThemes: customThemes ?? this.customThemes,
       // 多窗口设置
       openWorkspaceInNewWindow: openWorkspaceInNewWindow ?? this.openWorkspaceInNewWindow,
+      // 启动与恢复设置
+      autoOpenLastWorkOnStartup: autoOpenLastWorkOnStartup ?? this.autoOpenLastWorkOnStartup,
+      restoreTabsOnOpenWork: restoreTabsOnOpenWork ?? this.restoreTabsOnOpenWork,
       // 布局设置（右侧边栏 - 布局设置面板）
       showChapterTitle: showChapterTitle ?? this.showChapterTitle,
       chapterTitleTopMargin: chapterTitleTopMargin ?? this.chapterTitleTopMargin,
@@ -624,6 +647,9 @@ class AppSettings {
            other.activeCustomThemeId == activeCustomThemeId &&
            listEquals(other.customThemes, customThemes) &&
            other.openWorkspaceInNewWindow == openWorkspaceInNewWindow &&
+           // 启动与恢复设置
+           other.autoOpenLastWorkOnStartup == autoOpenLastWorkOnStartup &&
+           other.restoreTabsOnOpenWork == restoreTabsOnOpenWork &&
            // 布局设置（右侧边栏 - 布局设置面板）
            other.showChapterTitle == showChapterTitle &&
            other.chapterTitleTopMargin == chapterTitleTopMargin &&
@@ -688,6 +714,9 @@ class AppSettings {
         openWorkspaceInNewWindow,
         activeCustomThemeId,
         Object.hashAll(customThemes),
+        // 启动与恢复设置
+        autoOpenLastWorkOnStartup,
+        restoreTabsOnOpenWork,
       ),
       // 布局设置（右侧边栏 - 布局设置面板）
       Object.hash(

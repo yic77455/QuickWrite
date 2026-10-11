@@ -1156,6 +1156,95 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
     wordCountNotifier.value++;
   }
 
+  // ================= 标签页会话持久化 =================
+
+  /// 保存当前打开的标签页会话到缓存
+  ///
+  /// 仅保存可恢复的章节与设定标签页（跳过只读的备份预览标签页），
+  /// 同时记录当前选中的标签页，供下次打开作品时恢复
+  Future<void> saveTabSession() async {
+    if (_currentBook == null) return;
+
+    final entries = <TabSessionEntry>[];
+    for (final tab in _openedTabs) {
+      if (tab.type == EditorTabType.backupPreview) continue;
+      entries.add(TabSessionEntry(
+        id: tab.id,
+        title: tab.title,
+        type: tab.type.name,
+      ));
+    }
+
+    // 计算保存列表中被选中的标签页索引（跳过备份预览后按标识重新定位）
+    int currentIndex = -1;
+    if (_currentTabIndex >= 0 && _currentTabIndex < _openedTabs.length) {
+      final currentId = _openedTabs[_currentTabIndex].id;
+      currentIndex = entries.indexWhere((e) => e.id == currentId);
+    }
+
+    await WorkspaceSessionCacheService.instance.saveSession(
+      bookUuid: _currentBook!.uuid,
+      tabs: entries,
+      currentIndex: currentIndex,
+    );
+  }
+
+  /// 按设置恢复上次退出时打开的标签页
+  ///
+  /// 在书籍数据加载完成后调用：读取缓存中的标签页会话，
+  /// 过滤掉已被删除的章节/设定后重建标签页，并恢复退出时选中的标签页。
+  /// 由 [WorkspaceProvider.initialize] 在初始化末尾调用。
+  void _restoreTabSessionIfEnabled() {
+    if (!SettingsService.instance.restoreTabsOnOpenWork) return;
+    if (_currentBook == null) return;
+
+    final session =
+        WorkspaceSessionCacheService.instance.getSession(_currentBook!.uuid);
+    if (session == null || session.tabs.isEmpty) return;
+
+    // 记录退出时选中的标签页标识，过滤失效标签页后据此重新定位
+    final savedCurrentId =
+        session.currentIndex >= 0 && session.currentIndex < session.tabs.length
+            ? session.tabs[session.currentIndex].id
+            : null;
+
+    for (final entry in session.tabs) {
+      final type = _parseEditorTabType(entry.type);
+      if (type == EditorTabType.chapter) {
+        final chapter = _chapters.where((c) => c.uuid == entry.id).firstOrNull;
+        if (chapter == null) continue;
+        _openedTabs.add(EditorTab(
+          id: chapter.uuid,
+          title: chapter.title,
+          type: EditorTabType.chapter,
+        ));
+      } else if (type == EditorTabType.settings) {
+        final item = _settingItems.where((i) => i.uuid == entry.id).firstOrNull;
+        if (item == null) continue;
+        _openedTabs.add(EditorTab(
+          id: item.uuid,
+          title: item.title,
+          type: EditorTabType.settings,
+        ));
+      }
+    }
+
+    if (_openedTabs.isEmpty) return;
+
+    _currentTabIndex = savedCurrentId == null
+        ? 0
+        : _openedTabs.indexWhere((t) => t.id == savedCurrentId);
+    if (_currentTabIndex < 0) _currentTabIndex = 0;
+  }
+
+  /// 将缓存的标签页类型名称解析为枚举值
+  EditorTabType _parseEditorTabType(String name) {
+    return EditorTabType.values.firstWhere(
+      (type) => type.name == name,
+      orElse: () => EditorTabType.chapter,
+    );
+  }
+
   // ================= 标签页保存方法 =================
 
   /// 保存当前标签页的内容

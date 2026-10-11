@@ -1,9 +1,13 @@
 import 'dart:convert';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
+import 'package:isar/isar.dart';
 import 'package:quick_write/app.dart';
+import 'package:quick_write/core/models/book.dart';
 import 'package:quick_write/core/services/backup_service.dart';
+import 'package:quick_write/core/services/database_service.dart';
 import 'package:quick_write/core/services/cache_services/chapter_cursor_cache_service.dart';
+import 'package:quick_write/core/services/cache_services/workspace_session_cache_service.dart';
 import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 import 'package:quick_write/core/services/font_service.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
@@ -32,6 +36,9 @@ void main(List<String> args) async {
   
   // 初始化杂项缓存服务（用于存储分组展开状态、书架分组选择等零散数据）
   await MiscCacheService.instance.initialize();
+  
+  // 初始化工作台会话缓存服务（用于恢复上次退出时打开的标签页）
+  await WorkspaceSessionCacheService.instance.initialize();
   
   // 初始化字体服务，加载系统字体列表
   await FontService().initialize();
@@ -78,6 +85,36 @@ void main(List<String> args) async {
   // 后台异步清理过期备份
   BackupService.instance.cleanupExpiredBackups();
   runApp(const MyWriterApp());
+
+  // 启动时按设置自动打开上一次编辑的作品（不阻塞首帧渲染）
+  _autoOpenLastEditedWorkOnStartup();
+}
+
+/// 启动时按设置自动打开上一次编辑的作品
+///
+/// 在界面完成首帧渲染后触发：若开启了相关设置，先等待启动同步补齐本地文件，
+/// 再查询最近编辑的作品并跳转到其工作台。
+/// 多窗口模式下该跳转会被路由重定向拦截，改为在新窗口中打开。
+Future<void> _autoOpenLastEditedWorkOnStartup() async {
+  if (!SettingsService.instance.autoOpenLastWorkOnStartup) return;
+
+  // 等待首帧渲染完成，确保路由器已挂载
+  await WidgetsBinding.instance.endOfFrame;
+
+  // 等待启动同步结束，避免在作品文件尚未补齐时打开
+  await CloudSyncService.instance.awaitStartupSync();
+
+  // 查询最近编辑的作品（updatedAt 最大者）
+  final isar = await DatabaseService.instance.open();
+  final books = await isar.bookModels.where().findAll();
+  if (books.isEmpty) return;
+
+  final recentBook = books.reduce(
+    (a, b) => a.updatedAt.isAfter(b.updatedAt) ? a : b,
+  );
+
+  // 跳转到该作品的工作台
+  appRouter.go('/workspace/${recentBook.uuid}');
 }
 
 /// 在根导航器的浮层上显示同步提示
