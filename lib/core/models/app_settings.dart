@@ -94,6 +94,23 @@ class AppSettings {
   /// false: 滚动条在空闲时自动隐藏
   final bool scrollbarAlwaysVisible;
 
+  // ================= 编辑器背景设置 =================
+
+  /// 编辑器背景色模式
+  /// 'default' - 跟随主题：背景色取当前主题的编辑器默认底色
+  /// 'custom' - 自定义：背景色取下方配置的自定义颜色
+  final String editorBackgroundMode;
+
+  /// 编辑器背景色（亮色主题，十六进制字符串）
+  final String? editorBackgroundColorLight;
+
+  /// 编辑器背景色（暗色主题，十六进制字符串）
+  final String? editorBackgroundColorDark;
+
+  /// 纸张模式背景淡化开关
+  /// 开启后，纸张模式下纸张外的背景相对纸张颜色做淡化处理，突出显示纸张
+  final bool dimPaperBackground;
+
   // ================= 大纲编辑器布局设置 =================
 
   /// 大纲编辑器顶边距（单位：百分比）
@@ -199,6 +216,11 @@ class AppSettings {
     this.bottomMargin = 40.0, // 页面底边距（单位：百分比）
     this.isPageViewEnabled = false, // 纸张模式
     this.scrollbarAlwaysVisible = false, // 滚动条是否常驻显示
+    // 编辑器背景设置
+    this.editorBackgroundMode = 'default', // 编辑器背景色模式（default 跟随主题 / custom 自定义）
+    this.editorBackgroundColorLight, // 编辑器背景色（亮色主题，十六进制字符串）
+    this.editorBackgroundColorDark, // 编辑器背景色（暗色主题，十六进制字符串）
+    this.dimPaperBackground = false, // 纸张模式背景淡化开关
     // 大纲编辑器布局设置
     this.outlineTopMargin = 4.0, // 大纲编辑器顶边距（单位：百分比）
     this.outlineHorizontalMargin = 4.0, // 大纲编辑器左右边距（单位：百分比）
@@ -254,6 +276,8 @@ class AppSettings {
     final chapterTitleJson = layoutJson['chapterTitle'] as Map<String, dynamic>? ?? {};
     final chapterTitleColorJson = chapterTitleJson['color'] as Map<String, dynamic>? ?? {};
     final pageJson = layoutJson['page'] as Map<String, dynamic>? ?? {};
+    final backgroundJson = layoutJson['background'] as Map<String, dynamic>? ?? {};
+    final backgroundColorJson = backgroundJson['color'] as Map<String, dynamic>? ?? {};
     final outlineLayoutJson = layoutJson['outline'] as Map<String, dynamic>? ?? {};
     final typographyJson = editorJson['typography'] as Map<String, dynamic>? ?? {};
     final autoSaveJson = editorJson['autoSave'] as Map<String, dynamic>? ?? {};
@@ -282,6 +306,12 @@ class AppSettings {
       bottomMargin: (pageJson['bottomMargin'] as num?)?.toDouble() ?? defaults.bottomMargin,
       isPageViewEnabled: pageJson['viewEnabled'] as bool? ?? defaults.isPageViewEnabled,
       scrollbarAlwaysVisible: pageJson['scrollbarAlwaysVisible'] as bool? ?? defaults.scrollbarAlwaysVisible,
+
+      // 编辑器背景设置（编辑器）
+      editorBackgroundMode: backgroundJson['mode'] as String? ?? defaults.editorBackgroundMode,
+      editorBackgroundColorLight: backgroundColorJson['light'] as String? ?? defaults.editorBackgroundColorLight,
+      editorBackgroundColorDark: backgroundColorJson['dark'] as String? ?? defaults.editorBackgroundColorDark,
+      dimPaperBackground: backgroundJson['dimPaper'] as bool? ?? defaults.dimPaperBackground,
 
       // 大纲编辑器布局设置（编辑器）
       outlineTopMargin: (outlineLayoutJson['topMargin'] as num?)?.toDouble() ?? defaults.outlineTopMargin,
@@ -375,6 +405,14 @@ class AppSettings {
             'viewEnabled': isPageViewEnabled,
             'scrollbarAlwaysVisible': scrollbarAlwaysVisible,
           },
+          'background': {
+            'mode': editorBackgroundMode,
+            'color': {
+              'light': editorBackgroundColorLight,
+              'dark': editorBackgroundColorDark,
+            },
+            'dimPaper': dimPaperBackground,
+          },
           'outline': {
             'topMargin': outlineTopMargin,
             'horizontalMargin': outlineHorizontalMargin,
@@ -440,6 +478,11 @@ class AppSettings {
     double? bottomMargin,
     bool? isPageViewEnabled,
     bool? scrollbarAlwaysVisible,
+    // 编辑器背景设置
+    String? editorBackgroundMode,
+    Object? editorBackgroundColorLight = _unset,
+    Object? editorBackgroundColorDark = _unset,
+    bool? dimPaperBackground,
     // 大纲编辑器布局设置
     double? outlineTopMargin,
     double? outlineHorizontalMargin,
@@ -496,6 +539,11 @@ class AppSettings {
       bottomMargin: bottomMargin ?? this.bottomMargin,
       isPageViewEnabled: isPageViewEnabled ?? this.isPageViewEnabled,
       scrollbarAlwaysVisible: scrollbarAlwaysVisible ?? this.scrollbarAlwaysVisible,
+      // 编辑器背景设置
+      editorBackgroundMode: editorBackgroundMode ?? this.editorBackgroundMode,
+      editorBackgroundColorLight: editorBackgroundColorLight == _unset ? this.editorBackgroundColorLight : editorBackgroundColorLight as String?,
+      editorBackgroundColorDark: editorBackgroundColorDark == _unset ? this.editorBackgroundColorDark : editorBackgroundColorDark as String?,
+      dimPaperBackground: dimPaperBackground ?? this.dimPaperBackground,
       // 大纲编辑器布局设置
       outlineTopMargin: outlineTopMargin ?? this.outlineTopMargin,
       outlineHorizontalMargin: outlineHorizontalMargin ?? this.outlineHorizontalMargin,
@@ -587,6 +635,11 @@ class AppSettings {
            other.bottomMargin == bottomMargin &&
            other.isPageViewEnabled == isPageViewEnabled &&
            other.scrollbarAlwaysVisible == scrollbarAlwaysVisible &&
+           // 编辑器背景设置
+           other.editorBackgroundMode == editorBackgroundMode &&
+           other.editorBackgroundColorLight == editorBackgroundColorLight &&
+           other.editorBackgroundColorDark == editorBackgroundColorDark &&
+           other.dimPaperBackground == dimPaperBackground &&
            // 大纲编辑器布局设置
            other.outlineTopMargin == outlineTopMargin &&
            other.outlineHorizontalMargin == outlineHorizontalMargin &&
@@ -648,6 +701,11 @@ class AppSettings {
         bottomMargin,
         isPageViewEnabled,
         scrollbarAlwaysVisible,
+        // 编辑器背景设置
+        editorBackgroundMode,
+        editorBackgroundColorLight,
+        editorBackgroundColorDark,
+        dimPaperBackground,
         // 大纲编辑器布局设置
         outlineTopMargin,
         outlineHorizontalMargin,

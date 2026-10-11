@@ -151,4 +151,59 @@ class ColorUtils {
       await SettingsService.instance.updateDialogueHighlightColorLight(colorHex);
     }
   }
+
+  // ================= 编辑器背景色 =================
+
+  /// 纸张背景淡化时，纸张外背景相对纸张颜色的调整强度
+  static const double _paperDimOverlayAlpha = 0.03;
+
+  /// 编辑器默认背景色（跟随主题）
+  ///
+  /// 取主题中层级最低的容器色，作为正文与大纲编辑区以及纸张的基础底色
+  static Color getDefaultEditorBackgroundColor(BuildContext context) {
+    return Theme.of(context).colorScheme.surfaceContainerLowest;
+  }
+
+  /// 根据当前主题亮度获取编辑器背景色
+  ///
+  /// 自定义模式下取对应主题亮度的自定义颜色，否则回退到主题默认底色
+  static Color getEditorBackgroundColorForTheme(BuildContext context) {
+    final String? hexColor = getEditorBackgroundColorHexForTheme(context);
+    return hexColor != null ? parseHex(hexColor) : getDefaultEditorBackgroundColor(context);
+  }
+
+  /// 获取当前主题亮度下编辑器背景色的原始 HEX 字符串
+  ///
+  /// 仅在自定义模式下返回已配置的颜色，跟随主题模式返回 null
+  static String? getEditorBackgroundColorHexForTheme(BuildContext context) {
+    if (SettingsService.instance.editorBackgroundMode != 'custom') return null;
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+    return isDark
+        ? SettingsService.instance.editorBackgroundColorDark
+        : SettingsService.instance.editorBackgroundColorLight;
+  }
+
+  /// 更新当前主题亮度下的编辑器背景色
+  static Future<void> updateEditorBackgroundColorForTheme(BuildContext context, String colorHex) async {
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+    if (isDark) {
+      await SettingsService.instance.updateEditorBackgroundColorDark(colorHex);
+    } else {
+      await SettingsService.instance.updateEditorBackgroundColorLight(colorHex);
+    }
+  }
+
+  /// 纸张模式下纸张外的背景色
+  ///
+  /// 未开启淡化时与纸张颜色保持一致；开启后依据纸张明度向其对比方向微调，
+  /// 使纸张外的背景弱于纸张，从而突出纸张轮廓
+  static Color getPaperOutsideBackgroundColor(BuildContext context) {
+    final Color paperColor = getEditorBackgroundColorForTheme(context);
+    if (!SettingsService.instance.dimPaperBackground) {
+      return paperColor;
+    }
+    final bool paperIsLight = paperColor.computeLuminance() > 0.5;
+    final Color overlay = paperIsLight ? Colors.black : Colors.white;
+    return Color.alphaBlend(overlay.withValues(alpha: _paperDimOverlayAlpha), paperColor);
+  }
 }

@@ -18,6 +18,9 @@ class OutlineEditorTopBar extends StatelessWidget {
   /// 颜色方案
   final ColorScheme colorScheme;
 
+  /// 工具栏背景色（与编辑器背景保持一致）
+  final Color backgroundColor;
+
   /// 是否只读（只读时禁用添加节点按钮）
   final bool readOnly;
 
@@ -39,6 +42,7 @@ class OutlineEditorTopBar extends StatelessWidget {
   const OutlineEditorTopBar({
     super.key,
     required this.colorScheme,
+    required this.backgroundColor,
     required this.readOnly,
     required this.onExpandAll,
     required this.onCollapseAll,
@@ -52,7 +56,7 @@ class OutlineEditorTopBar extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerLowest,
+        color: backgroundColor,
         // border: Border(bottom: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.5))),
       ),
       child: Row(

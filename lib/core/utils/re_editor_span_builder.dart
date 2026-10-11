@@ -33,6 +33,9 @@ class ReEditorSpanBuilder {
   /// 缓存：上一次参与解析的配置指纹
   String _configSignature = '';
 
+  /// 行首空白（含首行缩进的全角空格）匹配式
+  static final RegExp _leadingWhitespace = RegExp(r'^[\u3000\s]+');
+
   /// 缓存：按优先级合并后的全文高亮范围（按起始偏移升序）
   List<HighlightRange> _ranges = const [];
 
@@ -71,13 +74,25 @@ class ReEditorSpanBuilder {
     );
 
     final String lineText = codeLine.text;
+    // 行首缩进等空白不属于正文内容，下划线不绘制在其下方
+    final int indentLength = settings.isUnderline ? _leadingWhitespaceLength(lineText) : 0;
     final List<HighlightRange> lineRanges = _rangesForLine(index, lineText.length);
-    if (lineRanges.isEmpty) return TextSpan(text: lineText, style: baseStyle);
+    if (lineRanges.isEmpty && indentLength == 0) {
+      return TextSpan(text: lineText, style: baseStyle);
+    }
+    final TextStyle plainStyle =
+        indentLength > 0 ? baseStyle.copyWith(decoration: TextDecoration.none) : baseStyle;
+
+    final List<InlineSpan> spans = [];
+    int cursor = 0;
+    // 先按无下划线样式补出行首缩进空白
+    if (indentLength > 0) {
+      spans.add(TextSpan(text: lineText.substring(0, indentLength), style: plainStyle));
+      cursor = indentLength;
+    }
 
     // 将全文范围换算为行内范围后按边界切片着色
     final int lineStart = _lineStarts[index];
-    final List<InlineSpan> spans = [];
-    int cursor = 0;
     for (final HighlightRange range in lineRanges) {
       final int start = (range.start - lineStart).clamp(cursor, lineText.length);
       final int end = (range.end - lineStart).clamp(start, lineText.length);
@@ -101,6 +116,9 @@ class ReEditorSpanBuilder {
     }
     return TextSpan(children: spans, style: baseStyle);
   }
+
+  /// 计算行首连续空白字符的数量（首行缩进等）
+  int _leadingWhitespaceLength(String text) => _leadingWhitespace.matchAsPrefix(text)?.end ?? 0;
 
   /// 解析全文高亮范围并按优先级合并
   List<HighlightRange> _resolveRanges(BuildContext context, String text) {

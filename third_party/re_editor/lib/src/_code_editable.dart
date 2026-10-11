@@ -22,6 +22,7 @@ class _CodeEditable extends StatefulWidget {
   final Color cursorColor;
   final Color? cursorLineColor;
   final Color? chunkIndicatorColor;
+  final CodeLineSeparatorStyle? lineSeparator;
   final double cursorWidth;
   final bool showCursorWhenReadOnly;
   final EdgeInsetsGeometry padding;
@@ -65,6 +66,7 @@ class _CodeEditable extends StatefulWidget {
     required this.cursorColor,
     this.cursorLineColor,
     this.chunkIndicatorColor,
+    this.lineSeparator,
     required this.cursorWidth,
     required this.showCursorWhenReadOnly,
     required this.padding,
@@ -323,6 +325,7 @@ class _CodeEditableState extends State<_CodeEditable> with AutomaticKeepAliveCli
       cursorColor: widget.cursorColor,
       cursorLineColor: widget.cursorLineColor,
       chunkIndicatorColor: widget.chunkIndicatorColor,
+      lineSeparator: widget.lineSeparator,
       cursorWidth: widget.cursorWidth,
       padding: widget.padding,
       readOnly: widget.readOnly,

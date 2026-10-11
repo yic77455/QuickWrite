@@ -24,6 +24,7 @@ class _CodeField extends SingleChildRenderObjectWidget {
   final Color floatingCursorColor;
   final Color? cursorLineColor;
   final Color? chunkIndicatorColor;
+  final CodeLineSeparatorStyle? lineSeparator;
   final double cursorWidth;
   final double floatingCursorWidth;
   final EdgeInsetsGeometry padding;
@@ -55,6 +56,7 @@ class _CodeField extends SingleChildRenderObjectWidget {
     floatingCursorColor,
     this.cursorLineColor,
     this.chunkIndicatorColor,
+    this.lineSeparator,
     required this.cursorWidth,
     floatingCursorWidth,
     required this.padding,
@@ -90,6 +92,7 @@ class _CodeField extends SingleChildRenderObjectWidget {
     floatingCursorColor: floatingCursorColor,
     cursorLineColor: cursorLineColor,
     chunkIndicatorColor: chunkIndicatorColor,
+    lineSeparator: lineSeparator,
     cursorWidth: cursorWidth,
     floatingCursorWidth: floatingCursorWidth,
     padding: padding,
@@ -123,6 +126,7 @@ class _CodeField extends SingleChildRenderObjectWidget {
       ..floatingCursorColor = floatingCursorColor
       ..cursorLineColor = cursorLineColor
       ..chunkIndicatorColor = chunkIndicatorColor
+      ..lineSeparator = lineSeparator
       ..cursorWidth = cursorWidth
       ..floatingCursorWidth = floatingCursorWidth
       ..padding = padding
@@ -213,6 +217,7 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
     required Color floatingCursorColor,
     Color? cursorLineColor,
     Color? chunkIndicatorColor,
+    CodeLineSeparatorStyle? lineSeparator,
     required double cursorWidth,
     required double floatingCursorWidth,
     required EdgeInsetsGeometry padding,
@@ -256,6 +261,7 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
     adoptChild(_backgroundRender);
     _foregroundRender = _CodeFieldExtraRender(
       painters: [
+        _CodeLineSeparatorPainter(lineSeparator),
         _CodeFieldCursorPainter(
           position: _selection.extent,
           color: cursorColor,
@@ -477,6 +483,11 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
     markNeedsPaint();
   }
 
+  /// 行间线样式：非空时绘制行间线，为空时关闭
+  set lineSeparator(CodeLineSeparatorStyle? value) {
+    _foregroundRender.find<_CodeLineSeparatorPainter>().style = value;
+  }
+
   set cursorWidth(double value) {
     _foregroundRender.find<_CodeFieldCursorPainter>().width = value;
   }
@@ -600,6 +611,9 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
   }
 
   List<CodeLineRenderParagraph> get displayParagraphs => _displayParagraphs;
+
+  /// 正文逻辑行总数
+  int get codeLineCount => _codes.length;
 
   Offset get paintOffset => Offset(_horizontalViewport?.pixels ?? 0, _verticalViewport.pixels);
 
@@ -1907,6 +1921,97 @@ class _CodeFieldSelectionPainter extends _CodeFieldSelectionsPainter {
 class _CodeFieldHighlightPainter extends _CodeFieldSelectionsPainter {
 
   _CodeFieldHighlightPainter(super.color, super.selections);
+
+}
+
+/// 行间线绘制器
+///
+/// 在正文每一个可见视觉行底部绘制一条水平分隔线，并在正文末行之下按行高
+/// 继续延伸、覆盖编辑器底部留白。可见段落由渲染器按滚动位置裁剪，绘制开销
+/// 只与视口内行数相关，不随正文篇幅增长。
+class _CodeLineSeparatorPainter extends _CodeFieldExtraPainter {
+
+  /// 虚线模式下每段划线的长度（像素）
+  static const double _dashLength = 6.0;
+
+  /// 虚线模式下每段间隙的长度（像素）
+  static const double _dashGap = 4.0;
+
+  /// 行间线粗细（像素）
+  static const double _lineThickness = 1.0;
+
+  final Paint _paint;
+  CodeLineSeparatorStyle? _style;
+
+  _CodeLineSeparatorPainter(this._style) : _paint = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = _lineThickness;
+
+  set style(CodeLineSeparatorStyle? value) {
+    if (_style == value) {
+      return;
+    }
+    _style = value;
+    notifyListeners();
+  }
+
+  @override
+  void paint(Canvas canvas, Size size, _CodeFieldRender render) {
+    final CodeLineSeparatorStyle? style = _style;
+    if (style == null) {
+      return;
+    }
+    final List<CodeLineRenderParagraph> paragraphs = render.displayParagraphs;
+    if (paragraphs.isEmpty) {
+      return;
+    }
+    // 行间线左右边界与正文文本区对齐，不侵入页面左右边距
+    final double left = render.paddingLeft - render.paintOffset.dx;
+    final double right = size.width - render.paddingRight - render.paintOffset.dx;
+    if (right <= left) {
+      return;
+    }
+    _paint.color = style.color.withValues(alpha: style.opacity);
+
+    // 逐行绘制：一行文本自动换行后会占用多个视觉行，每个视觉行底部各画一条线
+    for (final CodeLineRenderParagraph paragraph in paragraphs) {
+      final double top = paragraph.offset.dy - render.paintOffset.dy;
+      final double lineHeight = paragraph.preferredLineHeight;
+      final int lineCount = paragraph.paragraph.lineCount;
+      for (int index = 1; index <= lineCount; index++) {
+        final double y = top + index * lineHeight;
+        if (y < 0 || y > size.height) {
+          continue;
+        }
+        _drawLine(canvas, left, right, y, style.dashed);
+      }
+    }
+
+    // 正文末行之下继续按行高延伸，覆盖编辑器底部留白区域
+    final CodeLineRenderParagraph last = paragraphs.last;
+    if (last.index == render.codeLineCount - 1) {
+      final double lineHeight = last.preferredLineHeight;
+      double y = last.offset.dy - render.paintOffset.dy + last.paragraph.height + lineHeight;
+      while (y <= size.height) {
+        _drawLine(canvas, left, right, y, style.dashed);
+        y += lineHeight;
+      }
+    }
+  }
+
+  /// 绘制一条水平线，按样式选择实线或虚线
+  void _drawLine(Canvas canvas, double left, double right, double y, bool dashed) {
+    if (!dashed) {
+      canvas.drawLine(Offset(left, y), Offset(right, y), _paint);
+      return;
+    }
+    double x = left;
+    while (x < right) {
+      final double end = min(x + _dashLength, right);
+      canvas.drawLine(Offset(x, y), Offset(end, y), _paint);
+      x = end + _dashGap;
+    }
+  }
 
 }
 

@@ -290,6 +290,18 @@ class SettingsService extends ChangeNotifier {
   /// 获取滚动条是否常驻显示
   bool get scrollbarAlwaysVisible => _settings.scrollbarAlwaysVisible;
 
+  /// 获取编辑器背景色模式（'default' 跟随主题 / 'custom' 自定义）
+  String get editorBackgroundMode => _settings.editorBackgroundMode;
+
+  /// 获取编辑器背景色（亮色主题，为 null 时使用主题默认颜色）
+  String? get editorBackgroundColorLight => _settings.editorBackgroundColorLight;
+
+  /// 获取编辑器背景色（暗色主题，为 null 时使用主题默认颜色）
+  String? get editorBackgroundColorDark => _settings.editorBackgroundColorDark;
+
+  /// 获取纸张模式背景淡化开关
+  bool get dimPaperBackground => _settings.dimPaperBackground;
+
   /// 获取大纲编辑器顶边距
   double get outlineTopMargin => _settings.outlineTopMargin;
 
@@ -367,6 +379,30 @@ class SettingsService extends ChangeNotifier {
   /// 更新滚动条是否常驻显示
   Future<bool> updateScrollbarAlwaysVisible(bool value) async {
     final newSettings = _settings.copyWith(scrollbarAlwaysVisible: value);
+    return updateSettings(newSettings);
+  }
+
+  /// 更新编辑器背景色模式（'default' 跟随主题 / 'custom' 自定义）
+  Future<bool> updateEditorBackgroundMode(String value) async {
+    final newSettings = _settings.copyWith(editorBackgroundMode: value);
+    return updateSettings(newSettings);
+  }
+
+  /// 更新编辑器背景色（亮色主题）
+  Future<bool> updateEditorBackgroundColorLight(String? value) async {
+    final newSettings = _settings.copyWith(editorBackgroundColorLight: value);
+    return updateSettings(newSettings);
+  }
+
+  /// 更新编辑器背景色（暗色主题）
+  Future<bool> updateEditorBackgroundColorDark(String? value) async {
+    final newSettings = _settings.copyWith(editorBackgroundColorDark: value);
+    return updateSettings(newSettings);
+  }
+
+  /// 更新纸张模式背景淡化开关
+  Future<bool> updateDimPaperBackground(bool value) async {
+    final newSettings = _settings.copyWith(dimPaperBackground: value);
     return updateSettings(newSettings);
   }
 
@@ -660,6 +696,11 @@ class SettingsService extends ChangeNotifier {
       bottomMargin: AppSettings.defaults.bottomMargin,
       isPageViewEnabled: AppSettings.defaults.isPageViewEnabled,
       scrollbarAlwaysVisible: AppSettings.defaults.scrollbarAlwaysVisible,
+      // 编辑器背景设置
+      editorBackgroundMode: AppSettings.defaults.editorBackgroundMode,
+      editorBackgroundColorLight: AppSettings.defaults.editorBackgroundColorLight,
+      editorBackgroundColorDark: AppSettings.defaults.editorBackgroundColorDark,
+      dimPaperBackground: AppSettings.defaults.dimPaperBackground,
       outlineTopMargin: AppSettings.defaults.outlineTopMargin,
       outlineHorizontalMargin: AppSettings.defaults.outlineHorizontalMargin,
       outlineBottomMargin: AppSettings.defaults.outlineBottomMargin,

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/services/settings_service.dart';
+import 'package:quick_write/core/utils/color_utils.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
+import 'package:quick_write/shared/dialogs/color_picker_dialog.dart';
 import 'package:quick_write/shared/widgets/segmented_control.dart';
 import '../widgets/right_sidebar_widgets.dart';
 
@@ -81,6 +83,11 @@ class _LayoutPanelState extends State<LayoutPanel> {
                   
                   // 视图模式设置区块
                   _buildViewModeSection(context, isPageViewEnabled),
+
+                  const SizedBox(height: 20),
+
+                  // 编辑器背景设置区块
+                  _buildEditorBackgroundSection(context),
 
                   const SizedBox(height: 20),
 
@@ -216,6 +223,85 @@ class _LayoutPanelState extends State<LayoutPanel> {
           },
         ),
       ],
+    );
+  }
+
+  /// 构建编辑器背景设置区块
+  Widget _buildEditorBackgroundSection(BuildContext context) {
+    final settings = SettingsService.instance;
+    final colorScheme = Theme.of(context).colorScheme;
+    // 背景色模式与分段索引的映射
+    const modeList = ['default', 'custom'];
+    final selectedIndex = modeList.indexOf(settings.editorBackgroundMode).clamp(0, modeList.length - 1);
+
+    return SettingsSection(
+      title: '编辑器背景',
+      icon: Icons.format_color_fill_outlined,
+      children: [
+        // 背景色模式分段选择器
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const SizedBox(width: 2),
+                  Icon(Icons.color_lens_outlined, size: 16, color: colorScheme.onSurfaceVariant),
+                  const SizedBox(width: 10),
+                  Text(
+                    '背景色',
+                    style: context.titleSmall?.copyWith(color: colorScheme.onSurface),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              SegmentedControl(
+                labels: const ['跟随主题', '自定义'],
+                selectedIndex: selectedIndex,
+                onChanged: (index) {
+                  settings.updateEditorBackgroundMode(modeList[index]);
+                  setState(() {});
+                },
+              ),
+              const SizedBox(height: 6),
+            ],
+          ),
+        ),
+        // 自定义模式下显示颜色选择项
+        if (settings.editorBackgroundMode == 'custom') ...[
+          const SettingDivider(),
+          SettingItem(
+            icon: Icons.palette_outlined,
+            label: '背景颜色',
+            trailing: ColorIndicator(color: ColorUtils.getEditorBackgroundColorForTheme(context)),
+            onTap: () => _showEditorBackgroundColorPicker(context),
+          ),
+        ],
+        const SettingDivider(),
+        SwitchSettingItem(
+          icon: Icons.dark_mode_outlined,
+          label: '纸张背景淡化',
+          value: settings.dimPaperBackground,
+          onChanged: (value) {
+            settings.updateDimPaperBackground(value);
+            setState(() {});
+          },
+        ),
+      ],
+    );
+  }
+
+  /// 显示编辑器背景颜色选择器对话框
+  void _showEditorBackgroundColorPicker(BuildContext context) {
+    ColorPickerDialog.show(
+      context: context,
+      title: '选择编辑器背景颜色',
+      initialColorHex: ColorUtils.getEditorBackgroundColorHexForTheme(context),
+      onColorSelected: (colorHex) {
+        ColorUtils.updateEditorBackgroundColorForTheme(context, colorHex);
+        setState(() {});
+      },
     );
   }
 

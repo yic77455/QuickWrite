@@ -1,5 +1,42 @@
 part of re_editor;
 
+/// 行间线样式
+///
+/// 描述正文行间分隔线的绘制参数：颜色、线型与不透明度。
+/// 在 [CodeEditorStyle.lineSeparator] 中传入非空值即可开启行间线。
+class CodeLineSeparatorStyle {
+
+  const CodeLineSeparatorStyle({
+    required this.color,
+    this.dashed = true,
+    this.opacity = 0.3,
+  });
+
+  /// 行间线颜色
+  final Color color;
+
+  /// 是否为虚线（false 表示实线）
+  final bool dashed;
+
+  /// 行间线不透明度（0.0 ~ 1.0）
+  final double opacity;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) {
+      return true;
+    }
+    return other is CodeLineSeparatorStyle &&
+        other.color == color &&
+        other.dashed == dashed &&
+        other.opacity == opacity;
+  }
+
+  @override
+  int get hashCode => Object.hash(color, dashed, opacity);
+
+}
+
 /// An immutable style describing how to format and paint editor content.
 class CodeEditorStyle {
 
@@ -20,6 +57,7 @@ class CodeEditorStyle {
     this.cursorLineColor,
     this.chunkIndicatorColor,
     this.codeTheme,
+    this.lineSeparator,
   }) : assert(fontSize == null || fontSize > 0),
     assert(fontHeight == null || fontHeight >= 1.0),
     assert(cursorWidth == null || cursorWidth > 0);
@@ -153,6 +191,11 @@ class CodeEditorStyle {
 
   /// The code syntax highlighting rules and styles.
   final CodeHighlightTheme? codeTheme;
+
+  /// 行间线样式
+  ///
+  /// 非空时在正文每一个视觉行底部绘制分隔线；为空则不绘制。
+  final CodeLineSeparatorStyle? lineSeparator;
 
 }
 
@@ -541,6 +584,7 @@ class _CodeEditorState extends State<CodeEditor> {
       cursorColor:  widget.style?.cursorColor ?? selectionTheme.cursorColor ?? theme.colorScheme.primary,
       cursorLineColor: widget.style?.cursorLineColor,
       chunkIndicatorColor: widget.style?.chunkIndicatorColor,
+      lineSeparator: widget.style?.lineSeparator,
       cursorWidth: widget.style?.cursorWidth ?? _kDefaultCaretWidth,
       showCursorWhenReadOnly: widget.showCursorWhenReadOnly ?? true,
       leadingDivider: widget.leadingDivider,

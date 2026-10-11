@@ -11,6 +11,7 @@ import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/providers/window_provider.dart';
 import 'package:quick_write/core/utils/clean_scroll.dart';
 import 'package:quick_write/core/utils/clipboard_state_cache.dart';
+import 'package:quick_write/core/utils/color_utils.dart';
 import 'package:quick_write/core/utils/editor_scroll_helper.dart';
 import 'package:quick_write/core/utils/find_replace_target.dart';
 import 'package:quick_write/core/utils/outline_markdown_codec.dart';
@@ -3948,13 +3949,21 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
     final flatList = _flatten();
 
+    // 编辑区底色：默认跟随主题，自定义时使用配置的颜色；纸张模式下纸张外背景由淡化设置决定
+    final bool isPaperMode = SettingsService.instance.outlinePageViewMode == 'paper';
+    final Color editorBackgroundColor = ColorUtils.getEditorBackgroundColorForTheme(context);
+    final Color editorAreaColor = isPaperMode
+        ? ColorUtils.getPaperOutsideBackgroundColor(context)
+        : editorBackgroundColor;
+
     return Container(
-      color: colorScheme.surfaceContainerLowest,
+      color: editorAreaColor,
       child: Column(
         children: [
           // 顶部工具栏
           OutlineEditorTopBar(
             colorScheme: colorScheme,
+            backgroundColor: editorAreaColor,
             readOnly: widget.readOnly,
             onExpandAll: _expandAll,
             onCollapseAll: _collapseAll,
@@ -4021,6 +4030,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
                                 final Widget content = _buildPageContent(
                                   pageViewMode: pageViewMode,
                                   colorScheme: colorScheme,
+                                  paperColor: editorBackgroundColor,
                                   tiles: tiles,
                                   horizontalPadding: horizontalPadding,
                                   topPadding: topPadding,
@@ -4103,6 +4113,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   Widget _buildPageContent({
     required String pageViewMode,
     required ColorScheme colorScheme,
+    required Color paperColor,
     required List<Widget> tiles,
     required double horizontalPadding,
     required double topPadding,
@@ -4128,7 +4139,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
           ),
           child: DecoratedBox(
             decoration: BoxDecoration(
-              color: colorScheme.surfaceContainerLowest,
+              color: paperColor,
               boxShadow: [
                 BoxShadow(
                   color: colorScheme.shadow.withValues(alpha: 0.15),
@@ -4179,6 +4190,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       controller: _controllers[flatNode.node.id]!,
       focusNode: _focusNodes[flatNode.node.id]!,
       colorScheme: widget.colorScheme,
+      editorBackgroundColor: ColorUtils.getEditorBackgroundColorForTheme(context),
       indentWidth: _indentWidth,
       dotTextGapReduction: _dotTextGapReduction,
       nodeSpacing: SettingsService.instance.outlineNodeSpacing,

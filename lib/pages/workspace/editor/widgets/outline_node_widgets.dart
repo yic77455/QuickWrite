@@ -25,6 +25,9 @@ class OutlineNodeTile extends StatefulWidget {
   /// 颜色方案
   final ColorScheme colorScheme;
 
+  /// 编辑区背景色（用于箭头遮罩的底色，与编辑器背景保持一致）
+  final Color editorBackgroundColor;
+
   /// 每级缩进的像素宽度
   final double indentWidth;
 
@@ -56,6 +59,7 @@ class OutlineNodeTile extends StatefulWidget {
     required this.controller,
     required this.focusNode,
     required this.colorScheme,
+    required this.editorBackgroundColor,
     required this.indentWidth,
     required this.dotTextGapReduction,
     required this.nodeSpacing,
@@ -292,11 +296,11 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
   /// 通过 Opacity 控制可见性，保留 AnimatedRotation 动画连续性。
   /// 箭头的 Material 背景用于遮住下方的连接线，避免视觉穿透
   Widget _buildArrowButton(OutlineNode node, ColorScheme colorScheme, double indentWidth) {
-    // 节点行实际背景色：选中时为 primary 半透明叠加 surfaceContainerLowest，否则为 surfaceContainerLowest
+    // 节点行实际背景色：选中时为 primary 半透明叠加编辑区背景色，否则为编辑区背景色
     // 用于遮住箭头位置下方的连接线，避免视觉穿透
     final nodeBackgroundColor = widget.isSelected
-        ? Color.alphaBlend(colorScheme.primary.withValues(alpha: 0.12), colorScheme.surfaceContainerLowest)
-        : colorScheme.surfaceContainerLowest;
+        ? Color.alphaBlend(colorScheme.primary.withValues(alpha: 0.12), widget.editorBackgroundColor)
+        : widget.editorBackgroundColor;
 
     return Positioned(
       left: widget.depth * indentWidth,

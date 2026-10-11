@@ -14,7 +14,6 @@ import 'package:quick_write/core/utils/code_line_selection_utils.dart';
 import 'package:quick_write/core/utils/color_utils.dart';
 import 'package:quick_write/core/utils/editor_scroll_helper.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
-import 'package:quick_write/core/utils/line_separator_painter.dart';
 import 'package:quick_write/core/utils/persistent_selection.dart';
 import 'package:quick_write/core/utils/re_editor_span_builder.dart';
 import 'package:quick_write/pages/workspace/editor/utils/re_editor_indent_policy.dart';
@@ -145,9 +144,6 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 焦点节点
   final FocusNode _focusNode = FocusNode();
 
-  /// 行间线排版缓存
-  final LineSeparatorLayoutCache _lineSeparatorCache = LineSeparatorLayoutCache();
-
   /// 章节标题区域的测量键
   final GlobalKey _titleAreaKey = GlobalKey();
 
@@ -254,7 +250,6 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     _scrollController.dispose();
     _codeScrollController.dispose();
     _focusNode.dispose();
-    _lineSeparatorCache.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -746,7 +741,7 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     );
   }
 
-  /// 编辑器区域内容：纸张 + 标题 + 编辑器 + 行间线
+  /// 编辑器区域内容：纸张 + 标题 + 编辑器
   ///
   /// 纸张宽度按模式约束（纸张模式为 A4 宽并居中，非纸张模式贴合上级容器），
   /// 高度由标题与正文内容撑开，纸张模式下至少为一页 A4 高。
@@ -774,54 +769,65 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     // 编辑器在滚动内容中的纵向偏移：滚动顶边距 + 章节标题高度
     final double editorContentOffset =
         scrollTopPadding + (showTitle ? _resolveTitleAreaHeight(settings) : 0.0);
-    // 正文排版宽度：纸张宽度扣除纸张容器补偿、左右页边距与行首内边距
-    final double contentWidth =
-        paperWidth - paperCompensation * 2 - horizontalPadding * 2 - _contentLeftInset;
+    // 编辑区底色：默认跟随主题，自定义时使用配置的颜色，纸张与编辑区共用同一底色
+    final Color editorBackgroundColor = ColorUtils.getEditorBackgroundColorForTheme(context);
+    // 纸张外的背景色：纸张模式下由淡化设置决定，其余模式与编辑区底色保持一致
+    final Color outsideBackgroundColor = pageViewEnabled
+        ? ColorUtils.getPaperOutsideBackgroundColor(context)
+        : editorBackgroundColor;
 
-    return SingleChildScrollView(
-      controller: _scrollController,
-      padding: EdgeInsets.only(top: scrollTopPadding, bottom: paperGap),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: pageViewEnabled ? GlobalConstants.a4Width : double.infinity,
-            minHeight: pageViewEnabled ? GlobalConstants.a4Height : 0.0,
-          ),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: pageViewEnabled ? colorScheme.surfaceContainerLowest : Colors.transparent,
-              boxShadow: pageViewEnabled
-                  ? [
-                      BoxShadow(
-                        color: colorScheme.shadow.withValues(alpha: 0.15),
-                        blurRadius: 16,
-                        offset: const Offset(0, 4),
-                      ),
-                    ]
-                  : null,
+    return ColoredBox(
+      // 铺满编辑区域的底色，用于显露纸张外的背景
+      color: outsideBackgroundColor,
+      child: SingleChildScrollView(
+        controller: _scrollController,
+        padding: EdgeInsets.only(top: scrollTopPadding, bottom: paperGap),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: pageViewEnabled ? GlobalConstants.a4Width : double.infinity,
+              minHeight: pageViewEnabled ? GlobalConstants.a4Height : 0.0,
             ),
-            // 纸张容器的左右补偿：纸张背景仍占满纸张宽度，内容两侧各内缩该补偿
-            child: Padding(
-              padding: EdgeInsets.symmetric(horizontal: paperCompensation),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // 标题与正文文本区左右对齐，故同样内缩左右页边距
-                  if (showTitle)
-                    Padding(
-                      padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-                      child: _buildChapterTitle(context),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: pageViewEnabled ? editorBackgroundColor : Colors.transparent,
+                boxShadow: pageViewEnabled
+                    ? [
+                        BoxShadow(
+                          color: colorScheme.shadow.withValues(alpha: 0.15),
+                          blurRadius: 16,
+                          offset: const Offset(0, 4),
+                        ),
+                      ]
+                    : null,
+              ),
+              // 纸张容器的左右补偿：纸张背景仍占满纸张宽度，内容两侧各内缩该补偿
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: paperCompensation),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // 标题与正文文本区左右对齐，故同样内缩左右页边距
+                    if (showTitle)
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+                        child: _buildChapterTitle(context),
+                      ),
+                    _buildEditor(
+                      context,
+                      // 左右页边距让正文与纸张边缘保留距离；左侧额外加上行首内边距，
+                      // 保证行首光标完整可见；顶边距为标题与正文之间的间距，底边距为末行的安全距离
+                      EdgeInsets.fromLTRB(
+                        horizontalPadding + _contentLeftInset,
+                        topMargin,
+                        horizontalPadding,
+                        bottomPadding,
+                      ),
+                      editorContentOffset,
                     ),
-                  _buildEditorWithLineSeparator(
-                    context,
-                    horizontalPadding: horizontalPadding,
-                    contentWidth: contentWidth,
-                    contentTopInset: topMargin,
-                    bottomPadding: bottomPadding,
-                    editorContentOffset: editorContentOffset,
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -888,74 +894,25 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     });
   }
 
-  /// 构建带行间线的编辑器区域
-  ///
-  /// 页边距只是编辑器的内部留白，编辑器盒仍占满纸张宽度，
-  /// 因此点击边距空白处会落在编辑器内并被换算为附近的正文位置；
-  /// 行间线作为覆盖层对齐到正文文本区，与编辑器同处滚动内容之中，
-  /// 按内容坐标系直接绘制，行位置与正文排版一致。
-  Widget _buildEditorWithLineSeparator(
-    BuildContext context, {
-    required double horizontalPadding,
-    required double contentWidth,
-    required double contentTopInset,
-    required double bottomPadding,
-    required double editorContentOffset,
-  }) {
-    final Widget editor = _buildEditor(
-      context,
-      // 左右页边距让正文与纸张边缘保留距离；左侧额外加上行首内边距，
-      // 保证行首光标完整可见；顶边距为标题与正文之间的间距，底边距为末行的安全距离
-      EdgeInsets.fromLTRB(
-        horizontalPadding + _contentLeftInset,
-        contentTopInset,
-        horizontalPadding,
-        bottomPadding,
-      ),
-      editorContentOffset,
-    );
-    return Stack(
-      children: [
-        editor,
-        Positioned.fill(
-          child: IgnorePointer(
-            // 内缩到正文文本区，使行间线与正文左右边界一致
-            child: Padding(
-              padding: EdgeInsets.only(left: horizontalPadding + _contentLeftInset, right: horizontalPadding),
-              child: ListenableBuilder(
-                // 正文变化时重建绘制器，使行间线随文字同步刷新
-                listenable: widget.controller,
-                builder: (context, child) => CustomPaint(
-                  painter: SettingsService.instance.showLineSeparator
-                      ? createLineSeparatorPainter(
-                          text: widget.controller.text,
-                          color: ColorUtils.getFontColorForTheme(context),
-                          contentWidth: contentWidth,
-                          contentTopInset: contentTopInset,
-                          // 行间线延伸覆盖底部边距这一安全距离区域
-                          bottomMargin: bottomPadding,
-                          cache: _lineSeparatorCache,
-                        )
-                      : null,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
   /// 构建编辑器本体
   ///
   /// 选区颜色随焦点切换：失焦时使用派生灰显色，保持上一次选区的可见性。
   /// 页边距作为编辑器的内部留白而非外层容器的间距，
   /// 使编辑器盒覆盖整张纸张，点击边距空白处也能把光标定位到附近的正文行。
+  /// 行间线随正文一并交给编辑器绘制，跟随其懒加载只绘制可见行。
   Widget _buildEditor(BuildContext context, EdgeInsets padding, double contentOffset) {
     final SettingsService settings = SettingsService.instance;
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
     final Color focusedSelectionColor = colorScheme.primary.withValues(alpha: 0.25);
     final Color unfocusedSelectionColor = computePersistentSelectionColor(context, colorScheme.primary);
+    // 行间线样式：仅在开启时传入，关闭时交由编辑器跳过绘制
+    final CodeLineSeparatorStyle? lineSeparator = settings.showLineSeparator
+        ? CodeLineSeparatorStyle(
+            color: ColorUtils.getFontColorForTheme(context),
+            dashed: settings.lineSeparatorStyle == 'dashed',
+            opacity: settings.lineSeparatorOpacity,
+          )
+        : null;
 
     return ReEditorImeReporter(
       controller: widget.controller,
@@ -982,6 +939,7 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
               cursorWidth: _cursorWidth,
               selectionColor: _focusNode.hasFocus ? focusedSelectionColor : unfocusedSelectionColor,
               highlightColor: focusedSelectionColor,
+              lineSeparator: lineSeparator,
             ),
             // 小说正文需要自动换行，且不显示行号与代码折叠标记
             wordWrap: true,

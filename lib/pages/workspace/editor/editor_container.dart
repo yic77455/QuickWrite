@@ -6,6 +6,7 @@ import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/services/backup_service.dart';
 import 'package:quick_write/core/services/cache_services/chapter_cursor_cache_service.dart';
 import 'package:quick_write/core/services/settings_service.dart';
+import 'package:quick_write/core/utils/color_utils.dart';
 import 'package:quick_write/core/utils/code_line_selection_utils.dart';
 import 'package:quick_write/core/utils/re_editor_span_builder.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
@@ -331,8 +332,9 @@ class _EditorContainerState extends State<EditorContainer> {
     final colorScheme = Theme.of(context).colorScheme;
 
     // 用 ColoredBox 包裹整个编辑器区域，确保内容为空时不会露出灰色底层
+    // 底色与编辑器背景设置保持一致，避免加载与空内容状态下出现异色
     return ColoredBox(
-      color: colorScheme.surfaceContainer,
+      color: ColorUtils.getEditorBackgroundColorForTheme(context),
       child: IndexedStack(
         index: provider.currentTabIndex,
         children: provider.openedTabs.asMap().entries.map((entry) {
