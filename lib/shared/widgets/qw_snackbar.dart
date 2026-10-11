@@ -134,8 +134,11 @@ class _SnackBarOverlayState extends State<_SnackBarOverlay>
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
+    // 提示框距离底部的高度按窗口高度的比例自适应，保证不同窗口尺寸下位置观感一致
+    final bottomOffset = MediaQuery.sizeOf(context).height * 0.05;
+
     return Positioned(
-      bottom: 32,
+      bottom: bottomOffset,
       left: 0,
       right: 0,
       child: Center(

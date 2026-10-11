@@ -91,10 +91,8 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/dict/chinese_words.txt
-    - assets/icon/icon1.png
-    - assets/icon/icon2.png
-    - assets/icon/tray.ico
+    - assets/dict/
+    - assets/icon/
 
   fonts:
     - family: MaterialIconsOutlined

@@ -34,6 +34,7 @@ class _CodeField extends SingleChildRenderObjectWidget {
   final LayerLink endHandleLayerLink;
   final ScrollController? externalScrollController;
   final double externalContentOffset;
+  final double externalMinHeight;
 
   _CodeField({
     super.key,
@@ -66,6 +67,7 @@ class _CodeField extends SingleChildRenderObjectWidget {
     required this.endHandleLayerLink,
     required this.externalScrollController,
     required this.externalContentOffset,
+    this.externalMinHeight = 0.0,
   }): assert(codes.isNotEmpty),
       floatingCursorColor = floatingCursorColor ?? cursorColor,
       floatingCursorWidth = floatingCursorWidth ?? cursorWidth;
@@ -102,6 +104,7 @@ class _CodeField extends SingleChildRenderObjectWidget {
     endHandleLayerLink: endHandleLayerLink,
     externalScrollController: externalScrollController,
     externalContentOffset: externalContentOffset,
+    externalMinHeight: externalMinHeight,
   );
 
   @override
@@ -135,7 +138,8 @@ class _CodeField extends SingleChildRenderObjectWidget {
       ..startHandleLayerLink = startHandleLayerLink
       ..endHandleLayerLink = endHandleLayerLink
       ..externalScrollController = externalScrollController
-      ..externalContentOffset = externalContentOffset;
+      ..externalContentOffset = externalContentOffset
+      ..externalMinHeight = externalMinHeight;
   }
 
 }
@@ -171,6 +175,7 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
   Color? _chunkIndicatorColor;
   ScrollController? _externalScrollController;
   double _externalContentOffset;
+  double _externalMinHeight;
 
   double? _horizontalViewportSize;
   double? _verticalViewportSize;
@@ -227,6 +232,7 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
     required LayerLink endHandleLayerLink,
     ScrollController? externalScrollController,
     double externalContentOffset = 0.0,
+    double externalMinHeight = 0.0,
   }) : _verticalViewport = verticalViewport,
     _horizontalViewport = horizontalViewport,
     _verticalScrollbarWidth = verticalScrollbarWidth,
@@ -245,6 +251,7 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
     _chunkIndicatorColor = chunkIndicatorColor,
     _externalScrollController = externalScrollController,
     _externalContentOffset = externalContentOffset,
+    _externalMinHeight = externalMinHeight,
     _paint = Paint(),
     _displayParagraphs = [],
     _chunkIndicators = [],
@@ -348,6 +355,17 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
       return;
     }
     _externalContentOffset = value;
+    markNeedsLayout();
+  }
+
+  /// 自适应高度模式下的最小高度
+  ///
+  /// 内容高度不足该值时按此值撑开编辑器，使空白区域仍属于编辑区。
+  set externalMinHeight(double value) {
+    if (_externalMinHeight == value) {
+      return;
+    }
+    _externalMinHeight = value;
     markNeedsLayout();
   }
 
@@ -1166,11 +1184,15 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
 
   /// 自适应高度布局
   ///
-  /// 高度取内容总高（内边距 + 各行排版高度），并按外部滚动偏移只构建可见段落。
+  /// 高度取内容总高（内边距 + 各行排版高度）与最小高度中的较大者，
+  /// 并按外部滚动偏移只构建可见段落。
   void _performIntrinsicLayout() {
     final double effectiveWidth = constraints.maxWidth - _padding.horizontal;
     final List<double> tops = _ensureLineTops(effectiveWidth);
-    size = Size(constraints.maxWidth, paddingTop + tops[_codes.length] + paddingBottom);
+    // 高度取内容总高与最小高度中的较大者：内容不足时按最小高度撑开，
+    // 使编辑器底部的空白区域仍属于编辑区（可命中并显示文本光标）
+    final double contentHeight = paddingTop + tops[_codes.length] + paddingBottom;
+    size = Size(constraints.maxWidth, max(contentHeight, _externalMinHeight));
     final BoxConstraints childConstraints = BoxConstraints.tight(size);
     _foregroundRender.layout(childConstraints);
     _backgroundRender.layout(childConstraints);

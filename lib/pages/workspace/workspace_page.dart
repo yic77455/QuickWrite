@@ -412,8 +412,9 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
       // centerTitle: true,
       title: Text('《$bookTitle》 - 正在创作', style: Theme.of(context).textTheme.bodyMedium),
       // 新窗口打开时显示静态 LOGO；否则显示可返回书架的 LOGO 按钮
+      // 统一用 Center 包裹：Center 提供松约束，避免 LOGO 被标题栏的紧约束拉伸放大
       leading: isOpenInNewWindow
-          ? const Padding(padding: EdgeInsets.only(left: 8.0), child: _AppLogo())
+          ? const Center(child: _AppLogo())
           : Center(child: _LogoBackButton(onPressed: _handleBackToShelf)),
       // 收窄左侧区域宽度与标题间距，让标题贴近 LOGO
       leadingWidth: 40,

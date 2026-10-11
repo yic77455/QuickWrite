@@ -262,6 +262,7 @@ class CodeEditor extends StatefulWidget {
     this.commentFormatter,
     this.viewportScroller,
     this.viewportContentOffset = 0.0,
+    this.viewportMinHeight = 0.0,
   }) : assert(indicatorBuilder != null || (indicatorBuilder == null && leadingDivider == null));
 
   /// Similar to [TextField], editor uses [CodeLineEditingController] as the content controller.
@@ -281,6 +282,12 @@ class CodeEditor extends StatefulWidget {
   /// 自适应高度模式下用于把外部滚动偏移换算为编辑器内的可见范围，
   /// 即编辑器顶部之前的内容高度（如纸张内边距、章节标题占位）。
   final double viewportContentOffset;
+
+  /// 自适应高度模式下编辑器的最小高度
+  ///
+  /// 自适应高度模式下编辑器高度由内容决定，当内容不足该高度时按此高度撑开，
+  /// 使编辑器的空白区域仍属于编辑区（可命中并显示文本光标）；为 0 时高度完全由内容决定。
+  final double viewportMinHeight;
 
   /// Controls the search widget and actions.
   final CodeFindController? findController;
@@ -614,6 +621,7 @@ class _CodeEditorState extends State<CodeEditor> {
       selectionOverlayController: _selectionOverlayController,
       viewportScroller: widget.viewportScroller,
       viewportContentOffset: widget.viewportContentOffset,
+      viewportMinHeight: widget.viewportMinHeight,
     );
     final Widget detector = _CodeSelectionGestureDetector(
       controller: _editingController,

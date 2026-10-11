@@ -11,6 +11,30 @@ library;
 /// 同时索引本地文件时会跳过该后缀，避免临时文件被当作正式文件同步
 const String kSyncTempSuffix = '.qwsync-tmp';
 
+/// 自定义词典在同步命名空间中的键前缀
+const String kDictKeyPrefix = 'dict/';
+
+/// 自定义词典文件的扩展名
+const String kDictFileExtension = '.json';
+
+/// 生成自定义词典的逻辑键
+///
+/// 词典以自身标识作为文件名，集中存放于该前缀目录下
+String dictSyncKeyOf(String dictionaryId) =>
+    '$kDictKeyPrefix$dictionaryId$kDictFileExtension';
+
+/// 自定义主题在同步命名空间中的键前缀
+const String kThemeKeyPrefix = 'theme/';
+
+/// 自定义主题文件的扩展名
+const String kThemeFileExtension = '.json';
+
+/// 生成自定义主题的逻辑键
+///
+/// 主题以自身标识作为文件名，集中存放于该前缀目录下
+String themeSyncKeyOf(String themeId) =>
+    '$kThemeKeyPrefix$themeId$kThemeFileExtension';
+
 /// 触发用户确认的同步影响面比例阈值
 ///
 /// 一次同步需要处理的文件占本地文件总数的比例超过该值时，

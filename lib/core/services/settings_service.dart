@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/models/app_settings.dart';
 import 'package:quick_write/core/theme/custom_theme.dart';
+import 'package:quick_write/core/theme/theme_store.dart';
 import 'app_paths.dart';
 
 /// 设置服务类
@@ -44,6 +45,13 @@ class SettingsService extends ChangeNotifier {
   
   /// 获取当前设置（只读）
   AppSettings get settings => _settings;
+
+  /// 自定义主题存取服务
+  final ThemeStore _themeStore = ThemeStore();
+
+  /// 已保存的自定义主题列表
+  /// 主题定义独立存放于主题目录下的 JSON 文件，不再随 settings.json 保存
+  List<CustomTheme> _customThemes = const [];
   
   /// 配置文件完整路径
   String? _configFilePath;
@@ -93,6 +101,9 @@ class SettingsService extends ChangeNotifier {
       
       // 加载配置文件
       await _loadSettings();
+      
+      // 加载自定义主题（独立存放于主题目录）
+      _customThemes = await _themeStore.loadAll();
       
       _isInitialized = true;
       debugPrint('SettingsService 初始化完成');
@@ -212,23 +223,27 @@ class SettingsService extends ChangeNotifier {
   String? get activeCustomThemeId => _settings.activeCustomThemeId;
 
   /// 获取已保存的自定义主题列表
-  List<CustomTheme> get customThemes => _settings.customThemes;
+  List<CustomTheme> get customThemes => _customThemes;
 
   /// 获取当前激活的自定义主题对象
   /// 未激活或激活的主题已被删除时返回 null
   CustomTheme? get activeCustomTheme {
     final id = _settings.activeCustomThemeId;
     if (id == null) return null;
-    for (final theme in _settings.customThemes) {
+    for (final theme in _customThemes) {
       if (theme.id == id) return theme;
     }
     return null;
   }
 
   /// 更新已保存的自定义主题列表
+  ///
+  /// 主题定义写入主题目录下的独立文件，列表中已移除的主题其文件会被删除
   Future<bool> updateCustomThemes(List<CustomTheme> themes) async {
-    final newSettings = _settings.copyWith(customThemes: themes);
-    return updateSettings(newSettings);
+    final success = await _themeStore.syncAll(themes);
+    _customThemes = themes;
+    notifyListeners();
+    return success;
   }
 
   /// 更新当前激活的自定义主题 ID

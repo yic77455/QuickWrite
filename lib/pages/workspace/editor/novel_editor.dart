@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -751,7 +752,8 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 编辑器区域内容：纸张 + 标题 + 编辑器
   ///
   /// 纸张宽度按模式约束（纸张模式为 A4 宽并居中，非纸张模式贴合上级容器），
-  /// 高度由标题与正文内容撑开，纸张模式下至少为一页 A4 高。
+  /// 高度由标题与正文内容撑开；编辑器另设最小高度以撑满视口，
+  /// 纸张模式下纸张容器再保证至少为一页 A4 高。
   /// 纸张背景占满纸张宽度；纸张模式下纸张容器再补偿左右各 16 像素，
   /// 布局设置-页边距（左右上下）则全部作为编辑器的内部留白，
   /// 使其落在编辑器盒内，点击边距空白处可把光标定位到附近的正文行。
@@ -773,9 +775,15 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     // 纸张上下与容器之间留出的空白，用于显露纸张轮廓
     final double paperGap = pageViewEnabled ? GlobalConstants.paperTopMargin : 0.0;
     final double scrollTopPadding = widget.extraTopPadding + paperGap;
+    // 标题区域占用的高度（纸张内标题及其顶部间距）
+    final double titleAreaHeight = showTitle ? _resolveTitleAreaHeight(settings) : 0.0;
+    // 视口扣除滚动容器上下留白后可供纸张使用的高度
+    final double viewportFillHeight = constraints.maxHeight - scrollTopPadding - paperGap;
+    // 编辑器最小高度：撑满视口中除去标题后的剩余区域，
+    // 使空文档或短章节下方的空白区仍属于编辑区（可命中并显示文本光标），不会露出母容器背景
+    final double editorMinHeight = math.max(0.0, viewportFillHeight - titleAreaHeight);
     // 编辑器在滚动内容中的纵向偏移：滚动顶边距 + 章节标题高度
-    final double editorContentOffset =
-        scrollTopPadding + (showTitle ? _resolveTitleAreaHeight(settings) : 0.0);
+    final double editorContentOffset = scrollTopPadding + titleAreaHeight;
     // 编辑区底色：默认跟随主题，自定义时使用配置的颜色，纸张与编辑区共用同一底色
     final Color editorBackgroundColor = ColorUtils.getEditorBackgroundColorForTheme(context);
     // 纸张外的背景色：纸张模式下由淡化设置决定，其余模式与编辑区底色保持一致
@@ -832,6 +840,7 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
                         bottomPadding,
                       ),
                       editorContentOffset,
+                      editorMinHeight,
                     ),
                   ],
                 ),
@@ -907,7 +916,13 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 页边距作为编辑器的内部留白而非外层容器的间距，
   /// 使编辑器盒覆盖整张纸张，点击边距空白处也能把光标定位到附近的正文行。
   /// 行间线随正文一并交给编辑器绘制，跟随其懒加载只绘制可见行。
-  Widget _buildEditor(BuildContext context, EdgeInsets padding, double contentOffset) {
+  /// [minHeight] 为编辑器最小高度，内容不足时按下限撑开，避免短章节露出纸张外的背景。
+  Widget _buildEditor(
+    BuildContext context,
+    EdgeInsets padding,
+    double contentOffset,
+    double minHeight,
+  ) {
     final SettingsService settings = SettingsService.instance;
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
     final Color focusedSelectionColor = colorScheme.primary.withValues(alpha: 0.25);
@@ -935,6 +950,8 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
             // 编辑器不承载滚动：高度随内容自适应，滚动由外层容器统一负责
             viewportScroller: _scrollController,
             viewportContentOffset: contentOffset,
+            // 内容不足视口时按下限撑开编辑器，使下方空白区仍属于编辑区
+            viewportMinHeight: minHeight,
             style: CodeEditorStyle(
               fontSize: settings.fontSize,
               fontFamily: settings.fontFamily,

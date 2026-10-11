@@ -41,12 +41,20 @@ class MetadataSyncResult {
   /// 远端目录的删除不可逆，交由调用方在风险确认通过后执行
   final Set<String> deletedBookUuids;
 
+  /// 存在删除记录、等待清理远端文件的自定义词典标识
+  final Set<String> deletedDictIds;
+
+  /// 存在删除记录、等待清理远端文件的自定义主题标识
+  final Set<String> deletedThemeIds;
+
   const MetadataSyncResult({
     this.upsertCount = 0,
     this.removalCount = 0,
     this.uploadedFileCount = 0,
     this.remoteFileCount = 0,
     this.deletedBookUuids = const {},
+    this.deletedDictIds = const {},
+    this.deletedThemeIds = const {},
   });
 
   /// 是否存在需要上报的变化
@@ -114,6 +122,8 @@ class MetadataSync {
       uploadedFileCount: uploadedFileCount,
       remoteFileCount: remote.fileCount,
       deletedBookUuids: deletedBookUuidsOf(outcome.merged),
+      deletedDictIds: deletedDictIdsOf(outcome.merged),
+      deletedThemeIds: deletedThemeIdsOf(outcome.merged),
     );
   }
 
@@ -443,6 +453,22 @@ class MetadataSync {
   static Set<String> deletedBookUuidsOf(MetadataSnapshot merged) {
     return {
       for (final tombstone in merged[kBooksCollection].tombstones)
+        if (tombstone.uuid.isNotEmpty) tombstone.uuid,
+    };
+  }
+
+  /// 收集存在删除记录、需要清理远端文件的自定义词典标识
+  static Set<String> deletedDictIdsOf(MetadataSnapshot merged) {
+    return {
+      for (final tombstone in merged[kDictsCollection].tombstones)
+        if (tombstone.uuid.isNotEmpty) tombstone.uuid,
+    };
+  }
+
+  /// 收集存在删除记录、需要清理远端文件的自定义主题标识
+  static Set<String> deletedThemeIdsOf(MetadataSnapshot merged) {
+    return {
+      for (final tombstone in merged[kThemesCollection].tombstones)
         if (tombstone.uuid.isNotEmpty) tombstone.uuid,
     };
   }

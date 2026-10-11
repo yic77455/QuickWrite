@@ -16,6 +16,7 @@ import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/services/single_instance_service.dart';
 import 'package:quick_write/core/services/tray_service.dart';
 import 'package:quick_write/core/services/cache_services/misc_cache_service.dart';
+import 'package:quick_write/core/services/cache_services/name_gen_cache_service.dart';
 import 'package:quick_write/core/services/window_service.dart';
 import 'package:quick_write/core/services/cache_services/window_cache_service.dart';
 import 'package:quick_write/core/router/router.dart';
@@ -59,6 +60,9 @@ void main(List<String> args) async {
   // 初始化杂项缓存服务（用于存储分组展开状态、书架分组选择等零散数据）
   await MiscCacheService.instance.initialize();
   
+  // 初始化随机取名缓存服务（用于存储取名词典、收藏与生成历史）
+  await NameGenCacheService.instance.initialize();
+
   // 初始化工作台会话缓存服务（用于恢复上次退出时打开的标签页）
   await WorkspaceSessionCacheService.instance.initialize();
   

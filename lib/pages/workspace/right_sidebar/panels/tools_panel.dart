@@ -5,6 +5,7 @@ import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/services/cache_services/misc_cache_service.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
+import 'package:quick_write/pages/workspace/name_gen/name_generator_dialog.dart';
 import 'package:quick_write/pages/workspace/right_sidebar/widgets/book_info_section.dart';
 import 'package:quick_write/pages/workspace/right_sidebar/widgets/tools_display_settings.dart';
 
@@ -107,6 +108,11 @@ class _ToolsPanelState extends State<ToolsPanel> {
     );
   }
 
+  /// 打开随机取名弹窗
+  void _openNameGenerator() {
+    showNameGeneratorDialog(context: context);
+  }
+
   /// 构建随机取名按钮卡片
   Widget _buildRandomNameButton(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -115,7 +121,7 @@ class _ToolsPanelState extends State<ToolsPanel> {
       color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
       borderRadius: BorderRadius.circular(8),
       child: InkWell(
-        onTap: () {},
+        onTap: _openNameGenerator,
         borderRadius: BorderRadius.circular(8),
         hoverColor: colorScheme.primary.withValues(alpha: 0.08),
         child: Padding(

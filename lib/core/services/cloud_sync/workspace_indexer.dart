@@ -98,6 +98,12 @@ class WorkspaceIndex {
   /// 章节归档包逻辑键 → 章节成员列表
   final Map<String, List<ChapterArchiveMember>> _archiveMembers;
 
+  /// 目录映射：逻辑键前缀 → 本地目录
+  ///
+  /// 用于让「远端已存在、本地尚未落盘」的文件也能定位落点。
+  /// 这类文件没有本地记录可依据推导路径，只能按键前缀映射到对应目录
+  final Map<String, String> _dirMappings;
+
   /// 章节正文哈希缓存，供调用方写回状态存储
   final List<ChapterHashCacheEntry> chapterHashCache;
 
@@ -105,9 +111,11 @@ class WorkspaceIndex {
     required this.files,
     required Map<String, String> plainPaths,
     required Map<String, List<ChapterArchiveMember>> archiveMembers,
+    required Map<String, String> dirMappings,
     required this.chapterHashCache,
   }) : _plainPaths = plainPaths,
-       _archiveMembers = archiveMembers;
+       _archiveMembers = archiveMembers,
+       _dirMappings = dirMappings;
 
   /// 解析逻辑键对应的本地绝对路径
   ///
@@ -115,6 +123,14 @@ class WorkspaceIndex {
   String? localPathOf(String key) {
     final plainPath = _plainPaths[key];
     if (plainPath != null) return plainPath;
+
+    // 目录映射：远端新增的文件按键前缀还原为本地目录中的路径
+    for (final entry in _dirMappings.entries) {
+      if (key.startsWith(entry.key)) {
+        final relativeSegments = key.substring(entry.key.length).split('/');
+        return _joinPath([entry.value, ...relativeSegments]);
+      }
+    }
 
     // 归档包以章节正文所在目录作为其本地位置
     final members = _archiveMembers[key];
@@ -148,6 +164,8 @@ class WorkspaceIndex {
 /// 索引范围包括：
 /// - 书籍的章节正文（按每 [kChapterChunkSize] 章合并为一个归档包）
 /// - 书籍的设定项正文、封面、自定义高亮配置
+/// - 用户自定义的取名词典
+/// - 用户自定义主题
 /// - 应用配置文件
 ///
 /// 为提高性能，文件内容哈希优先复用基线中记录的结果，
@@ -168,6 +186,7 @@ class WorkspaceIndexer {
     final files = <LocalSyncFile>[];
     final plainPaths = <String, String>{};
     final archiveMembers = <String, List<ChapterArchiveMember>>{};
+    final dirMappings = <String, String>{};
     final hashCache = <ChapterHashCacheEntry>[];
 
     await _collectBooks(
@@ -177,6 +196,22 @@ class WorkspaceIndexer {
       plainPaths: plainPaths,
       archiveMembers: archiveMembers,
       hashCache: hashCache,
+    );
+
+    // 用户自定义的取名词典
+    await _collectDicts(
+      baselines: baselines,
+      files: files,
+      plainPaths: plainPaths,
+      dirMappings: dirMappings,
+    );
+
+    // 用户自定义主题
+    await _collectThemes(
+      baselines: baselines,
+      files: files,
+      plainPaths: plainPaths,
+      dirMappings: dirMappings,
     );
 
     // 应用配置文件
@@ -193,6 +228,7 @@ class WorkspaceIndexer {
       files: files,
       plainPaths: plainPaths,
       archiveMembers: archiveMembers,
+      dirMappings: dirMappings,
       chapterHashCache: hashCache,
     );
   }
@@ -382,6 +418,74 @@ class WorkspaceIndexer {
           modifiedAt: latestModified!,
           contentHash: manifestHashOf(manifest),
         ),
+      );
+    }
+  }
+
+  // ================= 自定义词典文件 =================
+
+  /// 收集用户自定义的取名词典文件
+  ///
+  /// 每个词典是一个独立的 JSON 文件，整体存放于应用目录下的 dict 文件夹。
+  /// 同时登记「键前缀 → 词典目录」的映射，使远端存在而本地缺失的词典
+  /// 也能定位到本机落点，从而在其它设备上补齐
+  Future<void> _collectDicts({
+    required Map<String, SyncBaselineRecord> baselines,
+    required List<LocalSyncFile> files,
+    required Map<String, String> plainPaths,
+    required Map<String, String> dirMappings,
+  }) async {
+    final dictDirPath = await AppPaths.instance.getDictPath();
+    dirMappings[kDictKeyPrefix] = dictDirPath;
+
+    final dir = Directory(dictDirPath);
+    if (!await dir.exists()) return;
+
+    await for (final entity in dir.list()) {
+      if (entity is! File || !entity.path.endsWith(kDictFileExtension)) {
+        continue;
+      }
+      final fileName = entity.path.split(Platform.pathSeparator).last;
+      await _collectPlainFile(
+        baselines: baselines,
+        files: files,
+        plainPaths: plainPaths,
+        key: '$kDictKeyPrefix$fileName',
+        localPath: entity.path,
+      );
+    }
+  }
+
+  // ================= 自定义主题文件 =================
+
+  /// 收集用户自定义主题文件
+  ///
+  /// 每个主题是一个独立的 JSON 文件，整体存放于应用目录下的 theme 文件夹。
+  /// 同时登记「键前缀 → 主题目录」的映射，使远端存在而本地缺失的主题
+  /// 也能定位到本机落点，从而在其它设备上补齐
+  Future<void> _collectThemes({
+    required Map<String, SyncBaselineRecord> baselines,
+    required List<LocalSyncFile> files,
+    required Map<String, String> plainPaths,
+    required Map<String, String> dirMappings,
+  }) async {
+    final themeDirPath = await AppPaths.instance.getThemePath();
+    dirMappings[kThemeKeyPrefix] = themeDirPath;
+
+    final dir = Directory(themeDirPath);
+    if (!await dir.exists()) return;
+
+    await for (final entity in dir.list()) {
+      if (entity is! File || !entity.path.endsWith(kThemeFileExtension)) {
+        continue;
+      }
+      final fileName = entity.path.split(Platform.pathSeparator).last;
+      await _collectPlainFile(
+        baselines: baselines,
+        files: files,
+        plainPaths: plainPaths,
+        key: '$kThemeKeyPrefix$fileName',
+        localPath: entity.path,
       );
     }
   }

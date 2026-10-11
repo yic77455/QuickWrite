@@ -38,6 +38,12 @@ class AppPaths {
   /// 书籍存储目录名
   static const String _worksDirName = 'works';
 
+  /// 词典存储目录名
+  static const String _dictDirName = 'dict';
+
+  /// 主题存储目录名
+  static const String _themeDirName = 'theme';
+
   /// 缓存目录名
   static const String _cacheDirName = 'cache';
 
@@ -162,6 +168,42 @@ class AppPaths {
     }
     
     return booksPath;
+  }
+
+  /// 获取词典存储目录路径
+  /// 
+  /// 用于存储用户自定义的取名词典文件（每个词典一个 JSON 文件）
+  /// 如果目录不存在会自动创建
+  Future<String> getDictPath() async {
+    _assertInitialized();
+    
+    final dictPath = '$_appRootPath${Platform.pathSeparator}$_dictDirName';
+    final dictDir = Directory(dictPath);
+    
+    if (!await dictDir.exists()) {
+      await dictDir.create(recursive: true);
+      debugPrint('已创建词典目录: $dictPath');
+    }
+    
+    return dictPath;
+  }
+
+  /// 获取主题存储目录路径
+  /// 
+  /// 用于存储用户自定义主题文件（每个主题一个 JSON 文件）
+  /// 如果目录不存在会自动创建
+  Future<String> getThemePath() async {
+    _assertInitialized();
+    
+    final themePath = '$_appRootPath${Platform.pathSeparator}$_themeDirName';
+    final themeDir = Directory(themePath);
+    
+    if (!await themeDir.exists()) {
+      await themeDir.create(recursive: true);
+      debugPrint('已创建主题目录: $themePath');
+    }
+    
+    return themePath;
   }
 
   /// 获取缓存目录路径

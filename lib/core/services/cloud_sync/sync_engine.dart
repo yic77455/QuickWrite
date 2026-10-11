@@ -83,6 +83,12 @@ class SyncEngine {
     // 第一阶段：先合并元数据，本地实体结构就绪后再比对正文
     final metadataResult = await _metadataSync.run(isar: isar);
 
+    // 被删除的词典需连带清理其远端文件，否则会在下一次同步被重新拉回
+    await _applyDictDeletions(metadataResult.deletedDictIds);
+
+    // 被删除的主题需连带清理其远端文件，否则会在下一次同步被重新拉回
+    await _applyThemeDeletions(metadataResult.deletedThemeIds);
+
     // 第二阶段：正文同步
     final index = await _buildIndex();
     final plan = await _buildPlanFrom(index);
@@ -155,6 +161,40 @@ class SyncEngine {
   }
 
   // ================= 内部实现 =================
+
+  /// 清理已删除词典的远端文件
+  ///
+  /// 词典在文件层是普通文件，而文件层不对「本地缺失」做删除决策，
+  /// 因此删除后的远端副本需在元数据确认删除记录后统一清理
+  Future<void> _applyDictDeletions(Set<String> deletedDictIds) async {
+    if (deletedDictIds.isEmpty) return;
+
+    for (final id in deletedDictIds) {
+      try {
+        await _webdav.deleteFile(_webdav.remotePathOf(dictSyncKeyOf(id)));
+      } catch (e) {
+        // 单个词典清理失败不影响其余同步，遗留的远端文件会在下次同步重试
+        debugPrint('清理远端词典失败: $id，$e');
+      }
+    }
+  }
+
+  /// 清理已删除主题的远端文件
+  ///
+  /// 主题在文件层是普通文件，而文件层不对「本地缺失」做删除决策，
+  /// 因此删除后的远端副本需在元数据确认删除记录后统一清理
+  Future<void> _applyThemeDeletions(Set<String> deletedThemeIds) async {
+    if (deletedThemeIds.isEmpty) return;
+
+    for (final id in deletedThemeIds) {
+      try {
+        await _webdav.deleteFile(_webdav.remotePathOf(themeSyncKeyOf(id)));
+      } catch (e) {
+        // 单个主题清理失败不影响其余同步，遗留的远端文件会在下次同步重试
+        debugPrint('清理远端主题失败: $id，$e');
+      }
+    }
+  }
 
   /// 扫描本地工作区
   ///

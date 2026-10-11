@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:isar/isar.dart';
 import 'package:quick_write/core/models/book.dart';
 import 'package:quick_write/core/models/chapter.dart';
@@ -6,6 +7,8 @@ import 'package:quick_write/core/models/setting_group.dart';
 import 'package:quick_write/core/models/setting_item.dart';
 import 'package:quick_write/core/models/volume.dart';
 import 'package:quick_write/core/models/writing_stat.dart';
+import 'package:quick_write/core/services/app_paths.dart';
+import 'package:quick_write/core/services/cloud_sync/sync_models.dart';
 
 /// 书籍信息集合名
 const String kBooksCollection = 'books';
@@ -28,12 +31,26 @@ const String kGroupsCollection = 'groups';
 /// 码字统计集合名
 const String kStatsCollection = 'stats';
 
+/// 自定义词典集合名
+///
+/// 该集合不承载词典内容，只记录每个词典的存在状态，使词典的删除能够
+/// 借助元数据的删除记录在各设备间传播；词典内容由文件同步按普通文件传输
+const String kDictsCollection = 'dicts';
+
+/// 自定义主题集合名
+///
+/// 该集合不承载主题内容，只记录每个主题的存在状态，使主题的删除能够
+/// 借助元数据的删除记录在各设备间传播；主题内容由文件同步按普通文件传输
+const String kThemesCollection = 'themes';
+
 /// 存放于全局元数据文件的集合
 ///
 /// 这些集合不隶属于某本书，改动频率低、数据量小
 const Set<String> kGlobalCollectionNames = {
   kGroupsCollection,
   kStatsCollection,
+  kDictsCollection,
+  kThemesCollection,
 };
 
 /// 参与元数据同步的实体类型注册表
@@ -45,6 +62,8 @@ final List<MetadataEntityType> kMetadataEntityTypes = [
   _settingItemsType,
   _groupsType,
   _statsType,
+  _dictsType,
+  _themesType,
 ];
 
 /// 参与同步的一种元数据实体类型
@@ -384,6 +403,120 @@ final MetadataEntityType _statsType = MetadataEntityType(
     ];
     if (ids.isEmpty) return;
     await isar.writingStatModels.deleteAll(ids);
+  },
+);
+
+// ================= 自定义词典 =================
+
+/// 从词典文件路径中解析词典标识
+///
+/// 文件名即词典标识，无法识别时返回 null
+String? _dictIdOfFile(String path) {
+  final name = path.split(Platform.pathSeparator).last;
+  if (!name.endsWith(kDictFileExtension)) return null;
+  return name.substring(0, name.length - kDictFileExtension.length);
+}
+
+/// 读取本机词典文件并转换为存在记录
+///
+/// 记录仅包含词典标识与版本时间，词典内容由文件同步负责传输
+Future<List<Map<String, dynamic>>> _loadDictEntities() async {
+  final result = <Map<String, dynamic>>[];
+  final dirPath = await AppPaths.instance.getDictPath();
+  final dir = Directory(dirPath);
+  if (!await dir.exists()) return result;
+
+  await for (final entity in dir.list()) {
+    if (entity is! File) continue;
+    final id = _dictIdOfFile(entity.path);
+    if (id == null || id.isEmpty) continue;
+
+    final file = File(entity.path);
+    final modified = await file.exists()
+        ? (await file.stat()).modified
+        : DateTime.now();
+    result.add({'uuid': id, 'updatedAt': modified.toIso8601String()});
+  }
+  return result;
+}
+
+/// 删除本机指定标识的词典文件
+Future<void> _deleteDictFiles(Set<String> keys) async {
+  final dirPath = await AppPaths.instance.getDictPath();
+  for (final id in keys) {
+    final file = File('$dirPath${Platform.pathSeparator}$id$kDictFileExtension');
+    if (await file.exists()) await file.delete();
+  }
+}
+
+final MetadataEntityType _dictsType = MetadataEntityType(
+  name: kDictsCollection,
+  perBook: false,
+  keyOf: _uuidKeyOf,
+  loadAll: (isar) => _loadDictEntities(),
+  // 词典内容由文件同步负责，元数据层只同步存在状态，无需写入
+  putAll: (isar, entities) async {},
+  deleteByKeys: (isar, keys) async {
+    if (keys.isEmpty) return;
+    await _deleteDictFiles(keys);
+  },
+);
+
+// ================= 自定义主题 =================
+
+/// 从主题文件路径中解析主题标识
+///
+/// 文件名即主题标识，无法识别时返回 null
+String? _themeIdOfFile(String path) {
+  final name = path.split(Platform.pathSeparator).last;
+  if (!name.endsWith(kThemeFileExtension)) return null;
+  return name.substring(0, name.length - kThemeFileExtension.length);
+}
+
+/// 读取本机主题文件并转换为存在记录
+///
+/// 记录仅包含主题标识与版本时间，主题内容由文件同步负责传输
+Future<List<Map<String, dynamic>>> _loadThemeEntities() async {
+  final result = <Map<String, dynamic>>[];
+  final dirPath = await AppPaths.instance.getThemePath();
+  final dir = Directory(dirPath);
+  if (!await dir.exists()) return result;
+
+  await for (final entity in dir.list()) {
+    if (entity is! File) continue;
+    final id = _themeIdOfFile(entity.path);
+    if (id == null || id.isEmpty) continue;
+
+    final file = File(entity.path);
+    final modified = await file.exists()
+        ? (await file.stat()).modified
+        : DateTime.now();
+    result.add({'uuid': id, 'updatedAt': modified.toIso8601String()});
+  }
+  return result;
+}
+
+/// 删除本机指定标识的主题文件
+Future<void> _deleteThemeFiles(Set<String> keys) async {
+  final dirPath = await AppPaths.instance.getThemePath();
+  for (final id in keys) {
+    final file = File(
+      '$dirPath${Platform.pathSeparator}$id$kThemeFileExtension',
+    );
+    if (await file.exists()) await file.delete();
+  }
+}
+
+final MetadataEntityType _themesType = MetadataEntityType(
+  name: kThemesCollection,
+  perBook: false,
+  keyOf: _uuidKeyOf,
+  loadAll: (isar) => _loadThemeEntities(),
+  // 主题内容由文件同步负责，元数据层只同步存在状态，无需写入
+  putAll: (isar, entities) async {},
+  deleteByKeys: (isar, keys) async {
+    if (keys.isEmpty) return;
+    await _deleteThemeFiles(keys);
   },
 );
 

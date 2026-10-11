@@ -19,7 +19,10 @@ class DropdownItem {
 class CustomDropdown extends StatefulWidget {
   /// 下拉框触发器的宽度
   final double width;
-  
+
+  /// 下拉框触发器的高度
+  final double height;
+
   /// 当前选中的值
   final String value;
   
@@ -32,6 +35,7 @@ class CustomDropdown extends StatefulWidget {
   const CustomDropdown({
     super.key, 
     required this.width,
+    this.height = 32,
     required this.value,
     required this.items,
     required this.onChanged,
@@ -137,7 +141,7 @@ class _CustomDropdownState extends State<CustomDropdown> {
                 },
                 child: AnimatedContainer(
                   width: widget.width,
-                  height: 32,
+                  height: widget.height,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   duration: const Duration(milliseconds: 100),
                   decoration: BoxDecoration(

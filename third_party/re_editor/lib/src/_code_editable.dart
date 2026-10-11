@@ -50,6 +50,7 @@ class _CodeEditable extends StatefulWidget {
   final _SelectionOverlayController selectionOverlayController;
   final ScrollController? viewportScroller;
   final double viewportContentOffset;
+  final double viewportMinHeight;
 
   const _CodeEditable({
     required this.editorKey,
@@ -94,6 +95,7 @@ class _CodeEditable extends StatefulWidget {
     required this.selectionOverlayController,
     required this.viewportScroller,
     required this.viewportContentOffset,
+    required this.viewportMinHeight,
   });
 
   @override
@@ -335,6 +337,7 @@ class _CodeEditableState extends State<_CodeEditable> with AutomaticKeepAliveCli
       endHandleLayerLink: widget.endHandleLayerLink,
       externalScrollController: widget.viewportScroller,
       externalContentOffset: widget.viewportContentOffset,
+      externalMinHeight: widget.viewportMinHeight,
     );
   }
 
