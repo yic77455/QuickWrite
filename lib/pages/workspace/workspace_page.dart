@@ -104,6 +104,18 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
             : cache.mainWindowSize.width;
         workspaceProvider.clampSidebarsToWidth(restoredWidth);
       };
+
+      // 设置最大化完成后的回调
+      // 窗口最大化会使编辑区失去输入焦点，此处将焦点归还给当前标签页的正文编辑器
+      _windowProvider!.onAfterMaximize = () async {
+        workspaceProvider.requestEditorFocus();
+      };
+
+      // 设置从最大化恢复完成后的回调
+      // 恢复过程中编辑区同样会失去输入焦点，此处将焦点归还给当前标签页的正文编辑器
+      _windowProvider!.onAfterUnmaximize = () async {
+        workspaceProvider.requestEditorFocus();
+      };
     });
   }
 
@@ -130,6 +142,8 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
     // 若不清空 onBeforeClose，下次关闭主窗口时会因使用失效的 context 而报错
     _windowProvider?.onBeforeClose = null;
     _windowProvider?.onBeforeUnmaximize = null;
+    _windowProvider?.onAfterMaximize = null;
+    _windowProvider?.onAfterUnmaximize = null;
     super.dispose();
   }
 
@@ -343,6 +357,27 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
     showWordCountDialog(context: context, result: result, chapterTitle: currentTab.title);
   }
 
+  /// 返回书架
+  /// 返回前若存在未保存内容，弹窗让用户选择保存/不保存/取消
+  Future<void> _handleBackToShelf() async {
+    // 在 async gap 之前捕获 provider 引用，避免跨 async gap 使用 BuildContext
+    final provider = context.read<WorkspaceProvider>();
+    // 返回书架前检查未保存内容，让用户选择保存/不保存/取消
+    final shouldReturn = await TabCloseGuard.confirmCloseWindow(
+      context: context,
+      provider: provider,
+      title: '返回书架',
+      descriptionTemplate: '有 {n} 个标签页的修改尚未保存，是否在返回前保存？',
+      saveText: '保存',
+    );
+    if (!shouldReturn) return;
+    // 保存所有打开标签页的光标位置到缓存
+    await provider.saveAllCursorPositions();
+    // 返回书架主界面
+    if (!mounted) return;
+    context.go('/');
+  }
+
   /// 构建标题栏
   PreferredSizeWidget _workspaceTitleBar(BuildContext context) {
     // 判断是否在新窗口中打开（通过 WindowProvider 的窗口类型判断）
@@ -356,33 +391,79 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
     return AppTitleBar(
       // centerTitle: true,
       title: Text('《$bookTitle》 - 正在创作', style: Theme.of(context).textTheme.bodyMedium),
-      // 如果是在新窗口打开的，显示 LOGO；否则显示返回按钮
+      // 新窗口打开时显示静态 LOGO；否则显示可返回书架的 LOGO 按钮
       leading: isOpenInNewWindow
-          ? Padding(padding: const EdgeInsets.only(left: 8.0), child: Icon(Icons.book))
-          : IconButton(
-              icon: const Icon(Icons.arrow_back),
-              // 返回书架前若存在未保存内容，弹窗让用户选择保存/不保存/取消
-              onPressed: () async {
-                // 在 async gap 之前捕获 provider 引用，避免跨 async gap 使用 BuildContext
-                final provider = context.read<WorkspaceProvider>();
-                // 返回书架前检查未保存内容，让用户选择保存/不保存/取消
-                final shouldReturn = await TabCloseGuard.confirmCloseWindow(
-                  context: context,
-                  provider: provider,
-                  title: '返回书架',
-                  descriptionTemplate: '有 {n} 个标签页的修改尚未保存，是否在返回前保存？',
-                  saveText: '保存',
-                );
-                if (!shouldReturn) return;
-                // 保存所有打开标签页的光标位置到缓存
-                await provider.saveAllCursorPositions();
-                // 返回书架主界面
-                if (context.mounted) {
-                  context.go('/');
-                }
-              },
-            ),
+          ? const Padding(padding: EdgeInsets.only(left: 8.0), child: _AppLogo())
+          : Center(child: _LogoBackButton(onPressed: _handleBackToShelf)),
+      // 收窄左侧区域宽度与标题间距，让标题贴近 LOGO
+      leadingWidth: 40,
+      titleSpacing: 4,
       height: 40,
+    );
+  }
+}
+
+/// 应用 LOGO 图标
+///
+/// 根据主题亮度自动切换图片：浅色使用 icon1，深色使用 icon2
+class _AppLogo extends StatelessWidget {
+  const _AppLogo();
+
+  @override
+  Widget build(BuildContext context) {
+    return Image.asset(
+      Theme.of(context).brightness == Brightness.dark
+          ? 'assets/icon/icon2.png'
+          : 'assets/icon/icon1.png',
+      // LOGO 显示尺寸
+      width: 24,
+      height: 24,
+      fit: BoxFit.contain, // 保持比例，避免拉伸变形
+    );
+  }
+}
+
+/// 返回按钮
+///
+/// - 默认显示应用 LOGO
+/// - 悬停时切换为返回箭头，并显示主色高亮背景
+class _LogoBackButton extends StatefulWidget {
+  // 点击返回时执行的回调
+  final VoidCallback onPressed;
+
+  const _LogoBackButton({required this.onPressed});
+
+  @override
+  State<_LogoBackButton> createState() => _LogoBackButtonState();
+}
+
+class _LogoBackButtonState extends State<_LogoBackButton> {
+  // 记录鼠标是否悬停，用于在 LOGO 与返回箭头之间切换
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: Material(
+        color: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          hoverColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+          onTap: widget.onPressed,
+          // 高亮框尺寸，略小于标题栏高度，使上下边缘留出间距
+          child: SizedBox(
+            width: 32,
+            height: 32,
+            child: Center(
+              // 悬停显示返回箭头，默认显示应用 LOGO
+              child: _isHovered ? const Icon(Icons.arrow_back, size: 18) : const _AppLogo(),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

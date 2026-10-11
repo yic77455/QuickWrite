@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:quick_write/core/constants/material_icons.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/color_utils.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
@@ -144,7 +145,7 @@ class _LayoutPanelState extends State<LayoutPanel> {
         ],
         const SettingDivider(),
         SwitchSettingItem(
-          icon: Icons.expand,
+          icon: Icons.unfold_more,
           label: '滚动条常驻',
           value: scrollbarAlwaysVisible,
           onChanged: (value) {
@@ -177,7 +178,7 @@ class _LayoutPanelState extends State<LayoutPanel> {
         ),
         const SettingDivider(),
         SliderSettingItem(
-          icon: Icons.horizontal_rule_outlined,
+          icon: Icons.swap_horiz,
           label: '左右边距',
           value: horizontalMargin,
           min: 0,
@@ -280,8 +281,8 @@ class _LayoutPanelState extends State<LayoutPanel> {
         ],
         const SettingDivider(),
         SwitchSettingItem(
-          icon: Icons.dark_mode_outlined,
-          label: '纸张背景淡化',
+          icon: MaterialIcons.ink_eraser,
+          label: '纸张模式背景淡化',
           value: settings.dimPaperBackground,
           onChanged: (value) {
             settings.updateDimPaperBackground(value);
@@ -339,7 +340,7 @@ class _LayoutPanelState extends State<LayoutPanel> {
         ),
         const SettingDivider(),
         SliderSettingItem(
-          icon: Icons.horizontal_rule_outlined,
+          icon: Icons.swap_horiz,
           label: '左右边距',
           value: outlineHorizontalMargin,
           min: 0,
@@ -367,7 +368,7 @@ class _LayoutPanelState extends State<LayoutPanel> {
         ),
         const SettingDivider(),
         SliderSettingItem(
-          icon: Icons.height_outlined,
+          icon: Icons.format_line_spacing_rounded,
           label: '节点间距',
           value: outlineNodeSpacing,
           min: 0,

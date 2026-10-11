@@ -217,7 +217,7 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
     _isFindReplaceVisible = false;
     _clearFindMatches();
     // 关闭后将焦点归还给编辑器
-    _requestEditorFocus();
+    requestEditorFocus();
     notifyListeners();
   }
 
@@ -541,8 +541,10 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
     target.scrollToSelection();
   }
 
-  /// 请求编辑器获取焦点
-  void _requestEditorFocus() {
+  /// 请求当前标签页的编辑器获取焦点
+  ///
+  /// 无打开标签页或编辑器尚未挂载时不作处理。
+  void requestEditorFocus() {
     final target = _currentFindReplaceTarget;
     if (target == null) return;
     target.requestFocus();

@@ -7,7 +7,7 @@ import 'package:window_manager/window_manager.dart';
 /// 
 /// - 支持标题栏的拖拽移动
 /// - 包含最小化、最大化、关闭按钮
-/// - 可自定义标题、左侧按钮、右侧操作区、高度、居中等
+/// - 可自定义标题、左侧按钮、右侧操作区、高度、居中、左侧区域宽度与标题间距
 class AppTitleBar extends StatefulWidget implements PreferredSizeWidget {
   // 必须实现 PreferredSizeWidget，告诉 Scaffold 这个顶部栏有多高
   // 封装 AppBar 不能简单地继承 StatefulWidget，必须同时实现 PreferredSizeWidget 接口，否则 Scaffold 的 appBar 属性不认识它
@@ -16,6 +16,12 @@ class AppTitleBar extends StatefulWidget implements PreferredSizeWidget {
   final bool? centerTitle;
   final double? height;
   final List<Widget>? actions;
+
+  /// 左侧区域宽度（为 null 时使用 AppBar 默认值）
+  final double? leadingWidth;
+
+  /// 标题与左侧区域之间的间距（为 null 时使用 AppBar 默认值）
+  final double? titleSpacing;
   
   /// 是否显示最小化按钮（默认 true）
   final bool showMinimize;
@@ -30,6 +36,8 @@ class AppTitleBar extends StatefulWidget implements PreferredSizeWidget {
     this.centerTitle,
     this.height,
     this.actions,
+    this.leadingWidth,
+    this.titleSpacing,
     this.showMinimize = true,
     this.showMaximize = true,
   });
@@ -57,6 +65,8 @@ class _AppTitleBarState extends State<AppTitleBar> {
 
       // 2. 接收外部传入的标题和按钮
       leading: widget.leading,
+      leadingWidth: widget.leadingWidth,
+      titleSpacing: widget.titleSpacing,
       title: widget.title != null
           ? IgnorePointer(child: widget.title) // 忽略并穿透手势
           : null,

@@ -134,14 +134,25 @@ class SidebarWidget extends StatelessWidget {
                 child: SizedBox(
                   width: 48,
                   height: 48,
-                  // 根据悬停状态和展开状态显示不同图标
-                  child: Icon(
-                    sidebarProvider.isLogoHovered
-                        ? (sidebarProvider.isExpanded
-                              ? Icons.keyboard_double_arrow_left_rounded
-                              : Icons.keyboard_double_arrow_right_rounded)
-                        : Icons.ac_unit_rounded,
-                    size: 24,
+                  // Center 提供松约束，避免图片被外层紧约束拉伸到 48
+                  child: Center(
+                    // 悬停时显示展开/折叠箭头，默认显示应用图标
+                    child: sidebarProvider.isLogoHovered
+                        ? Icon(
+                            sidebarProvider.isExpanded
+                                ? Icons.keyboard_double_arrow_left_rounded
+                                : Icons.keyboard_double_arrow_right_rounded,
+                            size: 24,
+                          )
+                        : Image.asset(
+                            // 浅色模式使用 icon1，深色模式使用 icon2
+                            Theme.of(context).brightness == Brightness.dark
+                                ? 'assets/icon/icon2.png'
+                                : 'assets/icon/icon1.png',
+                            width: 36,
+                            height: 36,
+                            fit: BoxFit.contain, // 保持比例，避免拉伸变形
+                          ),
                   ),
                 ),
               ),

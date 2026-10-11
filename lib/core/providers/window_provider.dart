@@ -49,6 +49,12 @@ class WindowProvider extends ChangeNotifier with WindowListener {
   /// 从最大化恢复时的回调，用于在窗口恢复前调整布局
   Future<void> Function()? onBeforeUnmaximize;
 
+  /// 最大化完成后的回调，用于在窗口最大化后执行焦点恢复等后续处理
+  Future<void> Function()? onAfterMaximize;
+
+  /// 从最大化恢复完成后的回调，用于在窗口恢复后执行焦点恢复等后续处理
+  Future<void> Function()? onAfterUnmaximize;
+
   // 获取窗口最大化状态
   bool get isMaximized => _isMaximized;
 
@@ -104,6 +110,15 @@ class WindowProvider extends ChangeNotifier with WindowListener {
     _isMaximized = true;
     notifyListeners(); // 通知监听者状态已改变
     _saveMaximizedState(true); // 保存最大化状态
+    // 最大化完成后执行回调
+    // 空闲阶段同步执行，使处理立即生效；build/layout 阶段则延迟到帧结束，避免在 build 中调用 notifyListeners 报错
+    if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.idle) {
+      onAfterMaximize?.call();
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        onAfterMaximize?.call();
+      });
+    }
   }
 
   // 窗口恢复时的回调
@@ -114,13 +129,15 @@ class WindowProvider extends ChangeNotifier with WindowListener {
     notifyListeners(); // 通知监听者状态已改变
     // 恢复时保存完整状态（位置、大小、最大化状态）
     _debounceSave();
-    // 调整边栏宽度以适配恢复后的窗口尺寸
+    // 调整边栏宽度以适配恢复后的窗口尺寸，并在恢复完成后执行回调（如焦点恢复）
     // 空闲阶段同步执行，使首帧即生效；build/layout 阶段则延迟到帧结束，避免在 build 中调用 notifyListeners 报错
     if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.idle) {
       onBeforeUnmaximize?.call();
+      onAfterUnmaximize?.call();
     } else {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         onBeforeUnmaximize?.call();
+        onAfterUnmaximize?.call();
       });
     }
   }

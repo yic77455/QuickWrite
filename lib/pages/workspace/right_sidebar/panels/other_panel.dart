@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:quick_write/core/constants/material_icons.dart';
 import 'package:quick_write/core/services/backup_service.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/shared/widgets/qw_dropdown.dart';
@@ -97,7 +98,7 @@ class _OtherPanelState extends State<OtherPanel> {
       icon: Icons.save_outlined,
       children: [
         SwitchSettingItem(
-          icon: Icons.auto_mode_outlined,
+          icon: MaterialIcons.save_clock,
           label: '自动保存',
           value: autoSaveEnabled,
           onChanged: (value) {

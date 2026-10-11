@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:quick_write/core/constants/material_icons.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/color_utils.dart';
@@ -104,7 +105,7 @@ class _TypesetPanelState extends State<TypesetPanel> {
       icon: Icons.text_fields_outlined,
       children: [
         SliderSettingItem(
-          icon: Icons.space_bar_rounded,
+          icon: MaterialIcons.format_letter_spacing_2,
           label: '字间距',
           value: letterSpacing,
           min: -2,
@@ -152,7 +153,7 @@ class _TypesetPanelState extends State<TypesetPanel> {
         
         const SettingDivider(),
         SwitchSettingItem(
-          icon: Icons.vertical_align_center_outlined,
+          icon: MaterialIcons.format_text_wrap,
           label: '自动空行',
           value: autoLineBreak,
           onChanged: (value) {

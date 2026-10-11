@@ -728,15 +728,22 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 纸张边界、页边距与标题都是滚动内容的组成部分，随正文一起滚动。
   Widget _buildEditorArea(BuildContext context) {
     final SettingsService settings = SettingsService.instance;
-    return Scrollbar(
-      controller: _scrollController,
-      thumbVisibility: settings.scrollbarAlwaysVisible ? true : null,
-      thickness: 8.0,
-      radius: const Radius.circular(4),
-      child: ScrollConfiguration(
-        // 屏蔽滚动视图自带滚动条与边界光效，滚动条统一由外层绘制
-        behavior: CleanEditorScrollBehavior(),
-        child: LayoutBuilder(builder: _buildEditorAreaContent),
+    return NotificationListener<ScrollMetricsNotification>(
+      // 视口尺寸变化时（如窗口最大化/恢复、拖动调整窗口大小），按新的视口高度重算可见行区间并重新排版
+      onNotification: (notification) {
+        widget.controller.forceRepaint();
+        return false;
+      },
+      child: Scrollbar(
+        controller: _scrollController,
+        thumbVisibility: settings.scrollbarAlwaysVisible ? true : null,
+        thickness: 8.0,
+        radius: const Radius.circular(4),
+        child: ScrollConfiguration(
+          // 屏蔽滚动视图自带滚动条与边界光效，滚动条统一由外层绘制
+          behavior: CleanEditorScrollBehavior(),
+          child: LayoutBuilder(builder: _buildEditorAreaContent),
+        ),
       ),
     );
   }
