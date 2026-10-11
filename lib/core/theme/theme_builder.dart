@@ -17,9 +17,17 @@ class ThemeBuilder {
   ];
 
   /// 根据调色板构建主题数据
-  static ThemeData build(ThemePalette p) {
+  ///
+  /// [p] 调色板，作为主题颜色的唯一来源
+  /// [fontFamily] 应用界面字体名称，null 表示跟随系统默认字体
+  static ThemeData build(ThemePalette p, {String? fontFamily}) {
+    // 将界面字体注入到显式声明的文本样式上，
+    // 使各组件自身的文字（如对话框标题、菜单项）同样跟随界面字体
+    TextStyle font(TextStyle style) => style.apply(fontFamily: fontFamily);
+
     return ThemeData(
       useMaterial3: true,
+      fontFamily: fontFamily,
       fontFamilyFallback: fontFallback,
 
       // ================= 核心颜色方案 =================
@@ -93,11 +101,11 @@ class ThemeBuilder {
         surfaceTintColor: Colors.transparent,
         centerTitle: false, // 标题左对齐
         iconTheme: IconThemeData(color: p.text),
-        titleTextStyle: TextStyle(
+        titleTextStyle: font(TextStyle(
           color: p.text,
           fontSize: 13, // 标题字号
           fontWeight: FontWeight.normal,
-        ),
+        )),
       ),
 
       // ================= 卡片相关 =================
@@ -151,9 +159,9 @@ class ThemeBuilder {
           borderRadius: BorderRadius.circular(8),
           borderSide: BorderSide(color: p.error, width: 1),
         ),
-        hintStyle: TextStyle(color: p.textMuted, fontSize: 13),
-        labelStyle: TextStyle(color: p.textVariant, fontSize: 13),
-        floatingLabelStyle: TextStyle(color: p.primary, fontSize: 13),
+        hintStyle: font(TextStyle(color: p.textMuted, fontSize: 13)),
+        labelStyle: font(TextStyle(color: p.textVariant, fontSize: 13)),
+        floatingLabelStyle: font(TextStyle(color: p.primary, fontSize: 13)),
       ),
 
       // ================= 文本选择主题 =================
@@ -319,12 +327,12 @@ class ThemeBuilder {
           borderRadius: const BorderRadius.all(Radius.circular(24)),
           side: BorderSide(color: p.outline, width: 1),
         ),
-        titleTextStyle: TextStyle(
+        titleTextStyle: font(TextStyle(
           color: p.text,
           fontSize: 14,
           fontWeight: FontWeight.w500,
-        ),
-        contentTextStyle: TextStyle(color: p.text, fontSize: 13),
+        )),
+        contentTextStyle: font(TextStyle(color: p.text, fontSize: 13)),
       ),
 
       // === 底部弹窗 ===
@@ -339,10 +347,10 @@ class ThemeBuilder {
       // === SnackBar 提示 ===
       snackBarTheme: SnackBarThemeData(
         backgroundColor: p.snackBarBackground,
-        contentTextStyle: TextStyle(
+        contentTextStyle: font(TextStyle(
           color: p.snackBarText,
           fontSize: 13,
-        ),
+        )),
         actionTextColor: p.primary,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         behavior: SnackBarBehavior.floating,
@@ -365,7 +373,7 @@ class ThemeBuilder {
             ),
           ],
         ),
-        textStyle: TextStyle(color: p.text, fontSize: 12),
+        textStyle: font(TextStyle(color: p.text, fontSize: 12)),
         waitDuration: const Duration(milliseconds: 500),
       ),
 
@@ -377,7 +385,7 @@ class ThemeBuilder {
           borderRadius: BorderRadius.circular(4),
           side: BorderSide(color: p.outline, width: 1),
         ),
-        textStyle: TextStyle(color: p.text, fontSize: 13),
+        textStyle: font(TextStyle(color: p.text, fontSize: 13)),
       ),
 
       // === 下拉菜单 ===
@@ -399,8 +407,8 @@ class ThemeBuilder {
         backgroundColor: p.chipBackground,
         selectedColor: p.selection,
         disabledColor: p.chipDisabled,
-        labelStyle: TextStyle(color: p.text, fontSize: 12),
-        secondaryLabelStyle: TextStyle(color: p.textVariant),
+        labelStyle: font(TextStyle(color: p.text, fontSize: 12)),
+        secondaryLabelStyle: font(TextStyle(color: p.textVariant)),
         side: BorderSide(color: p.outline, width: 1),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(2)),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -484,7 +492,7 @@ class ThemeBuilder {
           fontWeight: FontWeight.w500,
           color: p.textVariant,
         ),
-      ),
+      ).apply(fontFamily: fontFamily, fontFamilyFallback: fontFallback),
     );
   }
 

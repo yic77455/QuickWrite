@@ -5,6 +5,7 @@ import 'package:quick_write/core/providers/cloud_sync_provider.dart';
 import 'package:quick_write/core/providers/recycle_bin_provider.dart';
 import 'package:quick_write/core/providers/home_sidebar_provider.dart';
 import 'package:quick_write/core/providers/theme_provider.dart';
+import 'package:quick_write/pages/home/about/about_page.dart';
 import 'package:quick_write/pages/home/bookshelf/bookshelf.dart';
 import 'package:quick_write/pages/home/cloud_sync/cloud_sync_page.dart';
 import 'package:quick_write/pages/home/recycle_bin/recycle_bin_page.dart';
@@ -71,6 +72,9 @@ class HomePage extends StatelessWidget {
 
         // Index 4: 全局设置
         const SettingsPage(),
+
+        // Index 5: 关于
+        const AboutPage(),
       ],
     );
   }

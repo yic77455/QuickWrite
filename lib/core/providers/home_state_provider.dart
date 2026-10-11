@@ -6,7 +6,8 @@ enum HomePageEnum {
   stats(1, '码字统计'),
   recycle(2, '回收站'),
   cloudSync(3, '云同步'),
-  settings(4, '设置');
+  settings(4, '设置'),
+  about(5, '关于');
 
   final int pageIndex;  // 页面索引
   final String title;  // 页面标题

@@ -313,6 +313,18 @@ class SettingsService extends ChangeNotifier {
     return updateSettings(newSettings);
   }
 
+  // ================= 应用界面字体设置相关 =================
+
+  /// 获取应用界面字体名称（null 表示跟随系统默认字体）
+  String? get appFontFamily => _settings.appFontFamily;
+
+  /// 更新应用界面字体名称
+  /// [value] 传入 null 表示跟随系统默认字体
+  Future<bool> updateAppFontFamily(String? value) async {
+    final newSettings = _settings.copyWith(appFontFamily: value);
+    return updateSettings(newSettings);
+  }
+
   // ================= 布局设置相关（右侧边栏 - 布局设置面板）=================
   
   /// 获取是否显示章节标题

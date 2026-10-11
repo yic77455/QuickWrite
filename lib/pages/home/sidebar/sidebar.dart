@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:quick_write/core/constants/material_icons.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:quick_write/core/constants/constants.dart';
@@ -65,8 +66,16 @@ class SidebarWidget extends StatelessWidget {
                   sidebarProvider,
                   homeStateProvider,
                   2,
-                  Icons.delete_outline_rounded,
+                  MaterialIcons.delete,
                   '回收站',
+                ),
+                _buildNavItem(
+                  context,
+                  sidebarProvider,
+                  homeStateProvider,
+                  5,
+                  Icons.info_outline_rounded,
+                  '关于',
                 ),
               ],
             ),

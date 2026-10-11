@@ -120,6 +120,13 @@ class _WorkspaceAppState extends State<WorkspaceApp> {
         _themeProvider!.updateThemeConfigFromMain(configJson);
       }
     };
+
+    // 设置界面字体变化回调
+    MultiWindowService.instance.onAppFontChanged = (fontFamily) {
+      if (_themeProvider != null) {
+        _themeProvider!.updateAppFontFromMain(fontFamily);
+      }
+    };
   }
 
   @override
@@ -127,6 +134,7 @@ class _WorkspaceAppState extends State<WorkspaceApp> {
     // 清理回调
     MultiWindowService.instance.onThemeChanged = null;
     MultiWindowService.instance.onThemeConfigChanged = null;
+    MultiWindowService.instance.onAppFontChanged = null;
     super.dispose();
   }
 

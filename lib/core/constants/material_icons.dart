@@ -15,4 +15,5 @@ class MaterialIcons {
   static const IconData ink_eraser = IconData(0xe6d0, fontFamily: 'MaterialIconsRounded');
   static const IconData format_text_wrap = IconData(0xf828, fontFamily: 'MaterialIconsRounded');
   static const IconData save_clock = IconData(0xf398, fontFamily: 'MaterialIconsRounded');
+  static const IconData delete = IconData(0xe872, fontFamily: 'MaterialIconsRoundedSemiBold');
 }

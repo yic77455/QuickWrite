@@ -41,6 +41,9 @@ class MultiWindowService {
   /// 自定义主题配置变化方法名称
   static const String _methodThemeConfigChanged = 'theme_config_changed';
 
+  /// 应用界面字体变化方法名称
+  static const String _methodAppFontChanged = 'app_font_changed';
+
   /// 书籍更新方法名称（工作台保存章节后通知主窗口刷新书架）
   static const String _methodBookUpdated = 'book_updated';
 
@@ -74,6 +77,9 @@ class MultiWindowService {
 
   /// 自定义主题配置变化回调（子窗口设置此回调来响应主窗口的自定义主题变化）
   void Function(String configJson)? onThemeConfigChanged;
+
+  /// 应用界面字体变化回调（子窗口设置此回调来响应主窗口的界面字体变化）
+  void Function(String fontFamily)? onAppFontChanged;
 
   /// 书籍更新回调（主窗口设置此回调来响应工作台的书籍更新通知）
   /// 当工作台保存章节后，会调用此回通知书架刷新
@@ -136,6 +142,12 @@ class MultiWindowService {
         if (configJson != null && onThemeConfigChanged != null) {
           debugPrint('收到自定义主题配置变化事件');
           onThemeConfigChanged!(configJson);
+        }
+      } else if (call.method == _methodAppFontChanged) {
+        final fontFamily = call.arguments as String?;
+        if (fontFamily != null && onAppFontChanged != null) {
+          debugPrint('收到界面字体变化事件');
+          onAppFontChanged!(fontFamily);
         }
       } else if (call.method == _methodFocusWindow) {
         // 收到主窗口的聚焦请求，使用 window_manager 让自己获得焦点
@@ -329,6 +341,20 @@ class MultiWindowService {
       }
     }
     debugPrint('已广播自定义主题配置到 ${_workspaceWindowControllers.length} 个子窗口');
+  }
+
+  /// 广播应用界面字体变化到所有子窗口（主窗口调用）
+  ///
+  /// [fontFamily] 界面字体名称，空字符串表示跟随系统默认字体
+  Future<void> broadcastAppFontChange(String fontFamily) async {
+    for (final controller in _workspaceWindowControllers.values) {
+      try {
+        await controller.invokeMethod(_methodAppFontChanged, fontFamily);
+      } catch (e) {
+        debugPrint('广播界面字体变化失败: $e');
+      }
+    }
+    debugPrint('已广播界面字体变化到 ${_workspaceWindowControllers.length} 个子窗口');
   }
 
   /// 检查指定书籍的窗口是否已打开

@@ -11,5 +11,7 @@ class DarkTheme {
   static const List<String> fontFallback = ThemeBuilder.fontFallback;
 
   /// 获取暗色主题数据
-  static ThemeData get theme => ThemeBuilder.build(ThemePalette.dark);
+  /// [fontFamily] 应用界面字体名称，null 表示跟随系统默认字体
+  static ThemeData theme({String? fontFamily}) =>
+      ThemeBuilder.build(ThemePalette.dark, fontFamily: fontFamily);
 }

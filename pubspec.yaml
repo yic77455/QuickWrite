@@ -60,6 +60,7 @@ dependencies:
   re_editor: ^0.10.0  # 超长文本编辑器，自研排版与输入，用于替代 TextField 解决长文本卡顿
   flutter_launcher_icons: ^0.14.4  # 用于生成应用图标
   tray_manager: ^0.5.0  # 用于实现系统托盘图标
+  package_info_plus: ^9.0.1  # 读取应用包信息（版本号、构建号），供关于页与更新检查使用
 
 dev_dependencies:
   flutter_test:
@@ -101,6 +102,9 @@ flutter:
     - family: MaterialIconsRounded
       fonts:
         - asset: assets/icons/MaterialSymbolsRounded-Regular.ttf
+    - family: MaterialIconsRoundedSemiBold
+      fonts:
+        - asset: assets/icons/MaterialSymbolsRounded-SemiBold.ttf
 
   # To add assets to your application, add an assets section, like this:
   #assets:

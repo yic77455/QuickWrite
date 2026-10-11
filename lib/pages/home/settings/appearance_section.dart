@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/providers/theme_provider.dart';
+import 'package:quick_write/core/services/font_service.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/pages/home/settings/custom_theme_list.dart';
@@ -22,6 +23,7 @@ class AppearanceSection extends StatelessWidget {
       title: '外观',
       children: [
         _buildThemeTile(context, themeProvider),
+        _buildAppFontTile(themeProvider),
         _buildDimCoverTile(context, settingsService),
       ],
     );
@@ -74,6 +76,45 @@ class AppearanceSection extends StatelessWidget {
         );
       },
     );
+  }
+
+  /// 构建应用界面字体选择项
+  ///
+  /// 仅改变应用界面的文字字体，与编辑器正文字体相互独立
+  Widget _buildAppFontTile(ThemeProvider themeProvider) {
+    // 字体列表顶部插入“默认”选项（空字符串），代表跟随系统默认字体
+    final fontItems = <DropdownItem>[
+      const DropdownItem(displayText: '默认', value: ''),
+      ..._buildFontItems(),
+    ];
+
+    return SettingTile(
+      icon: Icons.text_fields,
+      title: '界面字体',
+      subtitle: '仅影响应用界面文字，编辑器字体可在工作台右侧设置面板调整',
+      trailing: CustomDropdown(
+        width: 150,
+        value: themeProvider.appFontFamily ?? '',
+        items: fontItems,
+        onChanged: (value) => themeProvider.setAppFontFamily(value.isEmpty ? null : value),
+      ),
+    );
+  }
+
+  /// 构建可选字体列表
+  ///
+  /// 取自系统字体服务，字体服务尚未加载完成时回退到常见中文字体
+  List<DropdownItem> _buildFontItems() {
+    final fonts = FontService().systemFonts;
+    if (fonts.isEmpty) {
+      return const [
+        DropdownItem(displayText: '微软雅黑', value: '微软雅黑'),
+        DropdownItem(displayText: '宋体', value: '宋体'),
+      ];
+    }
+    return fonts
+        .map((font) => DropdownItem(displayText: font.displayName, value: font.fontFamily))
+        .toList();
   }
 
   /// 显示主题选择对话框

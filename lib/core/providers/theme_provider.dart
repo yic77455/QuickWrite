@@ -21,9 +21,15 @@ class ThemeProvider extends ChangeNotifier {
 
   /// 当前激活的自定义主题 ID（null 表示使用内置主题）
   String? _activeCustomThemeId;
+
+  /// 当前应用界面字体名称（null 表示跟随系统默认字体）
+  String? _appFontFamily;
   
   /// 获取当前主题模式
   ThemeMode get themeMode => _themeMode;
+
+  /// 获取当前应用界面字体名称（null 表示跟随系统默认字体）
+  String? get appFontFamily => _appFontFamily;
 
   /// 获取已保存的自定义主题列表
   List<CustomTheme> get customThemes => _customThemes;
@@ -46,16 +52,16 @@ class ThemeProvider extends ChangeNotifier {
   /// 激活了自定义主题时返回基于自定义关键色构建的主题，否则返回内置亮色主题
   ThemeData get lightTheme {
     final custom = activeCustomTheme;
-    if (custom == null) return AppTheme.lightTheme;
-    return AppTheme.buildCustom(custom, Brightness.light);
+    if (custom == null) return AppTheme.lightTheme(fontFamily: _appFontFamily);
+    return AppTheme.buildCustom(custom, Brightness.light, fontFamily: _appFontFamily);
   }
 
   /// 获取暗色主题数据
   /// 激活了自定义主题时返回基于自定义关键色构建的主题，否则返回内置暗色主题
   ThemeData get darkTheme {
     final custom = activeCustomTheme;
-    if (custom == null) return AppTheme.darkTheme;
-    return AppTheme.buildCustom(custom, Brightness.dark);
+    if (custom == null) return AppTheme.darkTheme(fontFamily: _appFontFamily);
+    return AppTheme.buildCustom(custom, Brightness.dark, fontFamily: _appFontFamily);
   }
 
   // ================= 构造函数 =================
@@ -76,6 +82,7 @@ class ThemeProvider extends ChangeNotifier {
       _themeMode = settingsService.themeMode;
       _customThemes = settingsService.customThemes;
       _activeCustomThemeId = settingsService.activeCustomThemeId;
+      _appFontFamily = settingsService.appFontFamily;
       debugPrint('从设置服务加载主题: $_themeMode');
     }
     
@@ -99,6 +106,10 @@ class ThemeProvider extends ChangeNotifier {
     }
     if (!listEquals(settingsService.customThemes, _customThemes)) {
       _customThemes = settingsService.customThemes;
+      changed = true;
+    }
+    if (settingsService.appFontFamily != _appFontFamily) {
+      _appFontFamily = settingsService.appFontFamily;
       changed = true;
     }
 
@@ -141,6 +152,25 @@ class ThemeProvider extends ChangeNotifier {
     MultiWindowService.instance.broadcastThemeChange(mode.name);
     
     debugPrint('主题模式已设置为: $mode');
+    notifyListeners();
+  }
+
+  /// 设置应用界面字体
+  ///
+  /// [fontFamily] 新的界面字体名称，传入 null 表示跟随系统默认字体
+  /// 会自动保存到配置文件并广播到所有子窗口
+  Future<void> setAppFontFamily(String? fontFamily) async {
+    if (_appFontFamily == fontFamily) return;
+
+    _appFontFamily = fontFamily;
+
+    // 保存到设置服务（会自动持久化到配置文件）
+    await SettingsService.instance.updateAppFontFamily(fontFamily);
+
+    // 广播界面字体变化到所有子窗口
+    MultiWindowService.instance.broadcastAppFontChange(fontFamily ?? '');
+
+    debugPrint('应用界面字体已设置为: $fontFamily');
     notifyListeners();
   }
 
@@ -209,6 +239,18 @@ class ThemeProvider extends ChangeNotifier {
     if (_themeMode != newMode) {
       _themeMode = newMode;
       debugPrint('从主窗口更新主题: $_themeMode');
+      notifyListeners();
+    }
+  }
+
+  /// 从主窗口接收界面字体变化（子窗口调用）
+  ///
+  /// [rawFontFamily] 界面字体名称，空字符串表示跟随系统默认字体
+  void updateAppFontFromMain(String rawFontFamily) {
+    final fontFamily = rawFontFamily.isEmpty ? null : rawFontFamily;
+    if (_appFontFamily != fontFamily) {
+      _appFontFamily = fontFamily;
+      debugPrint('从主窗口更新界面字体: $fontFamily');
       notifyListeners();
     }
   }

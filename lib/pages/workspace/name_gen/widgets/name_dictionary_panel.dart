@@ -92,7 +92,7 @@ class NameDictionaryPanel extends StatelessWidget {
         const Divider(height: 1),
         // 底部操作：新建词典
         Padding(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.fromLTRB(8, 10, 8, 12),
           child: SizedBox(
             width: double.infinity,
             child: FilledButton.tonalIcon(
@@ -100,7 +100,7 @@ class NameDictionaryPanel extends StatelessWidget {
               icon: const Icon(Icons.add_rounded, size: 16),
               label: const Text('新建词典'),
               style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 8),
+                padding: const EdgeInsets.symmetric(vertical: 16),
               ),
             ),
           ),

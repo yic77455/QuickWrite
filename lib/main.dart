@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:isar/isar.dart';
 import 'package:quick_write/app.dart';
 import 'package:quick_write/core/models/book.dart';
+import 'package:quick_write/core/services/app_info_service.dart';
 import 'package:quick_write/core/services/backup_service.dart';
 import 'package:quick_write/core/services/database_service.dart';
 import 'package:quick_write/core/services/cache_services/chapter_cursor_cache_service.dart';
@@ -30,6 +31,9 @@ void main(List<String> args) async {
   // 初始化设置服务（必须在其他服务初始化之前）
   // 这会创建配置目录并加载用户设置
   await SettingsService.instance.initialize();
+
+  // 读取应用包信息，缓存版本号供关于页与更新检查使用
+  await AppInfoService.instance.initialize();
 
   // 获取当前窗口控制器
   final windowController = await WindowController.fromCurrentEngine();

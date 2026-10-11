@@ -17,6 +17,11 @@ class AppSettings {
   /// null 表示使用内置主题（跟随系统/亮色/暗色）
   final String? activeCustomThemeId;
 
+  // ================= 应用界面字体设置 =================
+  /// 应用界面字体名称
+  /// null 表示跟随系统默认字体
+  final String? appFontFamily;
+
   // ================= 多窗口设置 =================
   /// 是否在新窗口中打开工作台
   /// true: 工作台在新窗口中打开
@@ -220,6 +225,8 @@ class AppSettings {
     this.dimCoverInDarkMode = false,
     // 自定义主题
     this.activeCustomThemeId,
+    // 应用界面字体
+    this.appFontFamily, // 应用界面字体名称（null 表示跟随系统默认字体）
     // 多窗口设置
     this.openWorkspaceInNewWindow = false,
     this.closeWindowAction = closeActionAsk, // 关闭主窗口时的行为
@@ -309,6 +316,9 @@ class AppSettings {
       themeMode: themeJson['mode'] as String? ?? defaults.themeMode,
       dimCoverInDarkMode: themeJson['dimCoverInDarkMode'] as bool? ?? defaults.dimCoverInDarkMode,
       activeCustomThemeId: themeJson['activeCustomThemeId'] as String?,
+
+      // 应用界面字体（全局）
+      appFontFamily: globalJson['appFontFamily'] as String? ?? defaults.appFontFamily,
       
       // 多窗口设置（全局）
       openWorkspaceInNewWindow: globalJson['openWorkspaceInNewWindow'] as bool? ?? defaults.openWorkspaceInNewWindow,
@@ -390,6 +400,8 @@ class AppSettings {
           'dimCoverInDarkMode': dimCoverInDarkMode,
           'activeCustomThemeId': activeCustomThemeId,
         },
+        // 应用界面字体
+        'appFontFamily': appFontFamily,
         // 多窗口设置
         'openWorkspaceInNewWindow': openWorkspaceInNewWindow,
         'closeWindowAction': closeWindowAction,
@@ -490,6 +502,8 @@ class AppSettings {
     bool? dimCoverInDarkMode,
     // 自定义主题
     Object? activeCustomThemeId = _unset,
+    // 应用界面字体（传入 null 表示重置为跟随系统默认字体）
+    Object? appFontFamily = _unset,
     // 多窗口设置
     bool? openWorkspaceInNewWindow,
     String? closeWindowAction,
@@ -554,6 +568,8 @@ class AppSettings {
       dimCoverInDarkMode: dimCoverInDarkMode ?? this.dimCoverInDarkMode,
       // 自定义主题
       activeCustomThemeId: activeCustomThemeId == _unset ? this.activeCustomThemeId : activeCustomThemeId as String?,
+      // 应用界面字体
+      appFontFamily: appFontFamily == _unset ? this.appFontFamily : appFontFamily as String?,
       // 多窗口设置
       openWorkspaceInNewWindow: openWorkspaceInNewWindow ?? this.openWorkspaceInNewWindow,
       closeWindowAction: closeWindowAction ?? this.closeWindowAction,
@@ -644,7 +660,7 @@ class AppSettings {
 
   @override
   String toString() {
-    return 'AppSettings(themeMode: $themeMode, openWorkspaceInNewWindow: $openWorkspaceInNewWindow, fontFamily: $fontFamily, fontSize: $fontSize, outlineFontFamily: $outlineFontFamily, outlineFontSize: $outlineFontSize)';
+    return 'AppSettings(themeMode: $themeMode, appFontFamily: $appFontFamily, openWorkspaceInNewWindow: $openWorkspaceInNewWindow, fontFamily: $fontFamily, fontSize: $fontSize, outlineFontFamily: $outlineFontFamily, outlineFontSize: $outlineFontSize)';
   }
 
   @override
@@ -654,6 +670,8 @@ class AppSettings {
            other.themeMode == themeMode &&
            other.dimCoverInDarkMode == dimCoverInDarkMode &&
            other.activeCustomThemeId == activeCustomThemeId &&
+           // 应用界面字体
+           other.appFontFamily == appFontFamily &&
            other.openWorkspaceInNewWindow == openWorkspaceInNewWindow &&
            other.closeWindowAction == closeWindowAction &&
            // 启动与恢复设置
@@ -723,6 +741,8 @@ class AppSettings {
         openWorkspaceInNewWindow,
         closeWindowAction,
         activeCustomThemeId,
+        // 应用界面字体
+        appFontFamily,
         // 启动与恢复设置
         autoOpenLastWorkOnStartup,
         restoreTabsOnOpenWork,
