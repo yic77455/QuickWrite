@@ -94,6 +94,7 @@ flutter:
   assets:
     - assets/dict/
     - assets/icon/
+    - assets/image/
 
   fonts:
     - family: MaterialIconsOutlined

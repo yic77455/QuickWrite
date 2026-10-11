@@ -13,10 +13,6 @@ import 'package:quick_write/shared/widgets/widgets.dart';
 class AboutPage extends StatelessWidget {
   const AboutPage({super.key});
 
-  // =========================================================
-  // 占位信息：以下内容均为占位，替换为真实信息即可
-  // =========================================================
-
   /// 开源协议名称
   static const String _licenseName = 'GPL-3.0';
 
@@ -29,14 +25,17 @@ class AboutPage extends StatelessWidget {
   /// 版本发布记录地址（Releases）
   static const String _releasesUrl = 'https://github.com/yic77455/QuickWrite/releases';
 
+/// 标识区右侧插图
+  static const String _heroImage = 'assets/image/about01.png';
+
   /// 一句话简介
-  static const String _tagline = '专注于长篇创作的本地写作工具';
+  static const String _tagline = '专注于小说创作的本地写作工具';
 
   /// 应用简介正文
   static const String _introduction =
-      '快码字是一款面向长篇小说创作者的本地写作工具，'
-      '将作品、章节、设定与码字统计集中在一处，帮助你专注地把故事写下去。'
-      '所有创作数据均保存在本地，无需联网即可使用。';
+      '快码字是一款面向小说创作者的本地写作工具，'
+      '将作品、章节、大纲设定与码字工具集中在一处，帮助你专注地把故事写下去。'
+      '所有创作数据均保存在本地，无需联网即可使用。同时提供云备份服务，可自选WebDAV平台，安全自由，无泄露风险。';
 
   /// 作者 / 版权归属方
   static const String _authorName = 'yic77455';
@@ -49,6 +48,7 @@ class AboutPage extends StatelessWidget {
     (icon: Icons.storage_rounded, label: '本地存储'),
     (icon: Icons.bolt_rounded, label: '长文不卡顿'),
     (icon: Icons.window_rounded, label: '多窗口并行'),
+    (icon: Icons.account_tree_outlined, label: '大纲节点树'),
     (icon: Icons.cloud_sync_outlined, label: '云同步备份'),
     (icon: Icons.bar_chart_rounded, label: '码字统计'),
   ];
@@ -118,7 +118,7 @@ class AboutPage extends StatelessWidget {
   // 顶部应用标识区
   // =========================================================
 
-  /// 应用标识区：图标、名称、版本信息、一句话简介与社区入口按钮
+  /// 应用标识区：内容整体居中，右上叠加装饰插图
   Widget _buildHero(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
@@ -148,96 +148,115 @@ class AboutPage extends StatelessWidget {
               ),
             ),
           ),
+          // 右侧插图：叠在面板之上，不参与内容排布，因此不影响原有布局
+          Positioned(
+            right: 28,
+            top: 0,
+            bottom: 0,
+            width: 500,
+            child: IgnorePointer(
+              child: Center(
+                child: Image.asset(_heroImage, fit: BoxFit.contain),
+              ),
+            ),
+          ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 40),
-            child: Column(
-              children: [
-                // 应用图标
-                Container(
-                  width: 88,
-                  height: 88,
-                  decoration: BoxDecoration(
-                    color: colorScheme.surface,
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.5)),
-                    boxShadow: [
-                      BoxShadow(
-                        color: colorScheme.primary.withValues(alpha: 0.18),
-                        blurRadius: 24,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
-                  ),
-                  child: Center(
-                    child: Image.asset(_appIconAsset(context), width: 54, height: 54, fit: BoxFit.contain),
-                  ),
-                ),
-                const SizedBox(height: 20),
-
-                // 应用名称
-                Text(
-                  GlobalConstants.appTitle,
-                  style: context.headlineMedium?.copyWith(
-                    fontSize: 26,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1,
-                  ),
-                ),
-                const SizedBox(height: 14),
-
-                // 版本 / 协议 / 平台 标识
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  alignment: WrapAlignment.center,
-                  children: [
-                    _buildMetaChip(context, 'v${AppInfoService.instance.version}', emphasized: true),
-                    _buildMetaChip(context, '$_licenseName 协议'),
-                    _buildMetaChip(context, '桌面端'),
-                  ],
-                ),
-                const SizedBox(height: 18),
-
-                // 一句话简介
-                Text(
-                  _tagline,
-                  textAlign: TextAlign.center,
-                  style: context.bodyLarge?.copyWith(
-                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.85),
-                    height: 1.6,
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                // 社区入口：源码仓库与问题反馈
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  alignment: WrapAlignment.center,
-                  children: [
-                    FilledButton.icon(
-                      onPressed: () => _openLink(context, _githubUrl, '项目地址'),
-                      style: FilledButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
-                      ),
-                      icon: const Icon(Icons.code_rounded, size: 18),
-                      label: const Text('项目地址'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: () => _openLink(context, _issuesUrl, '反馈建议'),
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
-                      ),
-                      icon: const Icon(Icons.forum_outlined, size: 18),
-                      label: const Text('反馈建议'),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+            child: _buildHeroInfo(context),
           ),
         ],
       ),
+    );
+  }
+
+  /// 标识区内容：图标、名称、版本信息、一句话简介与社区入口按钮
+  Widget _buildHeroInfo(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Column(
+      children: [
+        // 应用图标
+        Container(
+          width: 88,
+          height: 88,
+          decoration: BoxDecoration(
+            color: colorScheme.surface,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.5)),
+            boxShadow: [
+              BoxShadow(
+                color: colorScheme.primary.withValues(alpha: 0.18),
+                blurRadius: 24,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Center(
+            child: Image.asset(_appIconAsset(context), width: 54, height: 54, fit: BoxFit.contain),
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // 应用名称
+        Text(
+          GlobalConstants.appTitle,
+          style: context.headlineMedium?.copyWith(
+            fontSize: 26,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1,
+          ),
+        ),
+        const SizedBox(height: 14),
+
+        // 版本 / 协议 / 平台 标识
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          alignment: WrapAlignment.center,
+          children: [
+            _buildMetaChip(context, 'v${AppInfoService.instance.version}', emphasized: true),
+            _buildMetaChip(context, '$_licenseName 协议'),
+            _buildMetaChip(context, '桌面端'),
+          ],
+        ),
+        const SizedBox(height: 18),
+
+        // 一句话简介
+        Text(
+          _tagline,
+          textAlign: TextAlign.center,
+          style: context.bodyLarge?.copyWith(
+            color: colorScheme.onSurfaceVariant.withValues(alpha: 0.85),
+            height: 1.6,
+          ),
+        ),
+        const SizedBox(height: 24),
+
+        // 社区入口：源码仓库与问题反馈
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          alignment: WrapAlignment.center,
+          children: [
+            FilledButton.icon(
+              onPressed: () => _openLink(context, _githubUrl, '项目地址'),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+              ),
+              icon: const Icon(Icons.code_rounded, size: 18),
+              label: const Text('项目地址'),
+            ),
+            OutlinedButton.icon(
+              onPressed: () => _openLink(context, _issuesUrl, '反馈建议'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+              ),
+              icon: const Icon(Icons.forum_outlined, size: 18),
+              label: const Text('反馈建议'),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
