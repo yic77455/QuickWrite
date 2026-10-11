@@ -1,5 +1,8 @@
 part of re_editor;
 
+/// 行首空白前缀（含全角空格、制表符等）
+final RegExp _kLeadingWhitespace = RegExp(r'^\s*');
+
 class _CodeField extends SingleChildRenderObjectWidget {
 
   final ViewportOffset verticalViewport;
@@ -682,6 +685,30 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
     return _selectWord(localPosition);
   }
 
+  /// 段落（整行）选区
+  ///
+  /// 返回点击位置所在代码行的文本范围：跳过段首空白（含全角缩进），从第一个
+  /// 非空白字符开始选取；空行返回折叠范围以便放置光标。
+  CodeLineRange? selectParagraph({
+    required Offset position,
+  }) {
+    final Offset localPosition = globalToLocal(position);
+    if (!isValidPointer(localPosition)) {
+      return null;
+    }
+    final CodeLineRenderParagraph? target = _findDisplayRenderParagraph(localPosition + paintOffset);
+    if (target == null) {
+      return null;
+    }
+    final String line = _codes[target.index].text;
+    final int start = _kLeadingWhitespace.firstMatch(line)!.end;
+    return CodeLineRange(
+      index: target.index,
+      start: start,
+      end: line.length
+    );
+  }
+
   void makePositionVisible(CodeLinePosition position, [int tryCount = 0]) {
     if (_intrinsic) {
       _revealInExternalViewport(position, center: false, tryCount: tryCount);
@@ -930,7 +957,21 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
     return _chunkIndicators[index].index;
   }
 
-  CodeLinePosition? getUpPosition(CodeLinePosition position) {
+  /// 指定光标位置的横向像素坐标
+  ///
+  /// 位置所在行不在可见段落内时返回 null。
+  double? caretDxOf(CodeLinePosition position) {
+    final CodeLineRenderParagraph? paragraph = findDisplayParagraphByLineIndex(position.index);
+    if (paragraph == null) {
+      return null;
+    }
+    return paragraph.getOffset(position.textPosition)?.dx;
+  }
+
+  /// 上移一行后的光标位置
+  ///
+  /// [preferredDx] 为纵向移动期间保持的横向像素坐标，为空时按当前光标横坐标计算。
+  CodeLinePosition? getUpPosition(CodeLinePosition position, {double? preferredDx}) {
     final CodeLineRenderParagraph? paragraph = findDisplayParagraphByLineIndex(position.index);
     if (paragraph == null) {
       return null;
@@ -939,8 +980,9 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
     if (offset == null) {
       return null;
     }
+    final double dx = preferredDx ?? offset.dx;
     if (offset.dy > 0) {
-      return paragraph.getPosition(offset - Offset(0, paragraph.preferredLineHeight));
+      return paragraph.getPosition(Offset(dx, offset.dy - paragraph.preferredLineHeight));
     }
     // The up position is not in this code line
     IParagraph? upParagraph = findDisplayParagraphByLineIndex(position.index - 1)?.paragraph;
@@ -953,11 +995,14 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
     }
     return CodeLinePosition.from(
       index: position.index - 1,
-      position: upParagraph.getPosition(Offset(offset.dx, upParagraph.height - upParagraph.preferredLineHeight))
+      position: upParagraph.getPosition(Offset(dx, upParagraph.height - upParagraph.preferredLineHeight))
     );
   }
 
-  CodeLinePosition? getDownPosition(CodeLinePosition position) {
+  /// 下移一行后的光标位置
+  ///
+  /// [preferredDx] 为纵向移动期间保持的横向像素坐标，为空时按当前光标横坐标计算。
+  CodeLinePosition? getDownPosition(CodeLinePosition position, {double? preferredDx}) {
     final CodeLineRenderParagraph? paragraph = findDisplayParagraphByLineIndex(position.index);
     if (paragraph == null) {
       return null;
@@ -966,8 +1011,9 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
     if (offset == null) {
       return null;
     }
+    final double dx = preferredDx ?? offset.dx;
     if (offset.dy < paragraph.height - paragraph.preferredLineHeight) {
-      return paragraph.getPosition(offset + Offset(0, paragraph.preferredLineHeight));
+      return paragraph.getPosition(Offset(dx, offset.dy + paragraph.preferredLineHeight));
     }
     // The up position is not in this code line
     IParagraph? downParagraph = findDisplayParagraphByLineIndex(position.index + 1)?.paragraph;
@@ -980,7 +1026,7 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
     }
     return CodeLinePosition.from(
       index: position.index + 1,
-      position: downParagraph.getPosition(Offset(offset.dx, 0))
+      position: downParagraph.getPosition(Offset(dx, 0))
     );
   }
 

@@ -39,6 +39,17 @@ class _CodeLineEditingControllerImpl extends ValueNotifier<CodeLineEditingValue>
   CodeLineEditingValue? _preValue;
   GlobalKey? _editorKey;
 
+  /// 纵向移动期间保持的横向像素坐标
+  ///
+  /// 一次连续的上下方向键移动期间沿用起始光标的横坐标，
+  /// 使途经空行或较短的行时横坐标不被压到行首。
+  double? _verticalDesiredDx;
+
+  /// 当前是否正在执行纵向移动
+  ///
+  /// 纵向移动自身会改写选区，借此避免被误判为离开纵向移动序列。
+  bool _movingVertically = false;
+
   _CodeLineEditingControllerImpl({
     required CodeLines codeLines,
     required this.options,
@@ -72,6 +83,11 @@ class _CodeLineEditingControllerImpl extends ValueNotifier<CodeLineEditingValue>
   @override
   set value(CodeLineEditingValue value) {
     _preValue = super.value;
+    // 非纵向移动引起的文本或选区变化意味着本次纵向移动序列结束
+    if (!_movingVertically &&
+        (value.selection != super.value.selection || value.codeLines != super.value.codeLines)) {
+      _verticalDesiredDx = null;
+    }
     super.value = value;
   }
 
@@ -365,6 +381,64 @@ class _CodeLineEditingControllerImpl extends ValueNotifier<CodeLineEditingValue>
     runRevocableOp(_moveSelectionLinesDown);
   }
 
+  /// 纵向移动光标或选区端点
+  ///
+  /// 首次移动时记录当前横向像素坐标，并在整个连续纵向移动过程中保持：
+  /// 目标行字符长度不足时落到行末，长度足够时落到对应位置。
+  void _moveVertically(AxisDirection direction, {bool extend = false}) {
+    final CodeLinePosition current = extend ? selection.extent : selection.start;
+    final double? desiredDx = _verticalDesiredDx ?? _render?.caretDxOf(current);
+    _verticalDesiredDx = desiredDx;
+    _movingVertically = true;
+    try {
+      final CodeLinePosition? position = direction == AxisDirection.up
+          ? _render?.getUpPosition(current, preferredDx: desiredDx)
+          : _render?.getDownPosition(current, preferredDx: desiredDx);
+      if (position != null) {
+        selection = extend
+            ? selection.copyWith(
+                extentIndex: position.index,
+                extentOffset: position.offset,
+                extentAffinity: position.affinity
+              )
+            : CodeLineSelection.fromPosition(position: position);
+        return;
+      }
+      // 排版尚未就绪时退化为逐行移动，行内偏移取目标行长度与当前偏移的较小者
+      final CodeLinePosition anchor = extend || direction == AxisDirection.up ? current : selection.end;
+      final int index;
+      final int offset;
+      if (direction == AxisDirection.up) {
+        if (anchor.index == 0) {
+          index = 0;
+          offset = 0;
+        } else {
+          index = anchor.index - 1;
+          offset = min(codeLines[index].length, anchor.offset);
+        }
+      } else {
+        if (anchor.index == codeLines.length - 1) {
+          index = codeLines.length - 1;
+          offset = codeLines.last.length;
+        } else {
+          index = anchor.index + 1;
+          offset = min(codeLines[index].length, anchor.offset);
+        }
+      }
+      selection = extend
+          ? selection.copyWith(
+              extentIndex: index,
+              extentOffset: offset
+            )
+          : CodeLineSelection.collapsed(
+              index: index,
+              offset: offset
+            );
+    } finally {
+      _movingVertically = false;
+    }
+  }
+
   @override
   void moveCursor(AxisDirection direction) {
     switch (direction) {
@@ -429,46 +503,8 @@ class _CodeLineEditingControllerImpl extends ValueNotifier<CodeLineEditingValue>
         }
         break;
       case AxisDirection.up:
-        final CodeLinePosition? position = _render?.getUpPosition(selection.start);
-        if (position != null) {
-          selection = CodeLineSelection.fromPosition(
-            position: position
-          );
-        } else {
-          final CodeLinePosition current = selection.start;
-          if (current.index == 0) {
-            selection = const CodeLineSelection.collapsed(
-              index: 0,
-              offset: 0
-            );
-          } else {
-            selection = CodeLineSelection.collapsed(
-              index: current.index - 1,
-              offset: min(codeLines[current.index - 1].length, current.offset)
-            );
-          }
-        }
-        break;
       case AxisDirection.down:
-        final CodeLinePosition? position = _render?.getDownPosition(selection.start);
-        if (position != null) {
-          selection = CodeLineSelection.fromPosition(
-            position: position
-          );
-        } else {
-          final CodeLinePosition current = selection.end;
-          if (current.index == codeLines.length - 1) {
-            selection = CodeLineSelection.collapsed(
-              index: codeLines.length - 1,
-              offset: codeLines.last.length
-            );
-          } else {
-            selection = CodeLineSelection.collapsed(
-              index: current.index + 1,
-              offset: min(codeLines[current.index + 1].length, current.offset)
-            );
-          }
-        }
+        _moveVertically(direction);
         break;
     }
     makeCursorVisible();
@@ -688,50 +724,8 @@ class _CodeLineEditingControllerImpl extends ValueNotifier<CodeLineEditingValue>
         }
         break;
       case AxisDirection.up:
-        final CodeLinePosition? position = _render?.getUpPosition(selection.extent);
-        if (position != null) {
-          selection = selection.copyWith(
-            extentIndex: position.index,
-            extentOffset: position.offset,
-            extentAffinity: position.affinity
-          );
-        } else {
-          final CodeLinePosition current = selection.extent;
-          if (current.index == 0) {
-            selection = selection.copyWith(
-              extentIndex: 0,
-              extentOffset: 0
-            );
-          } else {
-            selection = selection.copyWith(
-              extentIndex: current.index - 1,
-              extentOffset: min(codeLines[current.index - 1].length, current.offset)
-            );
-          }
-        }
-        break;
       case AxisDirection.down:
-        final CodeLinePosition? position = _render?.getDownPosition(selection.extent);
-        if (position != null) {
-          selection = selection.copyWith(
-            extentIndex: position.index,
-            extentOffset: position.offset,
-            extentAffinity: position.affinity
-          );
-        } else {
-          final CodeLinePosition current = selection.extent;
-          if (current.index == codeLines.length - 1) {
-            selection = selection.copyWith(
-              extentIndex: codeLines.length - 1,
-              extentOffset: codeLines.last.length
-            );
-          } else {
-            selection = selection.copyWith(
-              extentIndex: current.index + 1,
-              extentOffset: min(codeLines[current.index + 1].length, current.offset)
-            );
-          }
-        }
+        _moveVertically(direction, extend: true);
         break;
     }
     makeCursorVisible();

@@ -30,6 +30,7 @@ class _CodeSelectionGestureDetectorState extends State<_CodeSelectionGestureDete
   bool _dragging = false;
   DateTime? _pointerTapTimestamp;
   Offset? _pointerTapPosition;
+  int _pointerTapCount = 0;
   bool? _handleByNextEvent;
   bool _longPressOnSelection = false;
   CodeLineSelection? _anchorSelection;
@@ -153,6 +154,7 @@ class _CodeSelectionGestureDetectorState extends State<_CodeSelectionGestureDete
             _handleByNextEvent = false;
             _pointerTapTimestamp = null;
             _pointerTapPosition = null;
+            _pointerTapCount = 0;
           },
           behavior: widget.behavior ?? HitTestBehavior.translucent,
           child: widget.child,
@@ -214,20 +216,38 @@ class _CodeSelectionGestureDetectorState extends State<_CodeSelectionGestureDete
       return;
     }
     final DateTime now = DateTime.now();
-    if (_pointerTapTimestamp != null && (now.millisecondsSinceEpoch - _pointerTapTimestamp!.millisecondsSinceEpoch) <
-      kDoubleTapTimeout.inMilliseconds && _pointerTapPosition != null && _pointerTapPosition!.isSamePosition(position)) {
-      _onDoubleTap(position);
-    } else {
-      if (widget.controller.selection.baseOffset != -1) {
-        if (_isShiftPressed) {
-          _extendSelection(position, _SelectionChangedCause.tapDown);
-          return;
-        }
-      }
-      _pointerTapTimestamp = now;
-      _pointerTapPosition = position;
-      _selectPosition(position, _SelectionChangedCause.tapDown);
+    final bool isMultiTap = _pointerTapTimestamp != null &&
+      (now.millisecondsSinceEpoch - _pointerTapTimestamp!.millisecondsSinceEpoch) < kDoubleTapTimeout.inMilliseconds &&
+      _pointerTapPosition != null &&
+      _pointerTapPosition!.isSamePosition(position);
+    _pointerTapCount = isMultiTap ? _pointerTapCount + 1 : 1;
+    _pointerTapTimestamp = now;
+    _pointerTapPosition = position;
+
+    switch (_pointerTapCount) {
+      // 双击选词
+      case 2:
+        _onDoubleTap(position);
+        return;
+      // 三连击选中段落
+      case 3:
+        _onTripleTap(position);
+        return;
+      // 第四击起重新计为单击
+      case 4:
+        _pointerTapCount = 0;
+        _pointerTapTimestamp = null;
+        _pointerTapPosition = null;
+        break;
     }
+
+    if (widget.controller.selection.baseOffset != -1) {
+      if (_isShiftPressed) {
+        _extendSelection(position, _SelectionChangedCause.tapDown);
+        return;
+      }
+    }
+    _selectPosition(position, _SelectionChangedCause.tapDown);
   }
 
   void _onDesktopTapUp(Offset position) {
@@ -265,6 +285,22 @@ class _CodeSelectionGestureDetectorState extends State<_CodeSelectionGestureDete
         range: range
       );
     }
+    widget.controller.selection = selection;
+    widget.controller.makeCursorVisible();
+    _anchorSelection = selection;
+  }
+
+  /// 三连击选中点击位置所在的整段（整行）
+  void _onTripleTap(Offset position) {
+    final CodeLineRange? range = render.selectParagraph(
+      position: position,
+    );
+    if (range == null) {
+      return;
+    }
+    final CodeLineSelection selection = CodeLineSelection.fromRange(
+      range: range
+    );
     widget.controller.selection = selection;
     widget.controller.makeCursorVisible();
     _anchorSelection = selection;

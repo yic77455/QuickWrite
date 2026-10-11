@@ -3,6 +3,7 @@ import 'package:quick_write/core/services/backup_service.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/shared/widgets/qw_dropdown.dart';
 import '../widgets/right_sidebar_widgets.dart';
+import '../widgets/shortcut_dialog.dart';
 
 /// 其他设置面板
 /// 
@@ -287,130 +288,26 @@ class _OtherPanelState extends State<OtherPanel> {
 
   /// 构建快捷键设置区块
   Widget _buildShortcutSection(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    
     return SettingsSection(
       title: '快捷键',
       icon: Icons.keyboard_outlined,
       children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: () {
-                // 这里可以打开快捷键列表对话框
-                _showShortcutDialog(context);
-              },
-              borderRadius: BorderRadius.circular(8),
-              child: Row(
-                children: [
-                  Icon(Icons.info_outlined, size: 18, color: colorScheme.onSurfaceVariant),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      '查看快捷键',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            color: colorScheme.onSurface,
-                          ),
-                    ),
-                  ),
-                  Icon(Icons.chevron_right, size: 18, color: colorScheme.onSurfaceVariant),
-                ],
-              ),
-            ),
-          ),
-        ),
+        // 查看快捷键入口（点击打开快捷键列表对话框）
+        _buildShortcutEntry(context),
       ],
     );
   }
 
-  /// 显示快捷键列表对话框
-  void _showShortcutDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('快捷键列表'),
-          content: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildShortcutItem('新建文档', 'Ctrl + N'),
-                _buildShortcutItem('打开文档', 'Ctrl + O'),
-                _buildShortcutItem('保存文档', 'Ctrl + S'),
-                _buildShortcutItem('另存为', 'Ctrl + Shift + S'),
-                _buildShortcutItem('撤销', 'Ctrl + Z'),
-                _buildShortcutItem('重做', 'Ctrl + Y'),
-                _buildShortcutItem('复制', 'Ctrl + C'),
-                _buildShortcutItem('剪切', 'Ctrl + X'),
-                _buildShortcutItem('粘贴', 'Ctrl + V'),
-                _buildShortcutItem('全选', 'Ctrl + A'),
-                _buildShortcutItem('查找', 'Ctrl + F'),
-                _buildShortcutItem('替换', 'Ctrl + H'),
-                _buildShortcutItem('插入图片', 'Ctrl + I'),
-                _buildShortcutItem('插入链接', 'Ctrl + K'),
-                _buildShortcutItem('插入表格', 'Ctrl + T'),
-                _buildShortcutItem('插入分割线', 'Ctrl + -'),
-                _buildShortcutItem('插入页码', 'Ctrl + P'),
-                _buildShortcutItem('插入日期时间', 'Ctrl + D'),
-                _buildShortcutItem('插入脚注', 'Ctrl + Alt + F'),
-                _buildShortcutItem('插入尾注', 'Ctrl + Alt + N'),
-                _buildShortcutItem('插入目录', 'Ctrl + Alt + T'),
-                _buildShortcutItem('插入页眉', 'Ctrl + Alt + H'),
-                _buildShortcutItem('插入页脚', 'Ctrl + Alt + F'),
-                _buildShortcutItem('插入页码', 'Ctrl + Alt + P'),
-                _buildShortcutItem('插入日期时间', 'Ctrl + Alt + D'),
-                _buildShortcutItem('插入分割线', 'Ctrl + Alt + -'),
-                _buildShortcutItem('插入表格', 'Ctrl + Alt + T'),
-                _buildShortcutItem('插入链接', 'Ctrl + Alt + K'),
-                _buildShortcutItem('插入图片', 'Ctrl + Alt + I'),
-                _buildShortcutItem('查找', 'Ctrl + Alt + F'),
-                _buildShortcutItem('替换', 'Ctrl + Alt + H'),
-                _buildShortcutItem('全选', 'Ctrl + Alt + A'),
-                _buildShortcutItem('复制', 'Ctrl + Alt + C'),
-                _buildShortcutItem('剪切', 'Ctrl + Alt + X'),
-                _buildShortcutItem('粘贴', 'Ctrl + Alt + V'),
-                _buildShortcutItem('撤销', 'Ctrl + Alt + Z'),
-                _buildShortcutItem('重做', 'Ctrl + Alt + Y'),
-                _buildShortcutItem('保存文档', 'Ctrl + Alt + S'),
-                _buildShortcutItem('另存为', 'Ctrl + Alt + Shift + S'),
-                _buildShortcutItem('打开文档', 'Ctrl + Alt + O'),
-                _buildShortcutItem('新建文档', 'Ctrl + Alt + N'),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-              child: const Text('关闭'),
-            ),
-          ],
-        );
-      },
-    );
-  }
+  /// 构建查看快捷键入口项
+  Widget _buildShortcutEntry(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
 
-  /// 构建快捷键项
-  Widget _buildShortcutItem(String action, String shortcut) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(action),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            decoration: BoxDecoration(
-              color: Colors.grey[200],
-              borderRadius: BorderRadius.circular(4),
-            ),
-            child: Text(shortcut),
-          ),
-        ],
-      ),
+    return InkWellSettingItem(
+      icon: Icons.info_outlined,
+      label: '查看快捷键',
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 15),
+      trailing: Icon(Icons.chevron_right_rounded, size: 18, color: colorScheme.onSurfaceVariant),
+      onTap: () => showShortcutDialog(context: context),
     );
   }
 }

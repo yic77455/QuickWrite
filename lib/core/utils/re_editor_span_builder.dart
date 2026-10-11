@@ -85,9 +85,13 @@ class ReEditorSpanBuilder {
         spans.add(TextSpan(text: lineText.substring(cursor, start), style: baseStyle));
       }
       if (end > start) {
+        // 查找匹配以文字底色标识，其余高亮覆盖文字颜色
+        final TextStyle highlightStyle = range.background
+            ? baseStyle.copyWith(backgroundColor: range.color)
+            : baseStyle.copyWith(color: range.color);
         spans.add(TextSpan(
           text: lineText.substring(start, end),
-          style: baseStyle.copyWith(color: range.color),
+          style: highlightStyle,
         ));
       }
       cursor = end;

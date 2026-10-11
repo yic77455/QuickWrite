@@ -7,6 +7,7 @@ import 'package:quick_write/core/providers/window_provider.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/services/workspace/custom_highlight_service.dart';
+import 'package:quick_write/core/utils/chinese_word_segmenter.dart';
 import 'package:quick_write/core/utils/clean_scroll.dart';
 import 'package:quick_write/core/utils/clipboard_state_cache.dart';
 import 'package:quick_write/core/utils/code_line_selection_utils.dart';
@@ -211,6 +212,9 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     _focusNode.addListener(_onFocusChanged);
     _lastCodeLines = widget.controller.value.codeLines;
     _previousTextLength = widget.controller.text.length;
+
+    // 加载中文词库，为双击选词提供分词能力
+    ChineseWordSegmenter.instance.install();
 
     // 打开章节时按需定位到光标位置（如"定位至章末""上一次编辑位置"）
     if (widget.initialScrollToCursor) {
@@ -553,7 +557,7 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   ///
   /// re_editor 自带代码编辑器语义的快捷键，这里替换为小说写作语义：
   /// 撤销/重做/剪切/粘贴标注事件来源，Tab 与回车走段落缩进策略，
-  /// 查找替换与保存改用工作台的既有实现。
+  /// 查找替换与保存改用工作台的既有实现，注释、字符转换两类快捷键直接屏蔽。
   Map<Type, Action<Intent>> _buildShortcutOverrides() {
     final WorkspaceProvider provider = context.read<WorkspaceProvider>();
     return {
@@ -623,6 +627,10 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
           return null;
         },
       ),
+      // 屏蔽单行/多行注释快捷键（Control/Command + / 与 Shift + Control/Command + /）
+      CodeShortcutCommentIntent: DoNothingAction(),
+      // 屏蔽字符转换快捷键（Control/Command + T）
+      CodeShortcutTransposeCharactersIntent: DoNothingAction(),
     };
   }
 
@@ -978,6 +986,8 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
             // 小说正文需要自动换行，且不显示行号与代码折叠标记
             wordWrap: true,
             readOnly: widget.readOnly,
+            // 只读预览（如历史版本备份）不显示输入光标
+            showCursorWhenReadOnly: false,
             // 关闭成对符号自动补全，避免把 ASCII 引号/括号写入正文
             autocompleteSymbols: false,
             chunkAnalyzer: const NonCodeChunkAnalyzer(),

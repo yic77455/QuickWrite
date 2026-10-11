@@ -18,7 +18,16 @@ class HighlightRange {
   /// 优先级（数值越大优先级越高）
   final int priority;
 
-  const HighlightRange(this.start, this.end, this.color, this.priority);
+  /// 颜色的呈现方式：true 作为文字底色，false 覆盖文字颜色
+  final bool background;
+
+  const HighlightRange(
+    this.start,
+    this.end,
+    this.color,
+    this.priority, {
+    this.background = false,
+  });
 
   @override
   String toString() => 'HighlightRange($start, $end, priority: $priority)';
@@ -103,7 +112,7 @@ class HighlightRangeResolver {
   /// 解析查找匹配范围
   ///
   /// [currentMatchIndex] 指向当前选中的匹配项（-1 表示无选中），该项使用更高优先级，
-  /// 使其颜色覆盖其它匹配项。
+  /// 使其底色覆盖其它匹配项。匹配范围的颜色统一作为文字底色呈现。
   static List<HighlightRange> parseFindMatchRanges(
     List<TextSelection> matches,
     int currentMatchIndex,
@@ -120,6 +129,7 @@ class HighlightRangeResolver {
         match.end,
         isCurrent ? currentMatchColor : matchColor,
         isCurrent ? currentFindMatchPriority : findMatchPriority,
+        background: true,
       ));
     }
     return ranges;
@@ -157,14 +167,16 @@ class HighlightRangeResolver {
       }
       if (best == null) continue;
 
-      // 与上一段颜色相同且连续时合并为一段
+      // 与上一段颜色、呈现方式相同且连续时合并为一段
       if (result.isNotEmpty &&
           result.last.color == best.color &&
+          result.last.background == best.background &&
           result.last.end == segStart) {
-        result[result.length - 1] =
-            HighlightRange(result.last.start, segEnd, best.color, best.priority);
+        result[result.length - 1] = HighlightRange(result.last.start, segEnd,
+            best.color, best.priority, background: best.background);
       } else {
-        result.add(HighlightRange(segStart, segEnd, best.color, best.priority));
+        result.add(HighlightRange(segStart, segEnd, best.color, best.priority,
+            background: best.background));
       }
     }
     return result;

@@ -89,7 +89,54 @@ class _ParagraphImpl extends IParagraph {
 
   @override
   TextRange getWord(Offset offset) {
-    return paragraph.getWordBoundary(getPosition(offset));
+    final TextRange range = paragraph.getWordBoundary(getPosition(offset));
+    // 引擎已给出多字符的单词范围（如拉丁字母单词）时直接采用
+    if (range.end - range.start > 1) {
+      return range;
+    }
+    // 引擎未内置中文分词时会按单字返回，优先使用注入的分词器，否则退化为连续汉字区间
+    final TextRange? resolved = codeWordBoundaryResolver?.call(text, range.start);
+    if (resolved != null) {
+      return resolved;
+    }
+    return _hanWordRange(range.start) ?? range;
+  }
+
+  /// 以 [offset] 所在汉字为中心扩展出连续汉字区间
+  ///
+  /// 遇到标点、空白、字母数字等非汉字字符即停止；当前位置不是汉字时返回 null。
+  TextRange? _hanWordRange(int offset) {
+    if (text.isEmpty) {
+      return null;
+    }
+    int index = offset.clamp(0, text.length - 1);
+    if (!_isHanCodeUnit(text.codeUnitAt(index))) {
+      // 光标落在汉字右边界时，回退一个字符判定
+      if (index == 0 || !_isHanCodeUnit(text.codeUnitAt(index - 1))) {
+        return null;
+      }
+      index -= 1;
+    }
+    int start = index;
+    int end = index + 1;
+    while (start > 0 && _isHanCodeUnit(text.codeUnitAt(start - 1))) {
+      start--;
+    }
+    while (end < text.length && _isHanCodeUnit(text.codeUnitAt(end))) {
+      end++;
+    }
+    return TextRange(start: start, end: end);
+  }
+
+  /// 判断是否为汉字码元
+  ///
+  /// 涵盖基本区、扩展 A、兼容区与叠字符号「々」，扩展 B 及以上（代理对）不在处理范围内。
+  bool _isHanCodeUnit(int codeUnit) {
+    return (codeUnit >= 0x4E00 && codeUnit <= 0x9FFF) ||
+        (codeUnit >= 0x3400 && codeUnit <= 0x4DBF) ||
+        (codeUnit >= 0xF900 && codeUnit <= 0xFAFF) ||
+        codeUnit == 0x3007 ||
+        codeUnit == 0x3005;
   }
 
   @override
