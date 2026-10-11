@@ -644,6 +644,15 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    // 编辑器内容不随应用界面字号缩放，保留编辑器自身的字体大小设置
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
+      child: _buildEditorBody(context),
+    );
+  }
+
+  /// 构建编辑器主体内容
+  Widget _buildEditorBody(BuildContext context) {
     // 检测窗口从最小化恢复的情况，请求编辑器焦点
     final bool isMinimized = context.select<WindowProvider, bool>((p) => p.isMinimized);
     if (_wasMinimized && !isMinimized && widget.isActive) {

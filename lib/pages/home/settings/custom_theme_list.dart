@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/providers/theme_provider.dart';
+import 'package:quick_write/core/theme/builtin_themes.dart';
 import 'package:quick_write/core/theme/custom_theme.dart';
 import 'package:quick_write/core/theme/theme_palette.dart';
 import 'package:quick_write/core/utils/color_utils.dart';
@@ -9,9 +10,11 @@ import 'package:quick_write/pages/home/settings/custom_theme_editor.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 import 'package:uuid/uuid.dart';
 
-/// 主题弹窗中的自定义主题区域
+/// 主题弹窗中的配色方案区域
 ///
-/// 展示默认配色与已保存的自定义主题，支持选中、新建、编辑配色、重命名与删除
+/// 展示默认配色、内置主题预设与已保存的自定义主题，
+/// 支持选中，自定义主题额外支持新建、编辑配色、重命名与删除，
+/// 内置方案（默认配色与内置主题预设）不可编辑、不可删除
 class CustomThemeSection extends StatelessWidget {
   const CustomThemeSection({super.key});
 
@@ -34,7 +37,7 @@ class CustomThemeSection extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  '自定义主题',
+                  '配色方案',
                   style: context.titleSmall?.copyWith(
                     fontWeight: FontWeight.w600,
                   ),
@@ -48,13 +51,21 @@ class CustomThemeSection extends StatelessWidget {
             ],
           ),
         ),
-        // 默认配色项，用于取消激活自定义主题
+        // 默认配色项，用于取消激活其它配色方案
         _ThemeEntry(
           name: '默认配色',
           previewColor: basePalette.primary,
           selected: themeProvider.activeCustomThemeId == null,
           onTap: () => themeProvider.setActiveCustomTheme(null),
         ),
+        // 内置主题预设，不可编辑、不可删除
+        for (final theme in BuiltinThemes.all)
+          _ThemeEntry(
+            name: theme.name,
+            previewColor: _previewPrimary(theme, basePalette, brightness),
+            selected: themeProvider.activeCustomThemeId == theme.id,
+            onTap: () => themeProvider.setActiveCustomTheme(theme.id),
+          ),
         // 已保存的自定义主题
         for (final theme in themeProvider.customThemes)
           _ThemeEntry(

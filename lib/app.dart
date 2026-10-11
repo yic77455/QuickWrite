@@ -25,6 +25,17 @@ Future<void> _handleMainWindowExit() async {
   await CloudSyncService.instance.handleAppExit();
 }
 
+/// 将应用内容包裹在按界面字号缩放的 MediaQuery 中
+///
+/// [scale] 界面字号缩放倍数，1.0 表示默认大小；
+/// 编辑器内容会在其所在位置排除该缩放，从而保持独立的字体大小设置
+Widget _wrapWithAppFontScale(BuildContext context, Widget? child, double scale) {
+  return MediaQuery(
+    data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(scale)),
+    child: child ?? const SizedBox.shrink(),
+  );
+}
+
 /// 主应用（书架页面）
 class MyWriterApp extends StatelessWidget {
   const MyWriterApp({super.key});
@@ -72,6 +83,9 @@ class MyWriterApp extends StatelessWidget {
             themeMode: themeProvider.themeMode,
             debugShowCheckedModeBanner: false,
             routerConfig: appRouter,
+            // 应用界面字号缩放：包裹整个界面，使界面文字按设定倍数显示
+            builder: (context, child) =>
+                _wrapWithAppFontScale(context, child, themeProvider.appFontScale),
           );
         },
       ),
@@ -127,6 +141,13 @@ class _WorkspaceAppState extends State<WorkspaceApp> {
         _themeProvider!.updateAppFontFromMain(fontFamily);
       }
     };
+
+    // 设置界面字号变化回调
+    MultiWindowService.instance.onAppFontScaleChanged = (scale) {
+      if (_themeProvider != null) {
+        _themeProvider!.updateAppFontScaleFromMain(scale);
+      }
+    };
   }
 
   @override
@@ -135,6 +156,7 @@ class _WorkspaceAppState extends State<WorkspaceApp> {
     MultiWindowService.instance.onThemeChanged = null;
     MultiWindowService.instance.onThemeConfigChanged = null;
     MultiWindowService.instance.onAppFontChanged = null;
+    MultiWindowService.instance.onAppFontScaleChanged = null;
     super.dispose();
   }
 
@@ -167,6 +189,9 @@ class _WorkspaceAppState extends State<WorkspaceApp> {
             themeMode: themeProvider.themeMode,
             debugShowCheckedModeBanner: false,
             home: WorkspacePage(bookId: widget.bookId, mainWindowId: widget.mainWindowId),
+            // 应用界面字号缩放：包裹整个界面，使界面文字按设定倍数显示
+            builder: (context, child) =>
+                _wrapWithAppFontScale(context, child, themeProvider.appFontScale),
           );
         },
       ),

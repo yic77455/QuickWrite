@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../services/settings_service.dart';
 import '../services/multi_window_service.dart';
 import '../theme/app_theme.dart';
+import '../theme/builtin_themes.dart';
 import '../theme/custom_theme.dart';
 
 /// 主题状态管理 Provider
@@ -24,6 +25,9 @@ class ThemeProvider extends ChangeNotifier {
 
   /// 当前应用界面字体名称（null 表示跟随系统默认字体）
   String? _appFontFamily;
+
+  /// 当前应用界面字号缩放倍数（1.0 表示默认大小）
+  double _appFontScale = 1.0;
   
   /// 获取当前主题模式
   ThemeMode get themeMode => _themeMode;
@@ -31,21 +35,25 @@ class ThemeProvider extends ChangeNotifier {
   /// 获取当前应用界面字体名称（null 表示跟随系统默认字体）
   String? get appFontFamily => _appFontFamily;
 
+  /// 获取当前应用界面字号缩放倍数（1.0 表示默认大小）
+  double get appFontScale => _appFontScale;
+
   /// 获取已保存的自定义主题列表
   List<CustomTheme> get customThemes => _customThemes;
 
   /// 获取当前激活的自定义主题 ID
   String? get activeCustomThemeId => _activeCustomThemeId;
 
-  /// 获取当前激活的自定义主题对象
-  /// 未激活或激活的主题已被删除时返回 null
+  /// 获取当前激活的主题
+  /// 未激活时返回 null（表示使用默认配色）
+  /// 依次在自定义主题与内置主题预设中查找，均未匹配时返回 null
   CustomTheme? get activeCustomTheme {
     final id = _activeCustomThemeId;
     if (id == null) return null;
     for (final theme in _customThemes) {
       if (theme.id == id) return theme;
     }
-    return null;
+    return BuiltinThemes.byId(id);
   }
 
   /// 获取亮色主题数据
@@ -83,6 +91,7 @@ class ThemeProvider extends ChangeNotifier {
       _customThemes = settingsService.customThemes;
       _activeCustomThemeId = settingsService.activeCustomThemeId;
       _appFontFamily = settingsService.appFontFamily;
+      _appFontScale = settingsService.appFontScale;
       debugPrint('从设置服务加载主题: $_themeMode');
     }
     
@@ -110,6 +119,10 @@ class ThemeProvider extends ChangeNotifier {
     }
     if (settingsService.appFontFamily != _appFontFamily) {
       _appFontFamily = settingsService.appFontFamily;
+      changed = true;
+    }
+    if (settingsService.appFontScale != _appFontScale) {
+      _appFontScale = settingsService.appFontScale;
       changed = true;
     }
 
@@ -171,6 +184,25 @@ class ThemeProvider extends ChangeNotifier {
     MultiWindowService.instance.broadcastAppFontChange(fontFamily ?? '');
 
     debugPrint('应用界面字体已设置为: $fontFamily');
+    notifyListeners();
+  }
+
+  /// 设置应用界面字号缩放倍数
+  ///
+  /// [scale] 新的缩放倍数，1.0 表示默认大小
+  /// 会自动保存到配置文件并广播到所有子窗口
+  Future<void> setAppFontScale(double scale) async {
+    if (_appFontScale == scale) return;
+
+    _appFontScale = scale;
+
+    // 保存到设置服务（会自动持久化到配置文件）
+    await SettingsService.instance.updateAppFontScale(scale);
+
+    // 广播界面字号变化到所有子窗口
+    MultiWindowService.instance.broadcastAppFontScaleChange(scale);
+
+    debugPrint('应用界面字号已设置为: $scale');
     notifyListeners();
   }
 
@@ -251,6 +283,17 @@ class ThemeProvider extends ChangeNotifier {
     if (_appFontFamily != fontFamily) {
       _appFontFamily = fontFamily;
       debugPrint('从主窗口更新界面字体: $fontFamily');
+      notifyListeners();
+    }
+  }
+
+  /// 从主窗口接收界面字号变化（子窗口调用）
+  ///
+  /// [scale] 界面字号缩放倍数，1.0 表示默认大小
+  void updateAppFontScaleFromMain(double scale) {
+    if (_appFontScale != scale) {
+      _appFontScale = scale;
+      debugPrint('从主窗口更新界面字号: $scale');
       notifyListeners();
     }
   }

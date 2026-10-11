@@ -325,6 +325,16 @@ class SettingsService extends ChangeNotifier {
     return updateSettings(newSettings);
   }
 
+  /// 获取应用界面字号缩放倍数（1.0 为默认大小）
+  double get appFontScale => _settings.appFontScale;
+
+  /// 更新应用界面字号缩放倍数
+  /// [value] 缩放倍数，1.0 为默认大小
+  Future<bool> updateAppFontScale(double value) async {
+    final newSettings = _settings.copyWith(appFontScale: value);
+    return updateSettings(newSettings);
+  }
+
   // ================= 布局设置相关（右侧边栏 - 布局设置面板）=================
   
   /// 获取是否显示章节标题

@@ -24,6 +24,7 @@ class AppearanceSection extends StatelessWidget {
       children: [
         _buildThemeTile(context, themeProvider),
         _buildAppFontTile(themeProvider),
+        _buildAppFontSizeTile(themeProvider),
         _buildDimCoverTile(context, settingsService),
       ],
     );
@@ -97,6 +98,54 @@ class AppearanceSection extends StatelessWidget {
         value: themeProvider.appFontFamily ?? '',
         items: fontItems,
         onChanged: (value) => themeProvider.setAppFontFamily(value.isEmpty ? null : value),
+      ),
+    );
+  }
+
+  /// 界面字号档位（小/中/大）与缩放倍数的对应关系，中档为默认大小
+  static const Map<String, double> _fontScaleOptions = {
+    'small': 0.8,
+    'medium': 1.0,
+    'large': 1.2,
+  };
+
+  /// 界面字号档位对应的显示名称
+  static const Map<String, String> _fontScaleLabels = {
+    'small': '小',
+    'medium': '中',
+    'large': '大',
+  };
+
+  /// 根据当前缩放倍数反查所属档位，用于回显下拉框选中项
+  String _fontScaleToOption(double scale) {
+    for (final entry in _fontScaleOptions.entries) {
+      if ((entry.value - scale).abs() < 0.001) return entry.key;
+    }
+    return 'medium';
+  }
+
+  /// 构建应用界面字号选择项
+  ///
+  /// 提供小、中、大三档字号，用于适配不同字体在相同字号下的视觉大小差异
+  Widget _buildAppFontSizeTile(ThemeProvider themeProvider) {
+    // 档位下拉选项由档位映射表派生，保证显示名称与缩放倍数始终一致
+    final items = _fontScaleOptions.entries
+        .map((entry) => DropdownItem(
+              displayText: _fontScaleLabels[entry.key] ?? entry.key,
+              value: entry.key,
+            ))
+        .toList();
+
+    return SettingTile(
+      icon: Icons.format_size,
+      title: '界面字号',
+      subtitle: '调整应用界面文字大小，编辑器字体不受影响',
+      trailing: CustomDropdown(
+        width: 90,
+        value: _fontScaleToOption(themeProvider.appFontScale),
+        items: items,
+        onChanged: (value) =>
+            themeProvider.setAppFontScale(_fontScaleOptions[value] ?? 1.0),
       ),
     );
   }

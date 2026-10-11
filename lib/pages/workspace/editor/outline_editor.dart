@@ -3911,6 +3911,15 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
   @override
   Widget build(BuildContext context) {
+    // 编辑器内容不随应用界面字号缩放，保留编辑器自身的字体大小设置
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
+      child: _buildEditorBody(context),
+    );
+  }
+
+  /// 构建编辑器主体内容
+  Widget _buildEditorBody(BuildContext context) {
     final colorScheme = widget.colorScheme;
 
     // 检测窗口从最小化恢复的情况，开启滚动保护防止 TextField 自动滚动到光标位置

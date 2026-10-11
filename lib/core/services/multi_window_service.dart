@@ -44,6 +44,9 @@ class MultiWindowService {
   /// 应用界面字体变化方法名称
   static const String _methodAppFontChanged = 'app_font_changed';
 
+  /// 应用界面字号变化方法名称
+  static const String _methodAppFontScaleChanged = 'app_font_scale_changed';
+
   /// 书籍更新方法名称（工作台保存章节后通知主窗口刷新书架）
   static const String _methodBookUpdated = 'book_updated';
 
@@ -80,6 +83,9 @@ class MultiWindowService {
 
   /// 应用界面字体变化回调（子窗口设置此回调来响应主窗口的界面字体变化）
   void Function(String fontFamily)? onAppFontChanged;
+
+  /// 应用界面字号变化回调（子窗口设置此回调来响应主窗口的界面字号变化）
+  void Function(double scale)? onAppFontScaleChanged;
 
   /// 书籍更新回调（主窗口设置此回调来响应工作台的书籍更新通知）
   /// 当工作台保存章节后，会调用此回通知书架刷新
@@ -148,6 +154,12 @@ class MultiWindowService {
         if (fontFamily != null && onAppFontChanged != null) {
           debugPrint('收到界面字体变化事件');
           onAppFontChanged!(fontFamily);
+        }
+      } else if (call.method == _methodAppFontScaleChanged) {
+        final scale = (call.arguments as num?)?.toDouble();
+        if (scale != null && onAppFontScaleChanged != null) {
+          debugPrint('收到界面字号变化事件');
+          onAppFontScaleChanged!(scale);
         }
       } else if (call.method == _methodFocusWindow) {
         // 收到主窗口的聚焦请求，使用 window_manager 让自己获得焦点
@@ -355,6 +367,20 @@ class MultiWindowService {
       }
     }
     debugPrint('已广播界面字体变化到 ${_workspaceWindowControllers.length} 个子窗口');
+  }
+
+  /// 广播应用界面字号变化到所有子窗口（主窗口调用）
+  ///
+  /// [scale] 界面字号缩放倍数，1.0 表示默认大小
+  Future<void> broadcastAppFontScaleChange(double scale) async {
+    for (final controller in _workspaceWindowControllers.values) {
+      try {
+        await controller.invokeMethod(_methodAppFontScaleChanged, scale);
+      } catch (e) {
+        debugPrint('广播界面字号变化失败: $e');
+      }
+    }
+    debugPrint('已广播界面字号变化到 ${_workspaceWindowControllers.length} 个子窗口');
   }
 
   /// 检查指定书籍的窗口是否已打开

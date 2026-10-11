@@ -22,6 +22,10 @@ class AppSettings {
   /// null 表示跟随系统默认字体
   final String? appFontFamily;
 
+  /// 应用界面字号缩放倍数
+  /// 1.0 为默认大小，小于 1.0 更小、大于 1.0 更大，仅影响应用界面文字
+  final double appFontScale;
+
   // ================= 多窗口设置 =================
   /// 是否在新窗口中打开工作台
   /// true: 工作台在新窗口中打开
@@ -227,6 +231,7 @@ class AppSettings {
     this.activeCustomThemeId,
     // 应用界面字体
     this.appFontFamily, // 应用界面字体名称（null 表示跟随系统默认字体）
+    this.appFontScale = 1.0, // 应用界面字号缩放倍数（1.0 为默认大小）
     // 多窗口设置
     this.openWorkspaceInNewWindow = false,
     this.closeWindowAction = closeActionAsk, // 关闭主窗口时的行为
@@ -319,6 +324,7 @@ class AppSettings {
 
       // 应用界面字体（全局）
       appFontFamily: globalJson['appFontFamily'] as String? ?? defaults.appFontFamily,
+      appFontScale: (globalJson['appFontScale'] as num?)?.toDouble() ?? defaults.appFontScale,
       
       // 多窗口设置（全局）
       openWorkspaceInNewWindow: globalJson['openWorkspaceInNewWindow'] as bool? ?? defaults.openWorkspaceInNewWindow,
@@ -402,6 +408,7 @@ class AppSettings {
         },
         // 应用界面字体
         'appFontFamily': appFontFamily,
+        'appFontScale': appFontScale,
         // 多窗口设置
         'openWorkspaceInNewWindow': openWorkspaceInNewWindow,
         'closeWindowAction': closeWindowAction,
@@ -504,6 +511,7 @@ class AppSettings {
     Object? activeCustomThemeId = _unset,
     // 应用界面字体（传入 null 表示重置为跟随系统默认字体）
     Object? appFontFamily = _unset,
+    double? appFontScale,
     // 多窗口设置
     bool? openWorkspaceInNewWindow,
     String? closeWindowAction,
@@ -570,6 +578,7 @@ class AppSettings {
       activeCustomThemeId: activeCustomThemeId == _unset ? this.activeCustomThemeId : activeCustomThemeId as String?,
       // 应用界面字体
       appFontFamily: appFontFamily == _unset ? this.appFontFamily : appFontFamily as String?,
+      appFontScale: appFontScale ?? this.appFontScale,
       // 多窗口设置
       openWorkspaceInNewWindow: openWorkspaceInNewWindow ?? this.openWorkspaceInNewWindow,
       closeWindowAction: closeWindowAction ?? this.closeWindowAction,
@@ -660,7 +669,7 @@ class AppSettings {
 
   @override
   String toString() {
-    return 'AppSettings(themeMode: $themeMode, appFontFamily: $appFontFamily, openWorkspaceInNewWindow: $openWorkspaceInNewWindow, fontFamily: $fontFamily, fontSize: $fontSize, outlineFontFamily: $outlineFontFamily, outlineFontSize: $outlineFontSize)';
+    return 'AppSettings(themeMode: $themeMode, appFontFamily: $appFontFamily, appFontScale: $appFontScale, openWorkspaceInNewWindow: $openWorkspaceInNewWindow, fontFamily: $fontFamily, fontSize: $fontSize, outlineFontFamily: $outlineFontFamily, outlineFontSize: $outlineFontSize)';
   }
 
   @override
@@ -672,6 +681,7 @@ class AppSettings {
            other.activeCustomThemeId == activeCustomThemeId &&
            // 应用界面字体
            other.appFontFamily == appFontFamily &&
+           other.appFontScale == appFontScale &&
            other.openWorkspaceInNewWindow == openWorkspaceInNewWindow &&
            other.closeWindowAction == closeWindowAction &&
            // 启动与恢复设置
@@ -743,6 +753,7 @@ class AppSettings {
         activeCustomThemeId,
         // 应用界面字体
         appFontFamily,
+        appFontScale,
         // 启动与恢复设置
         autoOpenLastWorkOnStartup,
         restoreTabsOnOpenWork,
