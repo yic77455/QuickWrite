@@ -458,7 +458,7 @@ class AboutPage extends StatelessWidget {
                 ],
               ),
               const Spacer(),
-              // 检查更新：向 GitHub 查询最新版本
+              // 检查更新：向更新源查询最新版本
               OutlinedButton.icon(
                 onPressed: () => UpdateDialog.show(context, currentVersion: AppInfoService.instance.version),
                 icon: const Icon(Icons.autorenew, size: 16),

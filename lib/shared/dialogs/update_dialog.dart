@@ -7,7 +7,7 @@ import 'package:quick_write/shared/widgets/widgets.dart';
 
 /// 检查更新对话框
 ///
-/// 打开后自动向 GitHub 查询最新版本，并按结果切换展示：
+/// 打开后自动向更新源查询最新版本，并按结果切换展示：
 /// 检查中、已是最新、发现新版本、下载中、下载完成、检查失败
 class UpdateDialog {
   UpdateDialog._();
@@ -73,7 +73,7 @@ class _UpdateDialogContentState extends State<_UpdateDialogContent> {
 
   // ================= 业务流程 =================
 
-  /// 向 GitHub 查询最新版本
+  /// 向更新源查询最新版本
   Future<void> _check() async {
     setState(() {
       _stage = _UpdateStage.checking;
@@ -163,8 +163,10 @@ class _UpdateDialogContentState extends State<_UpdateDialogContent> {
   }
 
   /// 在浏览器中打开版本发布页
+  ///
+  /// 优先打开本次检查所用更新源的发布页，未取得结果时回退到默认发布页
   Future<void> _openReleasePage() async {
-    await UrlOpener.open(UpdateService.releasesPageUrl);
+    await UrlOpener.open(_result?.releaseUrl ?? UpdateService.releasesPageUrl);
   }
 
   /// 在文件管理器中定位已下载的安装包

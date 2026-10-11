@@ -5,7 +5,12 @@ import 'package:path_provider/path_provider.dart';
 
 /// 发布资产（Release 中上传的文件）
 class UpdateAsset {
-  const UpdateAsset({required this.name, required this.downloadUrl, required this.size});
+  const UpdateAsset({
+    required this.name,
+    required this.downloadUrl,
+    required this.size,
+    required this.sourceName,
+  });
 
   /// 文件名
   final String name;
@@ -15,6 +20,33 @@ class UpdateAsset {
 
   /// 文件大小（字节）
   final int size;
+
+  /// 资产所属更新源的名称，用于当前源下载失败时切换到其他源兜底
+  final String sourceName;
+}
+
+/// 更新源描述
+///
+/// 每个源提供最新发布查询接口与对应的版本发布页地址
+class _UpdateSource {
+  const _UpdateSource({
+    required this.name,
+    required this.latestApi,
+    required this.releasesPageUrl,
+    this.headers,
+  });
+
+  /// 源名称
+  final String name;
+
+  /// 最新发布查询接口
+  final String latestApi;
+
+  /// 版本发布页地址
+  final String releasesPageUrl;
+
+  /// 访问该源接口时附加的请求头
+  final Map<String, String>? headers;
 }
 
 /// 更新检查结果
@@ -74,31 +106,46 @@ class UpdateCancelToken {
 
 /// 应用更新服务
 ///
-/// 通过 GitHub Releases API 检查最新版本，并支持下载当前平台对应的安装包。
+/// 通过发布仓库 API 检查最新版本，并支持下载当前平台对应的安装包。
+/// 优先使用 GitHub，无法连接时自动切换到 Gitee 兜底。
 class UpdateService {
   UpdateService._();
 
   /// 仓库所有者
   static const String _owner = 'yic77455';
 
-  /// 仓库名称
-  static const String _repo = 'QuickWrite';
+  /// GitHub 仓库名称
+  static const String _githubRepo = 'QuickWrite';
 
-  /// 最新发布查询接口
-  static const String _latestApi = 'https://api.github.com/repos/$_owner/$_repo/releases/latest';
+  /// Gitee 仓库名称
+  static const String _giteeRepo = 'quick-write';
 
-  /// 版本发布页地址
-  static const String releasesPageUrl = 'https://github.com/$_owner/$_repo/releases';
+  /// 版本发布页地址（主源 GitHub）
+  static const String releasesPageUrl = 'https://github.com/$_owner/$_githubRepo/releases';
+
+  /// 更新源列表
+  ///
+  /// 按优先级排序：优先 GitHub，无法连接时自动切换到 Gitee
+  static const List<_UpdateSource> _sources = [
+    _UpdateSource(
+      name: 'GitHub',
+      latestApi: 'https://api.github.com/repos/$_owner/$_githubRepo/releases/latest',
+      releasesPageUrl: releasesPageUrl,
+      headers: {'Accept': 'application/vnd.github+json'},
+    ),
+    _UpdateSource(
+      name: 'Gitee',
+      latestApi: 'https://gitee.com/api/v5/repos/$_owner/$_giteeRepo/releases/latest',
+      releasesPageUrl: 'https://gitee.com/$_owner/$_giteeRepo/releases',
+    ),
+  ];
 
   /// 查询更新所用的网络客户端
   static final Dio _apiDio = Dio(
     BaseOptions(
       connectTimeout: const Duration(seconds: 12),
       receiveTimeout: const Duration(seconds: 12),
-      headers: {
-        'Accept': 'application/vnd.github+json',
-        'User-Agent': 'QuickWrite',
-      },
+      headers: {'User-Agent': 'QuickWrite'},
     ),
   );
 
@@ -106,34 +153,55 @@ class UpdateService {
 
   /// 检查是否有新版本
   ///
-  /// [currentVersion] 为当前应用版本号；网络异常或响应异常时抛出 [UpdateException]
+  /// [currentVersion] 为当前应用版本号；按优先级依次尝试各更新源，
+  /// 全部失败时抛出 [UpdateException]
   static Future<UpdateCheckResult> checkForUpdate(String currentVersion) async {
-    final Response<Map<String, dynamic>> response;
-    try {
-      response = await _apiDio.get<Map<String, dynamic>>(_latestApi);
-    } on DioException catch (e) {
-      throw UpdateException(_describeError(e));
+    UpdateException? lastError;
+
+    for (final source in _sources) {
+      try {
+        final response = await _requestLatest(source);
+        final data = response.data;
+        if (data == null) throw const UpdateException('未获取到版本信息');
+        return _buildResult(source, data, currentVersion);
+      } on UpdateException catch (e) {
+        lastError = e;
+      }
     }
 
-    final data = response.data;
-    if (data == null) {
-      throw const UpdateException('未获取到版本信息');
-    }
+    throw lastError ?? const UpdateException('请求失败，请稍后重试');
+  }
 
+  /// 将某一更新源返回的发布信息转换为检查结果
+  static UpdateCheckResult _buildResult(
+    _UpdateSource source,
+    Map<String, dynamic> data,
+    String currentVersion,
+  ) {
     final tag = (data['tag_name'] as String?)?.trim() ?? '';
-    if (tag.isEmpty) {
-      throw const UpdateException('未获取到版本号');
-    }
+    if (tag.isEmpty) throw const UpdateException('未获取到版本号');
 
     final latestVersion = _normalizeVersion(tag);
 
     return UpdateCheckResult(
       hasUpdate: compareVersion(latestVersion, currentVersion) > 0,
       latestVersion: latestVersion,
-      releaseUrl: (data['html_url'] as String?) ?? releasesPageUrl,
+      releaseUrl: (data['html_url'] as String?) ?? source.releasesPageUrl,
       releaseNotes: (data['body'] as String?)?.trim() ?? '',
-      asset: _pickPlatformAsset(data['assets']),
+      asset: _pickPlatformAsset(data['assets'], source.name),
     );
+  }
+
+  /// 请求指定更新源的最新发布
+  static Future<Response<Map<String, dynamic>>> _requestLatest(_UpdateSource source) async {
+    try {
+      return await _apiDio.get<Map<String, dynamic>>(
+        source.latestApi,
+        options: Options(headers: source.headers),
+      );
+    } on DioException catch (e) {
+      throw UpdateException(_describeError(e));
+    }
   }
 
   // ================= 下载安装包 =================
@@ -142,8 +210,25 @@ class UpdateService {
   ///
   /// [asset] 待下载的发布资产；[onProgress] 为进度回调（0~1，总大小未知时传 null）；
   /// [cancelToken] 可用于中止下载。返回下载完成后的本地文件路径；
+  /// 当前源下载失败时自动改用其他源的同名资产重试；
   /// 失败抛出 [UpdateException]，被中止抛出 [UpdateCancelledException]
   static Future<String> downloadAsset(
+    UpdateAsset asset, {
+    void Function(double? progress)? onProgress,
+    UpdateCancelToken? cancelToken,
+  }) async {
+    try {
+      return await _downloadToFile(asset, onProgress: onProgress, cancelToken: cancelToken);
+    } on UpdateException {
+      // 当前源不可用时，改用其他源的同名资产重试
+      final fallback = await _resolveFallbackAsset(asset);
+      if (fallback == null) rethrow;
+      return await _downloadToFile(fallback, onProgress: onProgress, cancelToken: cancelToken);
+    }
+  }
+
+  /// 将资产下载到本地并返回保存路径
+  static Future<String> _downloadToFile(
     UpdateAsset asset, {
     void Function(double? progress)? onProgress,
     UpdateCancelToken? cancelToken,
@@ -173,6 +258,26 @@ class UpdateService {
     }
 
     return savePath;
+  }
+
+  /// 在其他更新源中查找与 [asset] 同名的资产
+  ///
+  /// 供下载兜底使用：找不到或源不可用时返回 null
+  static Future<UpdateAsset?> _resolveFallbackAsset(UpdateAsset asset) async {
+    for (final source in _sources) {
+      if (source.name == asset.sourceName) continue;
+      try {
+        final response = await _requestLatest(source);
+        final data = response.data;
+        if (data == null) continue;
+        for (final candidate in _parseAssets(data['assets'], source.name)) {
+          if (candidate.name == asset.name) return candidate;
+        }
+      } on UpdateException {
+        // 兜底源不可用时跳过，继续尝试其他源
+      }
+    }
+    return null;
   }
 
   // ================= 版本比较 =================
@@ -213,11 +318,9 @@ class UpdateService {
 
   // ================= 内部辅助 =================
 
-  /// 从发布资产中挑选适配当前平台的文件
-  ///
-  /// 优先按平台关键词匹配；仅有单个资产且未命中关键词时直接使用该资产
-  static UpdateAsset? _pickPlatformAsset(dynamic rawAssets) {
-    if (rawAssets is! List) return null;
+  /// 解析发布资产列表
+  static List<UpdateAsset> _parseAssets(dynamic rawAssets, String sourceName) {
+    if (rawAssets is! List) return const [];
 
     final assets = <UpdateAsset>[];
     for (final item in rawAssets) {
@@ -229,8 +332,17 @@ class UpdateService {
         name: name,
         downloadUrl: url,
         size: (item['size'] as num?)?.toInt() ?? 0,
+        sourceName: sourceName,
       ));
     }
+    return assets;
+  }
+
+  /// 从发布资产中挑选适配当前平台的文件
+  ///
+  /// 优先按平台关键词匹配；仅有单个资产且未命中关键词时直接使用该资产
+  static UpdateAsset? _pickPlatformAsset(dynamic rawAssets, String sourceName) {
+    final assets = _parseAssets(rawAssets, sourceName);
     if (assets.isEmpty) return null;
 
     final keywords = _platformKeywords();
