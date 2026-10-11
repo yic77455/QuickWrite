@@ -19,19 +19,38 @@ typedef _CreateMutexWDart = int Function(
   Pointer<Utf16> lpName,
 );
 
-/// GetLastError：获取当前线程最近一次的错误码
-typedef _GetLastErrorNative = Uint32 Function();
-typedef _GetLastErrorDart = int Function();
+/// ReleaseMutex：释放对互斥体的所有权，返回值可用于判断调用前是否拥有该互斥体
+typedef _ReleaseMutexNative = Int32 Function(IntPtr hMutex);
+typedef _ReleaseMutexDart = int Function(int hMutex);
 
-/// FindWindowW：按窗口标题查找顶层窗口
-typedef _FindWindowWNative = IntPtr Function(
-  Pointer<Utf16> lpClassName,
-  Pointer<Utf16> lpWindowName,
+/// EnumWindows 的枚举回调：返回非零继续枚举，返回零停止
+typedef _EnumWindowsProcNative = Int32 Function(IntPtr hWnd, IntPtr lParam);
+
+/// EnumWindows：枚举系统所有顶层窗口
+typedef _EnumWindowsNative = Int32 Function(
+  Pointer<NativeFunction<_EnumWindowsProcNative>> lpEnumFunc,
+  IntPtr lParam,
 );
-typedef _FindWindowWDart = int Function(
-  Pointer<Utf16> lpClassName,
-  Pointer<Utf16> lpWindowName,
+typedef _EnumWindowsDart = int Function(
+  Pointer<NativeFunction<_EnumWindowsProcNative>> lpEnumFunc,
+  int lParam,
 );
+
+/// GetWindowTextW：将窗口标题写入缓冲区，返回实际复制的字符数
+typedef _GetWindowTextWNative = Int32 Function(
+  IntPtr hWnd,
+  Pointer<Utf16> lpString,
+  Int32 nMaxCount,
+);
+typedef _GetWindowTextWDart = int Function(
+  int hWnd,
+  Pointer<Utf16> lpString,
+  int nMaxCount,
+);
+
+/// GetWindowTextLengthW：获取窗口标题的字符数
+typedef _GetWindowTextLengthWNative = Int32 Function(IntPtr hWnd);
+typedef _GetWindowTextLengthWDart = int Function(int hWnd);
 
 /// IsIconic：判断窗口是否处于最小化状态
 typedef _IsIconicNative = Int32 Function(IntPtr hWnd);
@@ -81,9 +100,6 @@ class SingleInstanceService {
   /// 单实例互斥体名称，用于标识本应用（同一用户会话下唯一）
   static const String _mutexName = 'QuickWrite_SingleInstance_Mutex';
 
-  /// ERROR_ALREADY_EXISTS：互斥体已存在，说明已有进程在运行
-  static const int _errorAlreadyExists = 183;
-
   /// SW_RESTORE：还原被最小化的窗口
   static const int _swRestore = 9;
 
@@ -102,9 +118,9 @@ class SingleInstanceService {
   static final _CreateMutexWDart _createMutex = _kernel32
       .lookupFunction<_CreateMutexWNative, _CreateMutexWDart>('CreateMutexW');
 
-  /// 获取当前线程最近一次的错误码
-  static final _GetLastErrorDart _getLastError = _kernel32
-      .lookupFunction<_GetLastErrorNative, _GetLastErrorDart>('GetLastError');
+  /// 释放互斥体所有权；返回非零表示调用前本进程拥有该互斥体
+  static final _ReleaseMutexDart _releaseMutex = _kernel32
+      .lookupFunction<_ReleaseMutexNative, _ReleaseMutexDart>('ReleaseMutex');
 
   /// 获取当前进程 ID
   static final _GetCurrentProcessIdDart _getCurrentProcessId = _kernel32
@@ -115,9 +131,19 @@ class SingleInstanceService {
   static final _CloseHandleDart _closeHandle = _kernel32
       .lookupFunction<_CloseHandleNative, _CloseHandleDart>('CloseHandle');
 
-  /// 按窗口标题查找顶层窗口
-  static final _FindWindowWDart _findWindow = _user32
-      .lookupFunction<_FindWindowWNative, _FindWindowWDart>('FindWindowW');
+  /// 枚举系统所有顶层窗口
+  static final _EnumWindowsDart _enumWindows = _user32
+      .lookupFunction<_EnumWindowsNative, _EnumWindowsDart>('EnumWindows');
+
+  /// 读取指定窗口的标题文本
+  static final _GetWindowTextWDart _getWindowText = _user32
+      .lookupFunction<_GetWindowTextWNative, _GetWindowTextWDart>(
+          'GetWindowTextW');
+
+  /// 获取指定窗口标题的字符数
+  static final _GetWindowTextLengthWDart _getWindowTextLength = _user32
+      .lookupFunction<_GetWindowTextLengthWNative, _GetWindowTextLengthWDart>(
+          'GetWindowTextLengthW');
 
   /// 获取窗口所属的进程 ID
   static final _GetWindowThreadProcessIdDart _getWindowThreadProcessId = _user32
@@ -156,25 +182,31 @@ class SingleInstanceService {
 
     final namePtr = _mutexName.toNativeUtf16();
     try {
-      final handle = _createMutex(nullptr, 0, namePtr);
+      // bInitialOwner = TRUE：新建互斥体时本进程成为所有者；
+      // 若互斥体已存在则本进程不会成为所有者，可据此判断是否为首个实例
+      final handle = _createMutex(nullptr, 1, namePtr);
       if (handle == 0) {
         // 创建互斥体失败时保守放行，避免因系统异常导致应用无法启动
         return true;
       }
-      if (_getLastError() == _errorAlreadyExists) {
-        // 互斥体已存在：若主窗口属于当前进程，说明只是当前进程重新执行了
-        // main()（如开发时的热重启），旧句柄仍在本进程内打开导致互斥体残留，
-        // 此时并非其它实例在运行，继续沿用本进程即可；
-        // 否则视为已有其它实例在运行，释放多余句柄并返回失败
-        if (!_isMainWindowOwnedByCurrentProcess()) {
-          _closeHandle(handle);
-          return false;
-        }
+      // 释放所有权：返回非零表示此前本进程拥有该互斥体（即新建成功、当前为首个实例）；
+      // 返回零表示互斥体此前已存在（已有其它实例在运行）。
+      // 该判断依赖 ReleaseMutex 的直接返回值，不依赖易被 FFI 层清除的 GetLastError。
+      final owned = _releaseMutex(handle) != 0;
+      if (owned) {
+        // 成功创建互斥体，当前进程是首个实例，保留句柄以维持互斥体存活
         _mutexHandle = handle;
         return true;
       }
-      _mutexHandle = handle;
-      return true;
+      // 互斥体已存在
+      if (_isMainWindowOwnedByCurrentProcess()) {
+        // 主窗口属于当前进程：属于同进程内的热重启，保留句柄并继续运行
+        _mutexHandle = handle;
+        return true;
+      }
+      // 已有其它实例在运行，释放多余句柄并返回失败
+      _closeHandle(handle);
+      return false;
     } finally {
       calloc.free(namePtr);
     }
@@ -182,13 +214,55 @@ class SingleInstanceService {
 
   // ================= 主窗口查找 =================
 
-  /// 按窗口标题查找主窗口句柄，未找到时返回 0
+  /// 查找主窗口句柄，未找到时返回 0
+  ///
+  /// 主窗口标题会随打开的作品变化（如「《书名》 - 快码字」），
+  /// 因此不能按固定标题精确匹配。这里枚举所有顶层窗口，
+  /// 优先返回标题与应用标题完全一致的窗口，其次返回标题中包含应用标题的窗口
   int _findMainWindow() {
-    final titlePtr = GlobalConstants.appTitle.toNativeUtf16();
+    // 精确匹配的窗口句柄（标题即为应用标题）
+    int exactMatch = 0;
+    // 包含匹配的窗口句柄（标题中含有应用标题，如带作品名的主窗口）
+    int partialMatch = 0;
+
+    final callback = NativeCallable<_EnumWindowsProcNative>.isolateLocal(
+      (int hWnd, int _) {
+        final title = _getWindowTitle(hWnd);
+        // 跳过没有标题的窗口（如各类系统隐藏窗口）
+        if (title.isEmpty) return 1;
+
+        if (title == GlobalConstants.appTitle) {
+          exactMatch = hWnd;
+          return 0; // 已找到精确匹配，无需继续枚举
+        }
+        if (partialMatch == 0 && title.contains(GlobalConstants.appTitle)) {
+          partialMatch = hWnd;
+        }
+        return 1;
+      },
+      exceptionalReturn: 0,
+    );
+
     try {
-      return _findWindow(nullptr, titlePtr);
+      _enumWindows(callback.nativeFunction, 0);
     } finally {
-      calloc.free(titlePtr);
+      callback.close();
+    }
+
+    return exactMatch != 0 ? exactMatch : partialMatch;
+  }
+
+  /// 读取指定窗口的标题文本，无标题或读取失败时返回空字符串
+  String _getWindowTitle(int hWnd) {
+    final length = _getWindowTextLength(hWnd);
+    if (length <= 0) return '';
+
+    final buffer = calloc<Uint16>(length + 1).cast<Utf16>();
+    try {
+      final copied = _getWindowText(hWnd, buffer, length + 1);
+      return copied <= 0 ? '' : buffer.toDartString();
+    } finally {
+      calloc.free(buffer);
     }
   }
 
