@@ -83,12 +83,14 @@ class SearchQueryParser {
   }) {
     if (keywords.isEmpty) return null;
     final source = caseSensitive ? text : text.toLowerCase();
+    // 起始位置限制在文本范围内，超出末尾时不存在可匹配区间
+    final from = start.clamp(0, source.length);
 
     KeywordMatch? best;
     for (final keyword in keywords) {
       final k = caseSensitive ? keyword : keyword.toLowerCase();
       if (k.isEmpty) continue;
-      final index = source.indexOf(k, start);
+      final index = source.indexOf(k, from);
       if (index == -1) continue;
       if (best == null || index < best.start) {
         best = KeywordMatch(start: index, length: k.length);

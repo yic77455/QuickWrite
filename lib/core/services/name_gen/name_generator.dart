@@ -6,8 +6,8 @@ import 'package:quick_write/core/models/name_gen/name_gen_options.dart';
 /// 名字生成器
 ///
 /// 纯函数式的名字生成逻辑，根据词典与参数组合出人名或地名。
-/// 词条池为"逐字"池（全部为单字）时按字数组合多个字，
-/// 为"整词"池时直接取一个完整词条。
+/// 生成方式由词典的 [NameDictionary.isCharBased] 声明：
+/// 逐字式按字数组合多个单字，整词式直接取一个完整词条。
 class NameGenerator {
   NameGenerator._();
 
@@ -67,8 +67,8 @@ class NameGenerator {
 
   /// 生成地名
   ///
-  /// 逐字主体池按字数组合单字，整词主体池直接取一个完整地名；
-  /// 后缀优先取自定义后缀，否则从词典后缀池随机选取。
+  /// 按词典声明的生成方式组合主体词：逐字式由单字按字数组合，整词式取一个
+  /// 完整地名；后缀优先取自定义后缀，否则从词典后缀池随机选取。
   static String? generatePlace(
     NameDictionary dictionary, {
     required NameGenOptions options,
@@ -77,7 +77,7 @@ class NameGenerator {
     final stemPool = dictionary.pool(NamePoolKeys.stem);
     if (stemPool.isEmpty) return null;
 
-    final String? stem = _isCharPool(stemPool)
+    final String? stem = dictionary.isCharBased
         ? _pickChars(stemPool, _resolveLength(options.stemLength, random), random)
         : _pickOne(stemPool, random);
     if (stem == null || stem.isEmpty) return null;
@@ -92,7 +92,7 @@ class NameGenerator {
   /// 构建名字部分
   ///
   /// 按性别取向选择用字池：指定性别时优先取该性别池，池为空时回退到另一性别；
-  /// 不限性别时合并两性用字池。逐字池按字数组合单字，整词池直接取一个完整词条。
+  /// 不限性别时合并两性用字池。逐字式按字数组合单字，整词式直接取一个完整词条。
   static String? _buildGivenName(
     NameDictionary dictionary,
     PersonGender gender,
@@ -116,7 +116,7 @@ class NameGenerator {
     }
     if (pool.isEmpty) return null;
 
-    if (_isCharPool(pool)) {
+    if (dictionary.isCharBased) {
       return _pickChars(pool, _resolveLength(length, random), random);
     }
     return _pickOne(pool, random);
@@ -125,11 +125,6 @@ class NameGenerator {
   /// 解析字数：大于 0 时使用指定值，否则随机取 1~2
   static int _resolveLength(int length, Random random) {
     return length > 0 ? length : 1 + random.nextInt(2);
-  }
-
-  /// 判断词条池是否为逐字池（所有词条均为单字）
-  static bool _isCharPool(List<String> pool) {
-    return pool.isNotEmpty && pool.every((e) => e.runes.length == 1);
   }
 
   /// 从词条池随机选取一个词条，池为空时返回 null

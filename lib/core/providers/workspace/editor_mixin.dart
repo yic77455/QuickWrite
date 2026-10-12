@@ -47,6 +47,12 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
   /// 全文搜索是否正在进行
   bool _isGlobalSearching = false;
 
+  /// 等待内容加载完成的标签页（标签页ID -> 完成信号）
+  ///
+  /// 跳转到尚未加载内容的新标签页时，需等编辑器异步读取完章节内容后，
+  /// 才能依据全文搜索记录的偏移量定位匹配位置，此表用于在加载完成时唤醒等待方。
+  final Map<String, Completer<void>> _contentLoadWaiters = {};
+
   // ================= 多标签页状态 =================
 
   /// 当前选中的标签页索引
@@ -666,6 +672,11 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
           _chapters.where((c) => c.uuid == result.chapterUuid).firstOrNull;
       if (chapter == null) return;
 
+      // 新标签页的内容由编辑器异步读取，注册完成信号，
+      // 待内容就绪后再依据搜索记录的偏移量定位，避免在内容未加载时计算匹配位置
+      final completer = Completer<void>();
+      _contentLoadWaiters[chapter.uuid] = completer;
+
       openTab(
         EditorTab(
           id: chapter.uuid,
@@ -676,8 +687,12 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
         isPreview: true,
       );
 
-      // 等待内容加载
-      await Future.delayed(const Duration(milliseconds: 100));
+      // 等待内容加载完成；超时兜底，避免标签页被中途切换导致永久等待
+      try {
+        await completer.future.timeout(const Duration(seconds: 2));
+      } on TimeoutException {
+        _contentLoadWaiters.remove(chapter.uuid);
+      }
     }
 
     // 定位到匹配行的起始偏移量
@@ -706,15 +721,37 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
           match.start,
           match.start + match.length,
         );
-        // 通知小说编辑器滚动到新选区位置
-        final editorState = tab.editorKey.currentState;
-        if (editorState is NovelEditorState) {
-          editorState.scrollToCursor();
-        }
+        // 通知小说编辑器滚动到新选区位置（编辑器尚未挂载时延后至挂载完成）
+        _scrollToSelectionWhenReady(tab, 10);
       }
     }
 
     notifyListeners();
+  }
+
+  /// 在编辑器挂载完成后滚动到当前选区
+  ///
+  /// 新建标签页的内容加载完成时，编辑器组件要到随后的一帧才创建，
+  /// 此时其状态尚不可用，直接滚动不会生效；此处逐帧等待挂载完成后再滚动定位。
+  /// [maxFrames] 限制最大等待帧数，避免标签页被关闭等情况下无限等待。
+  void _scrollToSelectionWhenReady(EditorTab tab, int maxFrames) {
+    final editorState = tab.editorKey.currentState;
+    if (editorState is NovelEditorState) {
+      editorState.scrollToCursor();
+      return;
+    }
+    if (maxFrames <= 0 || !_openedTabs.contains(tab)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToSelectionWhenReady(tab, maxFrames - 1);
+    });
+  }
+
+  /// 通知指定标签页的内容已加载完成
+  ///
+  /// 由编辑器完成异步内容读取后调用，用于唤醒等待该标签页内容就绪的调用方
+  /// （如全文搜索跳转）。
+  void notifyTabContentLoaded(String tabId) {
+    _contentLoadWaiters.remove(tabId)?.complete();
   }
 
   // ================= 标签页管理 =================

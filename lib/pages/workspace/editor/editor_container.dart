@@ -208,6 +208,8 @@ class _EditorContainerState extends State<EditorContainer> {
         });
       }
       _loadingTabId = null;
+      // 通知等待该标签页内容就绪的调用方（如全文搜索跳转）
+      provider.notifyTabContentLoaded(tab.id);
     }
   }
   

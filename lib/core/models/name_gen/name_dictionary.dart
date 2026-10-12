@@ -76,6 +76,12 @@ class NamePoolKeys {
 /// 描述一个可用于生成人名的字库集合。词典可分为内置词典与自定义词典，
 /// 内置词典随应用提供，自定义词典由用户创建。
 class NameDictionary {
+  /// 自定义词典排序序号的起始值
+  ///
+  /// 内置词典使用小于该值的序号，从而始终排在自定义词典之前，并向内扩展
+  /// 预留出充足空间；自定义词典从该值起依次递增。
+  static const int customOrderStart = 1000;
+
   /// 词典唯一标识
   final String id;
 
@@ -87,6 +93,18 @@ class NameDictionary {
 
   /// 是否为内置词典
   final bool isBuiltin;
+
+  /// 排序序号
+  ///
+  /// 数值越小越靠前，默认词典取最小值 0，内置词典依次递增且均小于
+  /// [customOrderStart]，自定义词典从 [customOrderStart] 起依次递增。
+  final int orderIndex;
+
+  /// 是否按"逐字"方式生成
+  ///
+  /// true 表示名字/主体词由多个单字组合而成，生成时可选字数；
+  /// false 表示词条本身即完整的名字或地名，只能整词选取。
+  final bool isCharBased;
 
   /// 是否"名在前"
   ///
@@ -106,6 +124,8 @@ class NameDictionary {
     required this.name,
     required this.category,
     this.isBuiltin = false,
+    this.orderIndex = customOrderStart,
+    this.isCharBased = false,
     this.givenFirst = false,
     this.pools = const {},
   });
@@ -118,11 +138,16 @@ class NameDictionary {
       pools[key] = (value as List<dynamic>).map((e) => e as String).toList();
     });
 
+    final category = NameCategory.fromId(json['category'] as String? ?? '');
+
     return NameDictionary(
       id: json['id'] as String? ?? '',
       name: json['name'] as String? ?? '',
-      category: NameCategory.fromId(json['category'] as String? ?? ''),
+      category: category,
       isBuiltin: json['isBuiltin'] as bool? ?? false,
+      orderIndex: json['orderIndex'] as int? ?? customOrderStart,
+      // 早期词典未声明生成方式，依据词条池推断以保持原行为
+      isCharBased: json['isCharBased'] as bool? ?? inferCharBased(category, pools),
       givenFirst: json['givenFirst'] as bool? ?? false,
       pools: pools,
     );
@@ -135,6 +160,8 @@ class NameDictionary {
       'name': name,
       'category': category.id,
       'isBuiltin': isBuiltin,
+      'orderIndex': orderIndex,
+      'isCharBased': isCharBased,
       'givenFirst': givenFirst,
       'pools': pools,
     };
@@ -146,6 +173,8 @@ class NameDictionary {
     String? name,
     NameCategory? category,
     bool? isBuiltin,
+    int? orderIndex,
+    bool? isCharBased,
     bool? givenFirst,
     Map<String, List<String>>? pools,
   }) {
@@ -154,6 +183,8 @@ class NameDictionary {
       name: name ?? this.name,
       category: category ?? this.category,
       isBuiltin: isBuiltin ?? this.isBuiltin,
+      orderIndex: orderIndex ?? this.orderIndex,
+      isCharBased: isCharBased ?? this.isCharBased,
       givenFirst: givenFirst ?? this.givenFirst,
       pools: pools ?? this.pools,
     );
@@ -161,4 +192,22 @@ class NameDictionary {
 
   /// 读取指定分组的词条（分组不存在时返回空列表）
   List<String> pool(String key) => pools[key] ?? const [];
+
+  /// 依据类别与词条池推断是否按"逐字"方式生成
+  ///
+  /// 人名依据男女名字用字池，地名依据主体词池；相关词条全部为单字时
+  /// 按逐字生成。供未显式声明生成方式的词典（如早期自定义词典）使用。
+  static bool inferCharBased(NameCategory category, Map<String, List<String>> pools) {
+    switch (category) {
+      case NameCategory.person:
+        return _isCharPool(pools[NamePoolKeys.male] ?? const []) &&
+            _isCharPool(pools[NamePoolKeys.female] ?? const []);
+      case NameCategory.place:
+        return _isCharPool(pools[NamePoolKeys.stem] ?? const []);
+    }
+  }
+
+  /// 判断词条池是否全部由单字组成（空池视为逐字池）
+  static bool _isCharPool(List<String> pool) =>
+      pool.every((entry) => entry.runes.length == 1);
 }

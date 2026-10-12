@@ -125,6 +125,8 @@ class _NameDictionaryEditorContentState extends State<_NameDictionaryEditorConte
       name: name.isEmpty ? _category.label : name,
       category: _category,
       isBuiltin: widget.dictionary?.isBuiltin ?? false,
+      // 依据词条内容判定生成方式并写入词典，避免运行时再推断
+      isCharBased: NameDictionary.inferCharBased(_category, pools),
       givenFirst: _category == NameCategory.person && _givenFirst,
       pools: pools,
     );

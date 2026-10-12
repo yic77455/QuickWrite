@@ -74,31 +74,14 @@ class NameOptionsPanel extends StatelessWidget {
   /// 参数输入框统一宽度
   static const double _fieldWidth = 100;
 
-  /// 名字用字是否为逐字池
+  /// 当前词典是否按逐字方式生成
   ///
-  /// 逐字词典的名字由多个单字组合而成，支持按字数生成；
-  /// 整词词典（如西方人名、日本人名）的名字为完整词条，字数不可选。
-  bool get _givenIsCharPool {
-    final dict = dictionary;
-    if (dict == null) return true;
-    return _isCharPool(dict.pool(NamePoolKeys.male)) &&
-        _isCharPool(dict.pool(NamePoolKeys.female));
-  }
-
-  /// 地名主体词是否为逐字池
-  bool get _stemIsCharPool {
-    final dict = dictionary;
-    if (dict == null) return true;
-    return _isCharPool(dict.pool(NamePoolKeys.stem));
-  }
-
-  /// 当前类别的名字是否由逐字池组合
-  bool get _usesCharPool =>
-      category == NameCategory.person ? _givenIsCharPool : _stemIsCharPool;
+  /// 由词典自身声明；未选择词典时按逐字处理，保留字数选项。
+  bool get _usesCharPool => dictionary?.isCharBased ?? true;
 
   /// 当前词典对应的长度选项
   ///
-  /// 逐字池按字数组合，整词池只能随机取整词。
+  /// 逐字式按字数组合，整词式只能随机取整词。
   List<DropdownItem> get _lengthItems {
     if (!_usesCharPool) return _wordLengthItems;
     return category == NameCategory.person ? _personLengthItems : _placeLengthItems;
@@ -113,10 +96,6 @@ class NameOptionsPanel extends StatelessWidget {
         : '${options.stemLength}';
     return _lengthItems.any((item) => item.value == value) ? value : '0';
   }
-
-  /// 判断词条池是否为逐字池（空池视为逐字池）
-  static bool _isCharPool(List<String> pool) =>
-      pool.every((entry) => entry.runes.length == 1);
 
   @override
   Widget build(BuildContext context) {

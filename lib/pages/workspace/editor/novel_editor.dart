@@ -291,9 +291,11 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   ///
   /// 供外部调用（如查找替换导航时），使编辑器滚动到当前选区所在位置
   void scrollToCursor() {
-    _scrollGuard.unprotect();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) widget.controller.makeCursorCenterIfInvisible();
+      if (!mounted) return;
+      // 滚动前解除滚动保护，避免保护逻辑把位置拉回旧的滚动值导致定位无效
+      _scrollGuard.unprotect();
+      widget.controller.makeCursorCenterIfInvisible();
     });
   }
 

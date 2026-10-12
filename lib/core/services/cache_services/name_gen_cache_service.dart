@@ -87,27 +87,56 @@ class NameGenCacheService extends CacheService<NameGenCacheData> {
   // ================= 词典管理 =================
 
   /// 获取指定类别的全部词典
+  ///
+  /// 按 [NameDictionary.orderIndex] 升序排列，序号相同时以 ID 兜底，
+  /// 保证默认词典居首、内置词典顺序固定、自定义词典排在最后。
   List<NameDictionary> getDictionaries(NameCategory category) {
-    return _dictionaries.where((d) => d.category == category).toList();
+    final list = _dictionaries.where((d) => d.category == category).toList()
+      ..sort((a, b) {
+        final byOrder = a.orderIndex.compareTo(b.orderIndex);
+        return byOrder != 0 ? byOrder : a.id.compareTo(b.id);
+      });
+    return list;
   }
 
   /// 新增或更新词典
   ///
-  /// 写入自定义词典文件，并同步更新内存列表；已存在相同 ID 的词典则覆盖，
-  /// 否则追加到列表末尾。内置词典不允许新增或修改，此类请求直接拒绝并返回 false。
+  /// 写入自定义词典文件，并同步更新内存列表；已存在相同 ID 的词典则覆盖并
+  /// 保留其排序序号，否则追加到自定义词典末尾。内置词典不允许新增或修改，
+  /// 此类请求直接拒绝并返回 false。
   Future<bool> saveDictionary(NameDictionary dictionary) async {
     if (dictionary.isBuiltin) return false;
     final dictionaries = List<NameDictionary>.from(_dictionaries);
     final index = dictionaries.indexWhere((d) => d.id == dictionary.id);
+
+    final NameDictionary saved;
     if (index >= 0) {
       if (dictionaries[index].isBuiltin) return false;
-      dictionaries[index] = dictionary;
+      // 编辑已有词典时沿用原排序序号，避免其在列表中的位置发生变动
+      saved = dictionary.copyWith(orderIndex: dictionaries[index].orderIndex);
+      dictionaries[index] = saved;
     } else {
-      dictionaries.add(dictionary);
+      // 新建词典排在已有自定义词典之后
+      saved = dictionary.copyWith(orderIndex: _nextCustomOrderIndex());
+      dictionaries.add(saved);
     }
-    if (!await _store.saveDictionary(dictionary)) return false;
+
+    if (!await _store.saveDictionary(saved)) return false;
     _dictionaries = dictionaries;
     return true;
+  }
+
+  /// 计算下一个自定义词典的排序序号
+  ///
+  /// 取现有自定义词典序号的最大值加一，首个自定义词典从
+  /// [NameDictionary.customOrderStart] 起算。
+  int _nextCustomOrderIndex() {
+    final maxOrder = _dictionaries
+        .where((d) => !d.isBuiltin)
+        .fold<int>(NameDictionary.customOrderStart - 1, (max, d) {
+      return d.orderIndex > max ? d.orderIndex : max;
+    });
+    return maxOrder + 1;
   }
 
   /// 删除指定 ID 的词典
