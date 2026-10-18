@@ -9,7 +9,7 @@
 # packages, and plugins designed to encourage good coding practices.
 analyzer:
   exclude:
-    # 彻底忽略所有生成的文件！世界瞬间清静！
+    # 忽略所有生成的文件
     - "**/*.g.dart"
     - "**/*.freezed.dart"
     # 本地 fork 的第三方包，不参与本项目的静态检查
