@@ -258,7 +258,7 @@ index 5d0121e3f37..99a9726c86d 100644
 +        // 如果它们之间有空隙，且空隙不是特别大（比如小于 12 个像素）
 +        // 或者是抗锯齿导致的微小负数重叠（通过微弱拉伸覆盖）
 +        if (gap > -1.0 && gap < 12.0) {
-+          // 画一个补丁矩形，把上一块的右边和这一块的左边连接起来！
++          // 画一个补丁矩形，把上一块的右边和这一块的左边连接起来
 +          canvas.drawRect(
 +            Rect.fromLTRB(prevRect.right - 0.5, rect.top, rect.left + 0.5, rect.bottom),
 +            highlightPaint

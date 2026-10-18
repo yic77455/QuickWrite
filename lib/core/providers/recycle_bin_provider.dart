@@ -276,7 +276,6 @@ class RecycleBinProvider extends ChangeNotifier {
     try {
       final recycleBinPath = await AppPaths.instance.getRecycleBinPath();
       final idsToDelete = recycledBooks.map((b) => b.id).toList();
-      // 使用 bookUuid 删除章节，不是 uuid！
       final bookUuidsToDelete = recycledBooks.map((b) => b.bookUuid).toSet();
 
       // 删除所有文件夹
