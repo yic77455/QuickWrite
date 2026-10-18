@@ -4,14 +4,15 @@ import 'package:quick_write/core/providers/bookshelf_provider.dart';
 import 'package:quick_write/core/providers/writing_stats_provider.dart';
 import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/shared/dialogs/integrity_check_dialog.dart';
 import 'widgets/widgets.dart';
 
 /// 书架页面
 ///
 /// 展示用户的书籍列表，包括：
-/// - 左侧：最近编辑的书籍大封面和详细信息
-/// - 右侧：所有书籍的网格列表，支持拖拽排序
+/// - 所有书籍的网格列表，支持拖拽排序
+/// - 桌面端额外在左侧展示最近编辑的书籍大封面和详细信息
 class BookshelfPage extends StatefulWidget {
   const BookshelfPage({super.key});
 
@@ -115,28 +116,29 @@ class _BookshelfPageState extends State<BookshelfPage> {
     }
 
     // 数据加载完成，且不是空的，开始渲染书架页面
+    // 移动端只展示书架网格，桌面端在网格左侧额外展示最近编辑区域
+    final Widget booksGrid = AllBooksGrid(books: books, isReady: _isReady);
+
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       body: Padding(
-        // 左、上、下保持 32，右侧减小到 12，让滚动条更靠近窗体边框
-        padding: const EdgeInsets.only(
-          left: 32,
-          top: 32,
-          bottom: 32,
-          right: 12,
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start, // 顶部对齐
-          children: [
-            // 左侧大封面
-            Flexible(flex: 0, child: RecentBookPanel(recentBook: recentBook)),
-            const SizedBox(width: 36),
-            // 右侧网格
-            Expanded(
-              child: AllBooksGrid(books: books, isReady: _isReady),
-            ),
-          ],
-        ),
+        // 桌面端左、上、下保持 32，右侧减小到 12，让滚动条更靠近窗体边框
+        // 移动端四周统一 24，避免左右留白不对称
+        padding: PlatformCapabilities.isMobile
+            ? const EdgeInsets.all(24)
+            : const EdgeInsets.only(left: 32, top: 32, bottom: 32, right: 12),
+        child: PlatformCapabilities.isMobile
+            ? booksGrid
+            : Row(
+                crossAxisAlignment: CrossAxisAlignment.start, // 顶部对齐
+                children: [
+                  // 左侧大封面
+                  Flexible(flex: 0, child: RecentBookPanel(recentBook: recentBook)),
+                  const SizedBox(width: 36),
+                  // 右侧网格
+                  Expanded(child: booksGrid),
+                ],
+              ),
       ),
     );
   }

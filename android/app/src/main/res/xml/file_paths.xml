@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider 可共享出去的目录范围 -->
+<paths>
+    <!-- 应用外部存储私有目录：新版本安装包下载在其中的 Download 子目录下 -->
+    <external-files-path name="external_files" path="." />
+</paths>

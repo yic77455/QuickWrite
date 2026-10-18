@@ -18,6 +18,7 @@ Future<void> showWordCountDialog({
     title: '字数统计',
     width: 360,
     height: 530,
+    adaptiveHeight: true,
     content: _WordCountDialogContent(
       result: result,
       chapterTitle: chapterTitle,
@@ -69,9 +70,9 @@ class _WordCountDialogContent extends StatelessWidget {
               ],
             ),
           ),
-          
+
           const SizedBox(height: 20),
-          
+
           // 详细统计列表
           _buildStatItem(context, '字数', result.wordCount, Icons.text_fields),
           _buildStatItem(context, '中文字符', result.chineseChars, Icons.translate),

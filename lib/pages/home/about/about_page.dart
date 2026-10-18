@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:quick_write/core/constants/constants.dart';
+import 'package:quick_write/core/providers/home_state_provider.dart';
+import 'package:quick_write/core/providers/update_provider.dart';
 import 'package:quick_write/core/services/app_info_service.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/utils/url_opener.dart';
 import 'package:quick_write/shared/dialogs/update_dialog.dart';
@@ -34,8 +38,8 @@ class AboutPage extends StatelessWidget {
   /// 应用简介正文
   static const String _introduction =
       '快码字是一款面向小说创作者的本地写作工具，'
-      '将作品、章节、大纲设定与码字工具集中在一处，帮助你专注地把故事写下去。'
-      '所有创作数据均保存在本地，无需联网即可使用。同时提供云备份服务，可自选WebDAV平台，安全自由，无泄露风险。';
+      '将作品、章节、大纲设定与码字工具集中在一处，帮助你专注地把故事写下去。\n'
+      '所有创作数据均保存在本地，无需联网即可使用。同时提供云备份服务，可自选WebDAV平台，安全、自由、纯净，无泄露风险。';
 
   /// 作者 / 版权归属方
   static const String _authorName = 'yic77455';
@@ -95,7 +99,7 @@ class AboutPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListView(
-      padding: const EdgeInsets.fromLTRB(32, 32, 32, 48),
+      padding: const EdgeInsets.fromLTRB(24, 32, 24, 48),
       children: [
         _buildHero(context),
         const SizedBox(height: 40),
@@ -118,7 +122,7 @@ class AboutPage extends StatelessWidget {
   // 顶部应用标识区
   // =========================================================
 
-  /// 应用标识区：内容整体居中，右上叠加装饰插图
+  /// 应用标识区：桌面端内容靠左、右上叠加装饰插图；移动端隐藏插图，内容整体居中
   Widget _buildHero(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
@@ -130,6 +134,8 @@ class AboutPage extends StatelessWidget {
       ),
       clipBehavior: Clip.antiAlias,
       child: Stack(
+        // 内容区为 Stack 的非定位子项，移动端将其居中，桌面端保持靠左与插图并排
+        alignment: PlatformCapabilities.isMobile ? Alignment.center : AlignmentDirectional.topStart,
         children: [
           // 顶部主色光晕，为标识区增加视觉重量
           Positioned(
@@ -148,24 +154,47 @@ class AboutPage extends StatelessWidget {
               ),
             ),
           ),
-          // 右侧插图：叠在面板之上，不参与内容排布，因此不影响原有布局
-          Positioned(
-            right: 28,
-            top: 0,
-            bottom: 0,
-            width: 500,
-            child: IgnorePointer(
-              child: Center(
-                child: Image.asset(_heroImage, fit: BoxFit.contain),
+          // 右侧插图：叠在面板之上，不参与内容排布，不影响原有布局；移动端屏幕较窄，隐藏该插图
+          if (!PlatformCapabilities.isMobile)
+            Positioned(
+              right: 28,
+              top: 0,
+              bottom: 0,
+              width: 500,
+              child: IgnorePointer(
+                child: Center(
+                  child: Image.asset(_heroImage, fit: BoxFit.contain),
+                ),
               ),
             ),
-          ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 40),
             child: _buildHeroInfo(context),
           ),
+          // 移动端：面板左上角提供返回入口，返回进入关于页面前的上一级页面
+          if (PlatformCapabilities.isMobile) Positioned(top: 12, left: 12, child: _buildBackButton(context)),
         ],
       ),
+    );
+  }
+
+  /// 移动端返回按钮：返回进入关于页面前的上一级页面
+  Widget _buildBackButton(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return IconButton(
+      icon: const Icon(Icons.arrow_back, size: 20),
+      tooltip: '返回',
+      // 半透明圆形底：在面板光晕背景及明暗主题下都保持清晰的点击暗示
+      style: IconButton.styleFrom(
+        backgroundColor: colorScheme.surfaceContainerHigh.withValues(alpha: 0.2),
+        foregroundColor: colorScheme.onSurfaceVariant,
+        shape: const CircleBorder(),
+        minimumSize: const Size(36, 36),
+        maximumSize: const Size(36, 36),
+        padding: EdgeInsets.zero,
+      ),
+      onPressed: () => context.read<HomeStateProvider>().backToRootPage(),
     );
   }
 
@@ -216,7 +245,7 @@ class AboutPage extends StatelessWidget {
           children: [
             _buildMetaChip(context, 'v${AppInfoService.instance.version}', emphasized: true),
             _buildMetaChip(context, '$_licenseName 协议'),
-            _buildMetaChip(context, '桌面端'),
+            _buildMetaChip(context, PlatformCapabilities.isMobile ? '移动端' : '桌面端'),
           ],
         ),
         const SizedBox(height: 18),
@@ -427,6 +456,9 @@ class AboutPage extends StatelessWidget {
   /// 当前版本展示与更新检查、历史版本入口
   Widget _buildVersion(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    // 启动检查的结果：存在新版本时在更新区域给出红点与提示
+    final updateProvider = context.watch<UpdateProvider>();
+    final bool hasUpdate = updateProvider.hasUpdate;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -458,15 +490,39 @@ class AboutPage extends StatelessWidget {
                 ],
               ),
               const Spacer(),
-              // 检查更新：向更新源查询最新版本
-              OutlinedButton.icon(
-                onPressed: () => UpdateDialog.show(context, currentVersion: AppInfoService.instance.version),
-                icon: const Icon(Icons.autorenew, size: 16),
-                label: const Text('检查更新'),
+              // 检查更新：向更新源查询最新版本；发现新版本时在按钮上叠加红点
+              Badge(
+                isLabelVisible: hasUpdate,
+                smallSize: 8,
+                child: OutlinedButton.icon(
+                  onPressed: () => UpdateDialog.show(context, currentVersion: AppInfoService.instance.version),
+                  icon: const Icon(Icons.autorenew, size: 16),
+                  label: const Text('检查更新'),
+                ),
               ),
             ],
           ),
         ),
+
+        // 发现新版本时的提示：红点与最新版本号
+        if (hasUpdate) ...[
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              _buildUpdateDot(colorScheme),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '有更新：发现新版本 v${updateProvider.latestVersion}，点击「检查更新」查看详情',
+                  style: context.bodySmall?.copyWith(
+                    color: colorScheme.error,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
         const SizedBox(height: 8),
 
         // 历史版本记录入口
@@ -477,6 +533,18 @@ class AboutPage extends StatelessWidget {
           label: const Text('查看历史版本记录'),
         ),
       ],
+    );
+  }
+
+  /// 提示存在可用更新的红色圆点
+  Widget _buildUpdateDot(ColorScheme colorScheme) {
+    return Container(
+      width: 8,
+      height: 8,
+      decoration: BoxDecoration(
+        color: colorScheme.error,
+        shape: BoxShape.circle,
+      ),
     );
   }
 

@@ -7,6 +7,7 @@ import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/color_utils.dart';
 import 'package:quick_write/core/utils/code_line_selection_utils.dart';
 import 'package:quick_write/core/utils/paragraph_formatter.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/pages/workspace/editor/novel_editor.dart';
 import 'package:quick_write/pages/workspace/toolbar/widgets/chapter_title_format_panel.dart';
 import 'package:quick_write/shared/dialogs/color_picker_dialog.dart';
@@ -16,7 +17,12 @@ import 'package:quick_write/shared/widgets/widgets.dart';
 ///
 /// 包含字体格式区、功能区、设置图标区三个部分
 class WorkspaceToolbar extends StatefulWidget {
-  const WorkspaceToolbar({super.key});
+  /// 是否以紧凑模式渲染
+  ///
+  /// 移动端放入横向滚动容器时使用，宽度由内容决定而非撑满父容器
+  final bool compact;
+
+  const WorkspaceToolbar({super.key, this.compact = false});
 
   @override
   State<WorkspaceToolbar> createState() => _WorkspaceToolbarState();
@@ -61,6 +67,8 @@ class _WorkspaceToolbarState extends State<WorkspaceToolbar> {
       decoration: BoxDecoration(color: colorScheme.surface),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
+        // 紧凑模式下宽度由内容决定，避免在横向滚动容器中撑满无限宽度
+        mainAxisSize: widget.compact ? MainAxisSize.min : MainAxisSize.max,
         children: [
           // 字体格式区
           _buildFontFormatSection(context, isOutline: isOutlineTab),
@@ -112,20 +120,25 @@ class _WorkspaceToolbarState extends State<WorkspaceToolbar> {
   /// 颜色、加粗、斜体、下划线、更多格式按钮锁定为不可用状态
   Widget _buildFontFormatSection(BuildContext context, {required bool isOutline}) {
     final colorScheme = Theme.of(context).colorScheme;
-    // 第一行总宽度：字体下拉框(130) + 间距(8) + 字号下拉框(64) = 202
+    // 字体下拉框依赖系统字体枚举，移动端无法枚举字体，仅保留字号选择
+    final showFontDropdown = PlatformCapabilities.supportsSystemFontEnumeration;
+    // 两行统一宽度：字体下拉框(130) + 间距(8) + 字号下拉框(64) = 202，
+    // 该宽度同时用于容纳第二行的五个格式按钮；移动端隐藏字体下拉框后不再等于第一行内容宽度
     const double firstRowWidth = 202.0;
 
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 第一行：字体选择、字号选择
+        // 第一行：字体选择（仅桌面端）、字号选择
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // 字体选择下拉框
-            _buildFontDropdown(context, isOutline: isOutline),
-            const SizedBox(width: 8),
+            if (showFontDropdown) ...[
+              // 字体选择下拉框
+              _buildFontDropdown(context, isOutline: isOutline),
+              const SizedBox(width: 8),
+            ],
             // 字号选择下拉框
             _buildFontSizeDropdown(context, isOutline: isOutline),
           ],
@@ -176,6 +189,8 @@ class _WorkspaceToolbarState extends State<WorkspaceToolbar> {
                 MenuAnchor(
                   controller: _formatMenuController,
                   alignmentOffset: const Offset(0, 4),
+                  // 移动端为触摸操作：菜单外点击仅关闭菜单，不触发下层组件的点击，避免误触
+                  consumeOutsideTap: PlatformCapabilities.isMobile,
                   style: MenuStyle(
                     backgroundColor: WidgetStateProperty.all(colorScheme.surface),
                     elevation: WidgetStateProperty.all(3),
@@ -310,38 +325,10 @@ class _WorkspaceToolbarState extends State<WorkspaceToolbar> {
 
   /// 构建颜色选择按钮
   Widget _buildColorButton(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    // 读取当前正文字体颜色，用于显示颜色指示条
-    final currentColor = ColorUtils.getFontColorForTheme(context);
-
-    return CursorTooltipTarget(
-      tooltipContent: const Text('字体颜色'),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () => _showFontColorPicker(context),
-          borderRadius: BorderRadius.circular(6),
-          child: SizedBox(
-            width: 32,
-            height: 32,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Icon(Icons.format_color_text_rounded, size: 18, color: colorScheme.onSurfaceVariant),
-                // 颜色指示条（显示当前选中的字体颜色）
-                Positioned(
-                  bottom: 7,
-                  child: Container(
-                    width: 16,
-                    height: 3,
-                    decoration: BoxDecoration(color: currentColor),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+    return ColorToolButton(
+      tooltip: '字体颜色',
+      color: ColorUtils.getFontColorForTheme(context),
+      onPressed: () => _showFontColorPicker(context),
     );
   }
 
@@ -490,6 +477,9 @@ class _WorkspaceToolbarState extends State<WorkspaceToolbar> {
     // 更新字数统计
     currentTab.updateWordCount();
     workspaceProvider.notifyWordCountUpdated();
+
+    // 触发自动保存
+    workspaceProvider.triggerAutoSave();
   }
 
   /// 显示正文字体颜色选择器对话框

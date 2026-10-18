@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/models/book.dart';
 import 'package:quick_write/core/providers/bookshelf_provider.dart';
+import 'package:quick_write/core/services/workspace/book_folder_service.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
 import 'package:quick_write/shared/dialogs/book_detail_dialog.dart';
@@ -17,6 +19,10 @@ import 'workspace_opener.dart';
 class HoverBookItem extends StatefulWidget {
   final BookModel book;
   final VoidCallback onTap;
+  // 卡片宽度
+  final double width;
+  // 卡片高度
+  final double height;
   // 是否被选中（批量模式下使用）
   final bool isSelected;
   // 是否处于批量模式
@@ -36,6 +42,8 @@ class HoverBookItem extends StatefulWidget {
     super.key,
     required this.book,
     required this.onTap,
+    this.width = 160,
+    this.height = 260,
     this.isSelected = false,
     this.isBatchMode = false,
     this.currentGroupId = '',
@@ -57,16 +65,14 @@ class _HoverBookItemState extends State<HoverBookItem> {
     return DefaultCover.buildThemed(
       title: widget.book.title,
       context: context,
-      fontSize: 18,
+      // 封面文字随卡片宽度等比缩放
+      fontSize: 18 * widget.width / 160,
       borderRadius: 0,
     );
   }
 
   /// 构建书籍右键菜单项
   List<ContextMenuItem> _buildMenuItems() {
-    // 获取分组列表
-    final groups = context.read<BookshelfProvider>().groups;
-
     // 批量模式下的菜单
     if (widget.isBatchMode) {
       // 已选中：显示取消选择和其他操作
@@ -81,7 +87,12 @@ class _HoverBookItemState extends State<HoverBookItem> {
           ContextMenuItem(
             labelText: '移动到',
             icon: Icons.folder_outlined,
-            children: _buildGroupMenuItems(groups, enabled: true),
+            children: buildMoveToGroupMenuItems(
+              context,
+              currentGroupId: widget.book.groupId,
+              enabled: true,
+              onSelect: (groupUuid, _) => widget.onMoveToGroup?.call(groupUuid),
+            ),
           ),
           ContextMenuItem(
             labelText: '导出',
@@ -110,7 +121,12 @@ class _HoverBookItemState extends State<HoverBookItem> {
           labelText: '移动到',
           icon: Icons.folder_outlined,
           enabled: false,
-          children: _buildGroupMenuItems(groups, enabled: false),
+          children: buildMoveToGroupMenuItems(
+            context,
+            currentGroupId: widget.book.groupId,
+            enabled: false,
+            onSelect: (groupUuid, _) => widget.onMoveToGroup?.call(groupUuid),
+          ),
         ),
         ContextMenuItem(
           labelText: '导出',
@@ -129,146 +145,26 @@ class _HoverBookItemState extends State<HoverBookItem> {
     }
 
     // 普通模式下的菜单
-    return [
-      ContextMenuItem(
-        labelText: '打开',
-        icon: Icons.open_in_new,
-        onTap: () => openWorkspace(context: context, bookId: widget.book.uuid, bookTitle: widget.book.title),
-      ),
-      ContextMenuItem(
-        labelText: '详情',
-        icon: Icons.info_outline,
-        onTap: () => showBookDetailDialog(context: context, book: widget.book),
-      ),
-      ContextMenuItem.divider(),
-      ContextMenuItem(
-        labelText: '修改信息',
-        icon: Icons.edit,
-        onTap: () => showEditBookDialog(context, widget.book),
-      ),
-      ContextMenuItem(
-        labelText: '移动到',
-        icon: Icons.folder_outlined,
-        children: _buildGroupMenuItems(groups, enabled: true, isSingleBook: true),
-      ),
-      ContextMenuItem(
-        labelText: '导出',
-        icon: Icons.upload,
-        onTap: () {
-          showExportDialog(context: context, books: [widget.book]);
-        },
-      ),
-      ContextMenuItem.divider(),
-      ContextMenuItem(
-        labelText: '删除',
-        icon: Icons.delete_outline,
-        labelColor: const Color.fromARGB(255, 224, 52, 40),
-        onTap: () => _showDeleteConfirmDialog(),
-      ),
-    ];
-  }
-
-  /// 显示删除确认对话框
-  void _showDeleteConfirmDialog() {
-    // 检查书籍是否在工作台打开
-    final isOpenedInWorkspace = MultiWindowService.instance.isWorkspaceWindowOpen(widget.book.uuid);
-
-    if (isOpenedInWorkspace) {
-      // 如果书籍已打开，显示提示对话框
-      showConfirmDialog(
-        context: context,
-        title: '无法删除',
-        description: '书籍「${widget.book.title}」正在工作台打开中，\n请先关闭工作台窗口后再进行删除操作。',
-        type: ConfirmType.warning,
-        confirmText: '我知道了',
-        icon: Icons.edit_document,
-      );
-    } else {
-      // 如果书籍未打开，显示删除确认对话框
-      showConfirmDialog(
-        context: context,
-        title: '删除书籍',
-        description: '书籍「${widget.book.title}」将被移入回收站，\n你可以在回收站中恢复或彻底删除。',
-        type: ConfirmType.delete,
-        confirmText: '删除',
-        cancelText: '取消',
-        onConfirm: () {
-          context.read<BookshelfProvider>().deleteBook(widget.book);
-          // 显示删除成功提示
-          SnackBarService.show(context, '作品已移入回收站');
-        },
-      );
-    }
-  }
-
-  /// 构建分组菜单项
-  List<ContextMenuItem> _buildGroupMenuItems(
-    dynamic groups, {
-    required bool enabled,
-    bool isSingleBook = false,
-  }) {
-    final items = <ContextMenuItem>[];
-
-    // 判断书籍当前所属分组
-    final bookCurrentGroupId = widget.book.groupId;
-
-    // "书架"选项 - 如果书籍当前就在书架，则禁用此选项
-    final isInUngrouped = bookCurrentGroupId.isEmpty;
-    items.add(ContextMenuItem(
-      labelText: '书架',
-      enabled: enabled && !isInUngrouped,
-      onTap: enabled && !isInUngrouped
-          ? () {
-              if (isSingleBook) {
-                context.read<BookshelfProvider>().moveBooksToGroup(
-                  [widget.book.uuid],
-                  '',
-                );
-                // 显示移动成功提示
-                SnackBarService.show(context, '已将作品移动到书架');
-              } else {
-                widget.onMoveToGroup?.call('');
-              }
-            }
-          : null,
-    ));
-
-    // 用户创建的分组
-    for (final group in groups) {
-      // 如果书籍当前就在该分组，则禁用此选项
-      final isInThisGroup = bookCurrentGroupId == group.uuid;
-      items.add(ContextMenuItem(
-        labelText: group.name,
-        enabled: enabled && !isInThisGroup,
-        onTap: enabled && !isInThisGroup
-            ? () {
-                if (isSingleBook) {
-                  context.read<BookshelfProvider>().moveBooksToGroup(
-                    [widget.book.uuid],
-                    group.uuid,
-                  );
-                  // 显示移动成功提示
-                  SnackBarService.show(context, '已将作品移动到「${group.name}」');
-                } else {
-                  widget.onMoveToGroup?.call(group.uuid);
-                }
-              }
-            : null,
-      ));
-    }
-
-    return items;
+    return buildSingleBookMenuItems(context, widget.book);
   }
 
   @override
   Widget build(BuildContext context) {
-    final menuItems = _buildMenuItems();
+    // 移动端批量模式下长按不再弹出菜单，卡片点击专用于切换选中状态
+    final menuItems = PlatformCapabilities.isMobile && widget.isBatchMode
+        ? const <ContextMenuItem>[]
+        : _buildMenuItems();
     final colorScheme = Theme.of(context).colorScheme;
+    // 封面固定存放在作品目录下，数据库只记录文件名，此处拼接出完整路径
+    final coverPath = BookFolderService().coverFilePath(widget.book);
 
     // 封面区域（含右键菜单）
-    // 封面高度 = 160 * 4 / 3 ≈ 213.33
+    // 封面高度由宽度按 3 : 4 的宽高比推算
+    // 移动端长按菜单改由书架网格统一处理（长按抬起后原地松手才弹出），
+    // 这里关闭内置长按识别器，避免与网格的拖动识别器抢占同一指针
     final coverArea = ContextMenu(
       menuItems: menuItems,
+      enableMobileLongPress: false,
       child: MouseRegion(
         // 批量模式下禁用悬停效果
         onEnter: widget.isBatchMode ? null : (_) => setState(() => _isHovered = true),
@@ -322,9 +218,9 @@ class _HoverBookItemState extends State<HoverBookItem> {
                 AspectRatio(
                   // 宽:高 = 3 : 4
                   aspectRatio: 3 / 4,
-                  child: widget.book.coverPath.isNotEmpty
+                  child: coverPath.isNotEmpty
                       ? ThemedCoverImage(
-                          coverPath: widget.book.coverPath,
+                          coverPath: coverPath,
                           cacheKey: widget.book.updatedAt.millisecondsSinceEpoch.toString(),
                           errorBuilder: (context, error, stackTrace) =>
                               _buildDefaultCover(),
@@ -371,6 +267,7 @@ class _HoverBookItemState extends State<HoverBookItem> {
     final titleArea = Center(
       child: ContextMenu(
         menuItems: menuItems,
+        enableMobileLongPress: false,
         child: MouseRegion(
           onEnter: widget.isBatchMode ? null : (_) => setState(() => _isHovered = true),
           onExit: widget.isBatchMode ? null : (_) => setState(() => _isHovered = false),
@@ -402,9 +299,9 @@ class _HoverBookItemState extends State<HoverBookItem> {
 
     return Center(
       child: SizedBox(
-        // 小封面锁死 160 宽
-        width: 160,
-        height: 260,
+        // 卡片尺寸由外层网格按可用宽度计算
+        width: widget.width,
+        height: widget.height,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -418,6 +315,144 @@ class _HoverBookItemState extends State<HoverBookItem> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 构建普通模式下单本书籍的菜单项
+///
+/// 桌面端右键菜单与移动端长按抬起后原地松手共用该菜单
+List<ContextMenuItem> buildSingleBookMenuItems(
+  BuildContext context,
+  BookModel book,
+) {
+  return [
+    ContextMenuItem(
+      labelText: '打开',
+      icon: Icons.open_in_new,
+      onTap: () => openWorkspace(
+        context: context,
+        bookId: book.uuid,
+        bookTitle: book.title,
+      ),
+    ),
+    ContextMenuItem(
+      labelText: '详情',
+      icon: Icons.info_outline,
+      onTap: () => showBookDetailDialog(context: context, book: book),
+    ),
+    ContextMenuItem.divider(),
+    ContextMenuItem(
+      labelText: '修改信息',
+      icon: Icons.edit,
+      onTap: () => showEditBookDialog(context, book),
+    ),
+    ContextMenuItem(
+      labelText: '移动到',
+      icon: Icons.folder_outlined,
+      children: buildMoveToGroupMenuItems(
+        context,
+        currentGroupId: book.groupId,
+        enabled: true,
+        onSelect: (groupUuid, groupLabel) {
+          context.read<BookshelfProvider>().moveBooksToGroup(
+            [book.uuid],
+            groupUuid,
+          );
+          // 显示移动成功提示
+          SnackBarService.show(
+            context,
+            groupUuid.isEmpty ? '已将作品移动到书架' : '已将作品移动到「$groupLabel」',
+          );
+        },
+      ),
+    ),
+    ContextMenuItem(
+      labelText: '导出',
+      icon: Icons.upload,
+      onTap: () => showExportDialog(context: context, books: [book]),
+    ),
+    ContextMenuItem.divider(),
+    ContextMenuItem(
+      labelText: '删除',
+      icon: Icons.delete_outline,
+      labelColor: const Color.fromARGB(255, 224, 52, 40),
+      onTap: () => showDeleteBookConfirmDialog(context, book),
+    ),
+  ];
+}
+
+/// 构建「移动到」子菜单项
+///
+/// 同时服务单本书籍与批量选择两种场景，具体移动行为由 [onSelect] 决定；
+/// 回调参数依次为分组 ID 与分组名称（"书架"对应空 ID）。
+/// [currentGroupId] 为书籍当前所属分组，用于禁用无效选项
+List<ContextMenuItem> buildMoveToGroupMenuItems(
+  BuildContext context, {
+  required String currentGroupId,
+  required bool enabled,
+  required void Function(String groupUuid, String groupLabel) onSelect,
+}) {
+  // 获取分组列表
+  final groups = context.read<BookshelfProvider>().groups;
+  final items = <ContextMenuItem>[];
+
+  // "书架"选项 - 如果书籍当前就在书架，则禁用此选项
+  final isInUngrouped = currentGroupId.isEmpty;
+  items.add(ContextMenuItem(
+    labelText: '书架',
+    enabled: enabled && !isInUngrouped,
+    onTap: enabled && !isInUngrouped ? () => onSelect('', '书架') : null,
+  ));
+
+  // 用户创建的分组
+  for (final group in groups) {
+    // 如果书籍当前就在该分组，则禁用此选项
+    final isInThisGroup = currentGroupId == group.uuid;
+    items.add(ContextMenuItem(
+      labelText: group.name,
+      enabled: enabled && !isInThisGroup,
+      onTap: enabled && !isInThisGroup
+          ? () => onSelect(group.uuid, group.name)
+          : null,
+    ));
+  }
+
+  return items;
+}
+
+/// 显示删除书籍的确认对话框
+///
+/// 检查书籍是否在工作台打开：已打开时仅提示不可删除，否则走移入回收站确认流程
+void showDeleteBookConfirmDialog(BuildContext context, BookModel book) {
+  // 检查书籍是否在工作台打开
+  final isOpenedInWorkspace =
+      MultiWindowService.instance.isWorkspaceWindowOpen(book.uuid);
+
+  if (isOpenedInWorkspace) {
+    // 如果书籍已打开，显示提示对话框
+    showConfirmDialog(
+      context: context,
+      title: '无法删除',
+      description: '书籍「${book.title}」正在工作台打开中，\n请先关闭工作台窗口后再进行删除操作。',
+      type: ConfirmType.warning,
+      confirmText: '我知道了',
+      icon: Icons.edit_document,
+    );
+  } else {
+    // 如果书籍未打开，显示删除确认对话框
+    showConfirmDialog(
+      context: context,
+      title: '删除书籍',
+      description: '书籍「${book.title}」将被移入回收站，\n你可以在回收站中恢复或彻底删除。',
+      type: ConfirmType.delete,
+      confirmText: '删除',
+      cancelText: '取消',
+      onConfirm: () {
+        context.read<BookshelfProvider>().deleteBook(book);
+        // 显示删除成功提示
+        SnackBarService.show(context, '作品已移入回收站');
+      },
     );
   }
 }

@@ -8,10 +8,12 @@ import 'package:quick_write/core/services/cache_services/chapter_cursor_cache_se
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/color_utils.dart';
 import 'package:quick_write/core/utils/code_line_selection_utils.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/re_editor_span_builder.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/find_replace_bar.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_editor_widgets.dart';
+import 'package:quick_write/pages/workspace/editor/widgets/word_count_floating_window.dart';
 import 'package:quick_write/pages/workspace/editor/novel_editor.dart';
 import 'package:quick_write/pages/workspace/editor/outline_editor.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
@@ -21,7 +23,12 @@ import 'package:re_editor/re_editor.dart';
 /// 
 /// 管理文本编辑器和标签页的容器组件
 class EditorContainer extends StatefulWidget {
-  const EditorContainer({super.key});
+  /// 是否收起标签页栏
+  ///
+  /// 移动端横屏输入法弹出时收起，把纵向空间让给编辑内容；桌面端与竖屏保持显示
+  final bool hideTabBar;
+
+  const EditorContainer({super.key, this.hideTabBar = false});
 
   @override
   State<EditorContainer> createState() => _EditorContainerState();
@@ -280,25 +287,41 @@ class _EditorContainerState extends State<EditorContainer> {
     final canReplace = currentTab?.canReplace ?? true;
 
     // 查找替换浮窗的顶部偏移量
-    // 大纲编辑器模式下需下移至顶部工具栏下方，避免遮挡操作按钮
+    // 移动端紧贴编辑器顶部（标签栏下方）；桌面端保留间距。大纲模式需下移至顶部工具栏下方，避免遮挡操作按钮
+    final double baseTop = PlatformCapabilities.isMobile ? 0.0 : 6.0;
     final double findReplaceTop = (currentTab?.usesOutlineEditor ?? false)
-        ? OutlineEditorTopBar.height + 6.0
-        : 6.0;
+        ? OutlineEditorTopBar.height + baseTop
+        : baseTop;
 
     return Column(
       children: [
-        // 标签栏
-        TabBarWidget(provider: workspaceProvider),
+        // 标签栏（移动端横屏时收起，为编辑内容让出高度）；
+        // 占满整宽由外层 SizedBox 保证，使收起/恢复动画只发生在纵向
+        SizedBox(
+          width: double.infinity,
+          child: AnimatedSize(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            alignment: Alignment.topCenter,
+            child: widget.hideTabBar
+                ? const SizedBox.shrink()
+                : TabBarWidget(provider: workspaceProvider),
+          ),
+        ),
         // 编辑器内容区域
         Expanded(
           child: Stack(
             children: [
               // 编辑器内容
               _buildEditorContent(context, workspaceProvider),
+              // 字数浮窗（移动端，浮在编辑内容之上，随编辑区一起被键盘上推）
+              const WordCountFloatingWindow(),
               // 查找替换栏（浮动在编辑区域右上角）
               if (workspaceProvider.isFindReplaceVisible)
                 Positioned(
-                  right: 16,
+                  // 移动端左右贴边铺满屏幕宽度，桌面端保持右侧留白
+                  left: PlatformCapabilities.isMobile ? 0 : null,
+                  right: PlatformCapabilities.isMobile ? 0 : 16,
                   top: findReplaceTop,
                   child: FindReplaceBar(
                     key: const ValueKey('find_replace_bar'),

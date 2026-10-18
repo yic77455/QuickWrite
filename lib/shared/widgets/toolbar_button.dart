@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 
@@ -58,7 +59,10 @@ class SmallToolbarButton extends StatelessWidget {
           onTap: onPressed,
           hoverColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.08),
           highlightColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.12),
-          splashColor: Colors.transparent,
+          // 移动端无悬停状态，点击时用与悬停一致的底色扩散反馈弥补点击反馈的缺失
+          splashColor: PlatformCapabilities.isMobile
+              ? colorScheme.onSurfaceVariant.withValues(alpha: 0.08)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(6),
           child: Container(
             width: width,
@@ -297,6 +301,63 @@ class _ToggleToolButtonState extends State<ToggleToolButton> {
               widget.icon,
               size: widget.iconSize,
               color: selected ? colorScheme.primary : colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 颜色选择工具按钮
+///
+/// 图标为文字颜色图标，图标下方的色条显示 [color] 所表示的当前颜色，
+/// 点击后由 [onPressed] 打开对应的颜色选择器
+class ColorToolButton extends StatelessWidget {
+  /// Tooltip 提示文本
+  final String tooltip;
+
+  /// 当前颜色，用于显示图标下方的色条
+  final Color color;
+
+  /// 点击回调
+  final VoidCallback onPressed;
+
+  const ColorToolButton({
+    super.key,
+    required this.tooltip,
+    required this.color,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return CursorTooltipTarget(
+      tooltipContent: Text(tooltip),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(6),
+          child: SizedBox(
+            width: 32,
+            height: 32,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Icon(Icons.format_color_text_rounded, size: 18, color: colorScheme.onSurfaceVariant),
+                // 颜色指示条（显示当前选中的颜色）
+                Positioned(
+                  bottom: 7,
+                  child: Container(
+                    width: 16,
+                    height: 3,
+                    decoration: BoxDecoration(color: color),
+                  ),
+                ),
+              ],
             ),
           ),
         ),

@@ -1,4 +1,4 @@
-// Microsoft Visual C++ generated resource script.
+﻿// Microsoft Visual C++ generated resource script.
 //
 #pragma code_page(65001)
 #include "resource.h"
@@ -14,10 +14,10 @@
 #undef APSTUDIO_READONLY_SYMBOLS
 
 /////////////////////////////////////////////////////////////////////////////
-// English (United States) resources
+// Chinese (Simplified, China) resources
 
 #if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
-LANGUAGE LANG_ENGLISH, SUBLANG_ENGLISH_US
+LANGUAGE LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED
 
 #ifdef APSTUDIO_INVOKED
 /////////////////////////////////////////////////////////////////////////////
@@ -60,13 +60,16 @@ IDI_APP_ICON            ICON                    "resources\\app_icon.ico"
 // Version
 //
 
-#if defined(FLUTTER_VERSION_MAJOR) && defined(FLUTTER_VERSION_MINOR) && defined(FLUTTER_VERSION_PATCH) && defined(FLUTTER_VERSION_BUILD)
-#define VERSION_AS_NUMBER FLUTTER_VERSION_MAJOR,FLUTTER_VERSION_MINOR,FLUTTER_VERSION_PATCH,FLUTTER_VERSION_BUILD
+#if defined(FLUTTER_VERSION_MAJOR) && defined(FLUTTER_VERSION_MINOR) && defined(FLUTTER_VERSION_PATCH)
+#define VERSION_AS_NUMBER FLUTTER_VERSION_MAJOR,FLUTTER_VERSION_MINOR,FLUTTER_VERSION_PATCH,0
 #else
 #define VERSION_AS_NUMBER 1,0,0,0
 #endif
 
-#if defined(FLUTTER_VERSION)
+// 展示用的版本号取自 FLUTTER_VERSION_DISPLAY（不含 pubspec 中的构建号），上游缺失时退回完整版本号
+#if defined(FLUTTER_VERSION_DISPLAY)
+#define VERSION_AS_STRING FLUTTER_VERSION_DISPLAY
+#elif defined(FLUTTER_VERSION)
 #define VERSION_AS_STRING FLUTTER_VERSION
 #else
 #define VERSION_AS_STRING "1.0.0"
@@ -87,25 +90,26 @@ VS_VERSION_INFO VERSIONINFO
 BEGIN
     BLOCK "StringFileInfo"
     BEGIN
-        BLOCK "040904e4"
+        // 版本块使用中文（中国）语言标识 + Unicode 代码页：保证中文应用名正确存储，
+        BLOCK "080404b0"
         BEGIN
-            VALUE "CompanyName", "QuickWrite" "\0"
-            VALUE "FileDescription", "QuickWrite" "\0"
+            VALUE "CompanyName", "快码字" "\0"
+            VALUE "FileDescription", "快码字" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "qwrite" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 QuickWrite. All rights reserved." "\0"
-            VALUE "OriginalFilename", "qwrite.exe" "\0"
-            VALUE "ProductName", "quick_write" "\0"
+            VALUE "InternalName", "QuickWrite" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 快码字. All rights reserved." "\0"
+            VALUE "OriginalFilename", "QuickWrite.exe" "\0"
+            VALUE "ProductName", "快码字" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END
     BLOCK "VarFileInfo"
     BEGIN
-        VALUE "Translation", 0x409, 1252
+        VALUE "Translation", 0x804, 1200
     END
 END
 
-#endif    // English (United States) resources
+#endif    // Chinese (Simplified, China) resources
 /////////////////////////////////////////////////////////////////////////////
 
 

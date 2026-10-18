@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/services/update_service.dart';
+import 'package:quick_write/core/utils/android_native.dart';
 import 'package:quick_write/core/utils/file_explorer.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/utils/url_opener.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
@@ -124,8 +126,9 @@ class _UpdateDialogContentState extends State<_UpdateDialogContent> {
         _installerLaunched = false;
       });
 
-      // 下载的是可运行安装包时，直接拉起安装程序，省去用户手动查找
-      if (_isInstaller(asset.name)) {
+      // 桌面端下载的是可运行安装包时直接拉起安装程序，省去用户手动查找；
+      // 安卓端拉起安装程序需先取得「安装未知应用」授权，改由「立即安装」按钮触发
+      if (!PlatformCapabilities.isAndroid && _isInstaller(asset.name)) {
         await _launchInstaller();
       }
     } on UpdateCancelledException {
@@ -145,10 +148,28 @@ class _UpdateDialogContentState extends State<_UpdateDialogContent> {
     _cancelToken?.cancel();
   }
 
-  /// 用系统默认程序打开已下载的安装包
+  /// 拉起安装程序安装已下载的安装包
+  ///
+  /// 桌面端用系统默认程序打开安装包；安卓端需先确认「安装未知应用」授权，
+  /// 未授权时引导用户前往系统设置开启后再回到本对话框发起安装
   Future<void> _launchInstaller() async {
     final path = _savedPath;
     if (path == null) return;
+
+    if (PlatformCapabilities.isAndroid) {
+      if (!await AndroidNative.canInstallPackages()) {
+        await AndroidNative.openInstallPermissionSettings();
+        if (!mounted) return;
+        setState(() => _installerLaunched = false);
+        SnackBarService.show(context, '请先允许「快码字」安装未知应用，返回后可再次点击「立即安装」');
+        return;
+      }
+
+      final success = await AndroidNative.installApk(path);
+      if (!mounted) return;
+      setState(() => _installerLaunched = success);
+      return;
+    }
 
     final success = await UrlOpener.open(path);
     if (!mounted) return;
@@ -157,7 +178,7 @@ class _UpdateDialogContentState extends State<_UpdateDialogContent> {
 
   /// 判断下载的文件是否为可直接运行的安装程序
   bool _isInstaller(String fileName) {
-    const extensions = ['.exe', '.msi', '.dmg', '.pkg', '.appimage', '.deb', '.rpm'];
+    const extensions = ['.exe', '.msi', '.dmg', '.pkg', '.appimage', '.deb', '.rpm', '.apk'];
     final lowerName = fileName.toLowerCase();
     return extensions.any(lowerName.endsWith);
   }
@@ -393,6 +414,7 @@ class _UpdateDialogContentState extends State<_UpdateDialogContent> {
     final path = _savedPath ?? '';
     final assetName = _result?.asset?.name ?? '';
     final isInstaller = _isInstaller(assetName);
+    final isAndroid = PlatformCapabilities.isAndroid;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -413,30 +435,40 @@ class _UpdateDialogContentState extends State<_UpdateDialogContent> {
           _installerLaunched
               ? '已启动安装程序，请按提示完成安装。'
               : isInstaller
-                  ? '安装程序启动失败，可手动打开或前往文件夹。'
+                  ? (isAndroid
+                      ? '安装包已下载完成，点击「立即安装」完成更新。'
+                      : '安装程序启动失败，可手动打开或前往文件夹。')
                   : '免安装包下载完成，解压后即可使用。',
           style: context.bodyMedium?.copyWith(color: colorScheme.onSurfaceVariant),
         ),
-        const SizedBox(height: 4),
-        SelectableText(
-          path,
-          style: context.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
-        ),
+        // 移动端的安装包存放在应用私有目录，展示路径对用户没有意义，不展示
+        if (!PlatformCapabilities.isMobile) ...[
+          const SizedBox(height: 4),
+          SelectableText(
+            path,
+            style: context.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+          ),
+        ],
         const SizedBox(height: 18),
         Row(
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
-            OutlinedButton.icon(
-              onPressed: _revealDownloadedFile,
-              icon: const Icon(Icons.folder_open_rounded, size: 18),
-              label: const Text('打开所在文件夹'),
-            ),
+            // 打开所在文件夹依赖桌面文件管理器，移动端不提供该入口
+            if (!PlatformCapabilities.isMobile)
+              OutlinedButton.icon(
+                onPressed: _revealDownloadedFile,
+                icon: const Icon(Icons.folder_open_rounded, size: 18),
+                label: const Text('打开所在文件夹'),
+              ),
             if (isInstaller) ...[
-              const SizedBox(width: 10),
+              if (!PlatformCapabilities.isMobile) const SizedBox(width: 10),
               FilledButton.icon(
                 onPressed: _launchInstaller,
-                icon: const Icon(Icons.install_desktop_outlined, size: 18),
-                label: const Text('打开安装程序'),
+                icon: Icon(
+                  isAndroid ? Icons.install_mobile_outlined : Icons.install_desktop_outlined,
+                  size: 18,
+                ),
+                label: Text(isAndroid ? '立即安装' : '打开安装程序'),
               ),
             ],
           ],

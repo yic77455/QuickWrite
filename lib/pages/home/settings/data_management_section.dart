@@ -3,13 +3,14 @@ import 'package:quick_write/core/services/app_paths.dart';
 import 'package:quick_write/core/services/backup_service.dart';
 import 'package:quick_write/core/services/writing_stats_service.dart';
 import 'package:quick_write/core/utils/file_explorer.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/pages/home/settings/setting_widgets.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 
 /// 数据管理设置分组
 ///
 /// 提供以下功能：
-/// - 在文件管理器中打开数据目录、缓存目录、备份目录
+/// - 在文件管理器中打开数据目录、缓存目录、备份目录（仅桌面端提供）
 /// - 重置码字统计数据
 /// - 清除所有备份文件
 class DataManagementSection extends StatelessWidget {
@@ -20,9 +21,12 @@ class DataManagementSection extends StatelessWidget {
     return SettingSectionCard(
       title: '数据管理',
       children: [
-        _buildDataDirTile(context),
-        _buildCacheDirTile(context),
-        _buildBackupDirTile(context),
+        // 目录定位依赖桌面文件管理器，移动端不提供
+        if (PlatformCapabilities.supportsFileManagerReveal) ...[
+          _buildDataDirTile(context),
+          _buildCacheDirTile(context),
+          _buildBackupDirTile(context),
+        ],
         _buildResetStatsTile(context),
         _buildClearBackupsTile(context),
       ],

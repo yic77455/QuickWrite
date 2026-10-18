@@ -8,6 +8,7 @@ import 'package:quick_write/core/models/setting_item.dart';
 import 'package:quick_write/core/models/volume.dart';
 import 'package:quick_write/core/services/app_paths.dart';
 import 'package:quick_write/core/utils/docx_builder.dart';
+import 'package:quick_write/core/utils/relative_path_utils.dart';
 import 'package:path/path.dart' as p;
 
 /// 导出格式
@@ -467,7 +468,7 @@ class BookExportService {
   Future<String> _readChapterContent(String bookFolderPath, String relativePath) async {
     if (relativePath.isEmpty) return '';
 
-    final fullPath = p.join(bookFolderPath, 'chapters', relativePath);
+    final fullPath = p.join(bookFolderPath, 'chapters', relativePathToPlatform(relativePath));
     final file = File(fullPath);
 
     if (!await file.exists()) return '';
@@ -487,7 +488,7 @@ class BookExportService {
   Future<String> _readSettingContent(String bookFolderPath, String relativePath) async {
     if (relativePath.isEmpty) return '';
 
-    final fullPath = p.join(bookFolderPath, 'settings', relativePath);
+    final fullPath = p.join(bookFolderPath, 'settings', relativePathToPlatform(relativePath));
     final file = File(fullPath);
 
     if (!await file.exists()) return '';

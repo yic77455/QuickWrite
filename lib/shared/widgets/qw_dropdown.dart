@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 
 /// 下拉框选项数据结构
@@ -98,6 +99,8 @@ class _CustomDropdownState extends State<CustomDropdown> {
         return MenuAnchor(
           // 修正对齐
           alignmentOffset: const Offset(2, 2),
+          // 移动端为触摸操作：菜单外点击仅关闭菜单，不触发下层组件的点击，避免误触
+          consumeOutsideTap: PlatformCapabilities.isMobile,
           // 监听下拉菜单展开事件，自动滚动定位
           onOpen: () {
             // 延迟 50 毫秒，等待弹窗彻底构建完成并挂载到渲染树上

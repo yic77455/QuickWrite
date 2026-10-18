@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/providers/cloud_sync_provider.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/pages/home/settings/setting_widgets.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 
@@ -50,18 +51,21 @@ class SyncSettingsSection extends StatelessWidget {
   /// 同步间隔：自动同步的执行频率，仅在自动同步开启时可用
   Widget _buildIntervalTile(CloudSyncProvider provider) {
     final enabled = provider.autoSyncEnabled;
+    // 移动端窄屏：下拉框换行到标题下方并占满整行
+    final isMobile = PlatformCapabilities.isMobile;
 
     return SettingTile(
       icon: Icons.timer_outlined,
       title: '同步间隔',
       subtitle: '两次自动同步之间的时间间隔',
       enabled: enabled,
+      trailingBelow: isMobile,
       trailing: Opacity(
         opacity: enabled ? 1.0 : 0.4,
         child: IgnorePointer(
           ignoring: !enabled,
           child: CustomDropdown(
-            width: 140,
+            width: isMobile ? double.infinity : 140,
             value: provider.syncIntervalMinutes.toString(),
             items: _intervalItems,
             onChanged: (value) => provider.setSyncIntervalMinutes(int.parse(value)),

@@ -1,4 +1,11 @@
 import 'package:flutter/material.dart';
+import 'platform_capabilities.dart';
+
+/// 编辑器滚动条手柄的宽度
+///
+/// 桌面端沿用较宽的手柄，便于鼠标拖拽时看清与命中；移动端由手指直接滑动滚动，
+/// 不需要同样宽的视觉宽度，收窄至与移动平台系统滚动条相近的尺寸。
+final double editorScrollbarThickness = PlatformCapabilities.isMobile ? 4.0 : 8.0;
 
 /// 专用于文本编辑器的纯净滚动行为
 /// 强制剥离系统自带的滚动条和边界发光效果

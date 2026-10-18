@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 
 /// 全局 SnackBar 服务
@@ -135,7 +136,10 @@ class _SnackBarOverlayState extends State<_SnackBarOverlay>
     final colorScheme = Theme.of(context).colorScheme;
 
     // 提示框距离底部的高度按窗口高度的比例自适应，保证不同窗口尺寸下位置观感一致
-    final bottomOffset = MediaQuery.sizeOf(context).height * 0.05;
+    // 移动端底部为导航栏和系统手势条，比例取值更大并叠加系统安全区，避免提示被遮挡
+    final double bottomOffset = PlatformCapabilities.isMobile
+        ? MediaQuery.sizeOf(context).height * 0.10 + MediaQuery.paddingOf(context).bottom
+        : MediaQuery.sizeOf(context).height * 0.05;
 
     return Positioned(
       bottom: bottomOffset,

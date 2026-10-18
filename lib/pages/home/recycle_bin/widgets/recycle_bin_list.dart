@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/models/recycle_bin.dart';
+import 'package:quick_write/core/services/app_paths.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 
@@ -180,9 +181,11 @@ class _RecycleBinListItem extends StatelessWidget {
     const double coverHeight = 64;
     const double borderRadius = 4;
 
-    // 如果有封面路径，尝试加载封面图片
-    if (book.coverPath.isNotEmpty) {
-      final coverFile = File(book.coverPath);
+    // 封面随被删除的作品文件夹移入回收站，此处按回收站目录拼接出完整路径
+    final coverPath =
+        AppPaths.instance.recycleBinCoverPath(book.recycleFolderName, book.coverFileName);
+    if (coverPath.isNotEmpty) {
+      final coverFile = File(coverPath);
       if (coverFile.existsSync()) {
         return ClipRRect(
           borderRadius: BorderRadius.circular(borderRadius),
@@ -190,7 +193,7 @@ class _RecycleBinListItem extends StatelessWidget {
             width: coverWidth,
             height: coverHeight,
             child: ThemedCoverImage(
-              coverPath: book.coverPath,
+              coverPath: coverPath,
               errorBuilder: (context, error, stackTrace) {
                 // 加载失败时显示默认封面
                 return DefaultCover.buildThemed(

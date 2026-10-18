@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 
 /// 应用路径管理服务
 /// 
@@ -28,10 +29,18 @@ class AppPaths {
   
   /// 应用名称（用于配置目录名）
   static const String _appName = 'QuickWrite';
-  
-  /// 配置文件名
-  static const String _configFileName = 'settings.json';
-  
+
+  /// 桌面端配置文件名
+  ///
+  /// 沿用历史名称，保证既有桌面用户的配置能够继续被读取
+  static const String desktopConfigFileName = 'settings.json';
+
+  /// 移动端配置文件名
+  ///
+  /// 与桌面端相互独立：两端存在大量不通用、不适配的设置项，
+  /// 各自读写自己的配置文件可避免互相污染
+  static const String mobileConfigFileName = 'settings.mobile.json';
+
   /// 数据库文件名
   static const String _databaseName = 'quick_write_db';
 
@@ -127,19 +136,54 @@ class AppPaths {
   /// 数据库文件名
   String get databaseName => _databaseName;
 
-  /// 配置文件完整路径
+  /// 桌面端配置文件完整路径
   /// 
   /// 例如：C:\Users\用户名\Documents\QuickWrite\settings.json
-  String get configFilePath {
+  String get desktopConfigFilePath {
     _assertInitialized();
-    return '$_appRootPath${Platform.pathSeparator}$_configFileName';
+    return '$_appRootPath${Platform.pathSeparator}$desktopConfigFileName';
   }
 
-  /// 配置文件名
-  String get configFileName => _configFileName;
+  /// 移动端配置文件完整路径
+  /// 
+  /// 例如：/data/user/0/com.quickwrite.app/files/QuickWrite/settings.mobile.json
+  String get mobileConfigFilePath {
+    _assertInitialized();
+    return '$_appRootPath${Platform.pathSeparator}$mobileConfigFileName';
+  }
+
+  /// 当前平台使用的配置文件完整路径
+  String get configFilePath {
+    _assertInitialized();
+    return PlatformCapabilities.isMobile ? mobileConfigFilePath : desktopConfigFilePath;
+  }
+
+  /// 当前平台使用的配置文件名
+  String get configFileName => PlatformCapabilities.isMobile ? mobileConfigFileName : desktopConfigFileName;
 
   /// 应用名称
   String get appName => _appName;
+
+  // ================= 路径拼接 =================
+
+  /// 书籍存储目录路径
+  /// 
+  /// 与 [getBooksPath] 的区别是不负责创建目录，
+  /// 供界面加载封面等只需要拼接路径的场景同步取用
+  String get booksPath {
+    _assertInitialized();
+    return '$_appRootPath${Platform.pathSeparator}$_worksDirName';
+  }
+
+  /// 获取回收站中书籍封面文件完整路径
+  /// 
+  /// 被删除的书籍文件夹在回收站中以 UUID 命名，封面文件随文件夹一起移动
+  /// [coverFileName] 为空表示该书没有封面，此时返回空路径
+  String recycleBinCoverPath(String recycleFolderName, String coverFileName) {
+    if (coverFileName.isEmpty) return '';
+    return '$_appRootPath${Platform.pathSeparator}$_recycleBinDirName'
+        '${Platform.pathSeparator}$recycleFolderName${Platform.pathSeparator}$coverFileName';
+  }
 
   // ================= 工具方法 =================
   
@@ -157,17 +201,15 @@ class AppPaths {
   /// 用于存储书籍相关的文件（封面、内容等）
   /// 如果目录不存在会自动创建
   Future<String> getBooksPath() async {
-    _assertInitialized();
-    
-    final booksPath = '$_appRootPath${Platform.pathSeparator}$_worksDirName';
-    final booksDir = Directory(booksPath);
-    
+    final path = booksPath;
+    final booksDir = Directory(path);
+
     if (!await booksDir.exists()) {
       await booksDir.create(recursive: true);
-      debugPrint('已创建书籍目录: $booksPath');
+      debugPrint('已创建书籍目录: $path');
     }
-    
-    return booksPath;
+
+    return path;
   }
 
   /// 获取词典存储目录路径

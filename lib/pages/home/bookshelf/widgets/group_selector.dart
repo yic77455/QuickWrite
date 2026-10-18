@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/models/group.dart';
 import 'package:quick_write/core/providers/bookshelf_provider.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/dialogs/group_manage_dialog.dart';
 import 'package:quick_write/shared/dialogs/new_group_dialog.dart';
@@ -52,6 +53,8 @@ class GroupSelector extends StatelessWidget {
 
         return MenuAnchor(
           alignmentOffset: const Offset(0, 8),
+          // 移动端为触摸操作：菜单外点击仅关闭菜单，不触发下层组件的点击，避免误触
+          consumeOutsideTap: PlatformCapabilities.isMobile,
           style: MenuStyle(
             shape: WidgetStateProperty.all(
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),

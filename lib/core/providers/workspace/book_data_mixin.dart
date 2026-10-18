@@ -245,7 +245,10 @@ mixin BookDataMixin on WorkspaceStateBase {
     String newRelativePath;
     final volumeName = getVolumeName(chapter.volumeUuid);
     if (volumeName.isNotEmpty) {
-      newRelativePath = '${_sanitizeFileName(volumeName)}${Platform.pathSeparator}${_sanitizeFileName(chapter.title)}${GlobalConstants.chapterFileExtension}';
+      newRelativePath = joinRelativePath([
+        _sanitizeFileName(volumeName),
+        '${_sanitizeFileName(chapter.title)}${GlobalConstants.chapterFileExtension}',
+      ]);
     } else {
       newRelativePath = '${_sanitizeFileName(chapter.title)}${GlobalConstants.chapterFileExtension}';
     }
@@ -324,7 +327,10 @@ mixin BookDataMixin on WorkspaceStateBase {
     String filePath;
     final volumeName = getVolumeName(volumeUuid);
     if (volumeName.isNotEmpty) {
-      filePath = '${_sanitizeFileName(volumeName)}${Platform.pathSeparator}${_sanitizeFileName(title)}${GlobalConstants.chapterFileExtension}';
+      filePath = joinRelativePath([
+        _sanitizeFileName(volumeName),
+        '${_sanitizeFileName(title)}${GlobalConstants.chapterFileExtension}',
+      ]);
     } else {
       filePath = '${_sanitizeFileName(title)}${GlobalConstants.chapterFileExtension}';
     }
@@ -625,7 +631,10 @@ mixin BookDataMixin on WorkspaceStateBase {
 
       // 生成新的文件相对路径
       final String newRelativePath = targetVolumeName.isNotEmpty
-          ? '${_sanitizeFileName(targetVolumeName)}${Platform.pathSeparator}${_sanitizeFileName(chapter.title)}${GlobalConstants.chapterFileExtension}'
+          ? joinRelativePath([
+              _sanitizeFileName(targetVolumeName),
+              '${_sanitizeFileName(chapter.title)}${GlobalConstants.chapterFileExtension}',
+            ])
           : '${_sanitizeFileName(chapter.title)}${GlobalConstants.chapterFileExtension}';
       chapter.filePath = newRelativePath;
 
@@ -783,7 +792,10 @@ mixin BookDataMixin on WorkspaceStateBase {
     // 生成新的文件路径
     String newRelativePath;
     if (newVolumeName.isNotEmpty) {
-      newRelativePath = '${_sanitizeFileName(newVolumeName)}${Platform.pathSeparator}${_sanitizeFileName(chapter.title)}${GlobalConstants.chapterFileExtension}';
+      newRelativePath = joinRelativePath([
+        _sanitizeFileName(newVolumeName),
+        '${_sanitizeFileName(chapter.title)}${GlobalConstants.chapterFileExtension}',
+      ]);
     } else {
       newRelativePath = '${_sanitizeFileName(chapter.title)}${GlobalConstants.chapterFileExtension}';
     }
@@ -1093,7 +1105,10 @@ mixin BookDataMixin on WorkspaceStateBase {
     // 更新所有章节的 filePath（volumeUuid 不变，只需更新路径中的分卷名部分）
     for (final chapter in volumeChapters) {
       chapter.updatedAt = DateTime.now();
-      chapter.filePath = '${_sanitizeFileName(newName)}${Platform.pathSeparator}${_sanitizeFileName(chapter.title)}${GlobalConstants.chapterFileExtension}';
+      chapter.filePath = joinRelativePath([
+        _sanitizeFileName(newName),
+        '${_sanitizeFileName(chapter.title)}${GlobalConstants.chapterFileExtension}',
+      ]);
 
       // 更新备份计时器中的分卷名
       BackupService.instance.updateTabBackupInfo(
@@ -1389,7 +1404,10 @@ mixin BookDataMixin on WorkspaceStateBase {
     String filePath;
     final groupName = getSettingGroupName(groupUuid);
     if (groupName.isNotEmpty) {
-      filePath = '${_sanitizeFileName(groupName)}${Platform.pathSeparator}${_sanitizeFileName(title)}${GlobalConstants.settingFileExtension}';
+      filePath = joinRelativePath([
+        _sanitizeFileName(groupName),
+        '${_sanitizeFileName(title)}${GlobalConstants.settingFileExtension}',
+      ]);
     } else {
       filePath = '${_sanitizeFileName(title)}${GlobalConstants.settingFileExtension}';
     }
@@ -1480,7 +1498,10 @@ mixin BookDataMixin on WorkspaceStateBase {
     // 更新所有设定项的 filePath
     for (final item in groupItems) {
       item.updatedAt = DateTime.now();
-      item.filePath = '${_sanitizeFileName(newName)}${Platform.pathSeparator}${_sanitizeFileName(item.title)}${GlobalConstants.settingFileExtension}';
+      item.filePath = joinRelativePath([
+        _sanitizeFileName(newName),
+        '${_sanitizeFileName(item.title)}${GlobalConstants.settingFileExtension}',
+      ]);
     }
 
     // 更新分组名称
@@ -1530,7 +1551,10 @@ mixin BookDataMixin on WorkspaceStateBase {
     // 生成新的文件路径
     final groupName = getSettingGroupName(item.groupUuid);
     if (groupName.isNotEmpty) {
-      item.filePath = '${_sanitizeFileName(groupName)}${Platform.pathSeparator}${_sanitizeFileName(newTitle)}${GlobalConstants.settingFileExtension}';
+      item.filePath = joinRelativePath([
+        _sanitizeFileName(groupName),
+        '${_sanitizeFileName(newTitle)}${GlobalConstants.settingFileExtension}',
+      ]);
     } else {
       item.filePath = '${_sanitizeFileName(newTitle)}${GlobalConstants.settingFileExtension}';
     }
@@ -1835,7 +1859,10 @@ mixin BookDataMixin on WorkspaceStateBase {
 
     // 生成新的文件路径
     if (newGroupName.isNotEmpty) {
-      item.filePath = '${_sanitizeFileName(newGroupName)}${Platform.pathSeparator}${_sanitizeFileName(item.title)}${GlobalConstants.settingFileExtension}';
+      item.filePath = joinRelativePath([
+        _sanitizeFileName(newGroupName),
+        '${_sanitizeFileName(item.title)}${GlobalConstants.settingFileExtension}',
+      ]);
     } else {
       item.filePath = '${_sanitizeFileName(item.title)}${GlobalConstants.settingFileExtension}';
     }
@@ -1979,7 +2006,10 @@ mixin BookDataMixin on WorkspaceStateBase {
 
       // 生成新的文件相对路径
       final String newRelativePath = targetGroupName.isNotEmpty
-          ? '${_sanitizeFileName(targetGroupName)}${Platform.pathSeparator}${_sanitizeFileName(item.title)}${GlobalConstants.settingFileExtension}'
+          ? joinRelativePath([
+              _sanitizeFileName(targetGroupName),
+              '${_sanitizeFileName(item.title)}${GlobalConstants.settingFileExtension}',
+            ])
           : '${_sanitizeFileName(item.title)}${GlobalConstants.settingFileExtension}';
       item.filePath = newRelativePath;
 

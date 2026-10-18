@@ -8,6 +8,7 @@ import 'package:quick_write/core/models/book.dart';
 import 'package:quick_write/core/models/chapter.dart';
 import 'package:quick_write/core/models/setting_item.dart';
 import 'package:quick_write/core/services/app_paths.dart';
+import 'package:quick_write/core/utils/relative_path_utils.dart';
 
 /// 书籍文件夹结构与路径服务
 class BookFolderService {
@@ -51,17 +52,29 @@ class BookFolderService {
   /// 获取书籍文件夹路径
   String bookFolderPath(BookModel book) {
     // 这里使用同步方式获取路径，因为 AppPaths 已经初始化
-    final worksPath = '${AppPaths.instance.appRootPath}${Platform.pathSeparator}works';
+    final worksPath = AppPaths.instance.booksPath;
     return '$worksPath${Platform.pathSeparator}${book.title}';
+  }
+
+  /// 获取书籍封面文件的完整路径
+  ///
+  /// 封面固定存放在书籍文件夹下，数据库中只记录文件名（如 cover.jpg），
+  /// 完整路径在此统一拼接，任何平台都无需把路径写进数据库。
+  /// 文件名为空表示该书没有封面，此时返回空路径
+  String coverFilePath(BookModel book) {
+    if (book.coverFileName.isEmpty) return '';
+    return '${bookFolderPath(book)}${Platform.pathSeparator}${book.coverFileName}';
   }
 
   /// 获取章节文件的完整路径
   String chapterFilePath(BookModel book, ChapterModel chapter) {
-    return '${bookFolderPath(book)}${Platform.pathSeparator}chapters${Platform.pathSeparator}${chapter.filePath}';
+    final relativePath = relativePathToPlatform(chapter.filePath);
+    return '${bookFolderPath(book)}${Platform.pathSeparator}chapters${Platform.pathSeparator}$relativePath';
   }
 
   /// 获取设定项文件的完整路径
   String settingItemFilePath(BookModel book, SettingItemModel item) {
-    return '${bookFolderPath(book)}${Platform.pathSeparator}settings${Platform.pathSeparator}${item.filePath}';
+    final relativePath = relativePathToPlatform(item.filePath);
+    return '${bookFolderPath(book)}${Platform.pathSeparator}settings${Platform.pathSeparator}$relativePath';
   }
 }

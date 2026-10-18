@@ -1,9 +1,9 @@
 import 'dart:ffi';
-import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:quick_write/core/constants/constants.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 
 // ================= Win32 API 函数签名 =================
 
@@ -175,7 +175,7 @@ class SingleInstanceService {
   /// 返回 true 表示当前是唯一运行的进程（可继续启动）；
   /// 返回 false 表示已有进程在运行（当前进程应退出）
   bool tryAcquire() {
-    if (!Platform.isWindows) return true;
+    if (!PlatformCapabilities.supportsSingleInstanceLock) return true;
 
     // 已持有互斥体时直接返回成功，避免重复创建
     if (_mutexHandle != 0) return true;
@@ -288,7 +288,7 @@ class SingleInstanceService {
   ///
   /// 按窗口标题查找主窗口，若已最小化则还原，并将其置于前台
   void activateExistingMainWindow() {
-    if (!Platform.isWindows) return;
+    if (!PlatformCapabilities.supportsSingleInstanceLock) return;
 
     try {
       final hWnd = _findMainWindow();

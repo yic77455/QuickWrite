@@ -74,7 +74,7 @@ class ColorPickerDialog {
                         },
                       ),
                     ),
-                    autofocus: true,
+                    autofocus: false,
                     maxLength: 6,
                     inputFormatters: [
                       UpperCaseTextFormatter(),

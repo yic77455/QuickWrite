@@ -3,11 +3,18 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:quick_write/core/models/book.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/providers/bookshelf_provider.dart';
 import 'package:quick_write/core/services/app_paths.dart';
+import 'package:quick_write/core/services/workspace/book_folder_service.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
+
+/// 移动端简介输入框的固定高度
+///
+/// 竖向排列下输入框不再随剩余空间伸展，改用固定高度保证多行输入有足够的可视区域
+const double _mobileSynopsisHeight = 120;
 
 /// 显示新建作品弹窗
 Future<void> showNewBookDialog(BuildContext context) {
@@ -16,6 +23,8 @@ Future<void> showNewBookDialog(BuildContext context) {
     title: '新建作品',
     width: 560,
     height: 360,
+    // 移动端内容竖向排列、高度随内容变化，需启用自适应高度；桌面端保持固定高度
+    adaptiveHeight: PlatformCapabilities.isMobile,
     content: const _NewBookDialogContent(),
   );
 }
@@ -27,6 +36,8 @@ Future<void> showEditBookDialog(BuildContext context, BookModel book) {
     title: '修改信息',
     width: 560,
     height: 360,
+    // 移动端内容竖向排列、高度随内容变化，需启用自适应高度；桌面端保持固定高度
+    adaptiveHeight: PlatformCapabilities.isMobile,
     content: _NewBookDialogContent(book: book),
   );
 }
@@ -51,7 +62,7 @@ class _NewBookDialogContentState extends State<_NewBookDialogContent> {
   final _titleFocusNode = FocusNode();
   // 简介焦点节点
   final _synopsisFocusNode = FocusNode();
-  // 选中的封面路径
+  // 选中的封面路径（新建时为文件选择器返回的图片路径，编辑时为作品目录下已有封面的路径）
   String? _coverPath;
   // 错误信息
   String? _errorMessage;
@@ -59,8 +70,10 @@ class _NewBookDialogContentState extends State<_NewBookDialogContent> {
   bool _isLoading = false;
   // 是否为编辑模式
   bool get _isEditMode => widget.book != null;
-  // 原始封面路径（编辑模式下用于判断是否更换了封面）
-  String _originalCoverPath = '';
+  // 原始封面文件名（编辑模式下用于判断是否更换了封面）
+  String _originalCoverFileName = '';
+  // 是否重新选择了封面
+  bool _coverReplaced = false;
 
   @override
   void initState() {
@@ -69,8 +82,10 @@ class _NewBookDialogContentState extends State<_NewBookDialogContent> {
     if (_isEditMode) {
       _titleController = TextEditingController(text: widget.book!.title);
       _synopsisController = TextEditingController(text: widget.book!.synopsis);
-      _coverPath = widget.book!.coverPath.isNotEmpty ? widget.book!.coverPath : null;
-      _originalCoverPath = widget.book!.coverPath;
+      _originalCoverFileName = widget.book!.coverFileName;
+      _coverPath = _originalCoverFileName.isEmpty
+          ? null
+          : BookFolderService().coverFilePath(widget.book!);
     } else {
       _titleController = TextEditingController();
       _synopsisController = TextEditingController();
@@ -97,6 +112,7 @@ class _NewBookDialogContentState extends State<_NewBookDialogContent> {
       if (result != null && result.files.single.path != null && mounted) {
         setState(() {
           _coverPath = result.files.single.path;
+          _coverReplaced = true;
         });
       }
     } catch (e) {
@@ -121,15 +137,11 @@ class _NewBookDialogContentState extends State<_NewBookDialogContent> {
 
   /// 复制封面到作品目录
   /// 
-  /// 将选中的封面图片复制到作品目录下，命名为 cover.扩展名（保留原格式）
+  /// 将选中的封面图片复制到作品目录下，命名为 cover.扩展名（保留原格式）。
+  /// 数据库只记录封面文件名，完整路径由 AppPaths 按作品目录拼接
   Future<String?> _copyCoverToBookDirectory(String bookFolderPath) async {
     if (_coverPath == null || _coverPath!.isEmpty) {
       return null;
-    }
-
-    // 如果封面路径已经是作品目录下的文件，直接返回
-    if (_coverPath!.startsWith(bookFolderPath)) {
-      return _coverPath;
     }
 
     try {
@@ -145,12 +157,26 @@ class _NewBookDialogContentState extends State<_NewBookDialogContent> {
           : '.png';
       
       // 封面命名为 cover.扩展名
-      final coverPath = '$bookFolderPath${Platform.pathSeparator}cover$coverExtension';
-      await sourceFile.copy(coverPath);
-      return coverPath;
+      final coverFileName = 'cover$coverExtension';
+      await sourceFile.copy('$bookFolderPath${Platform.pathSeparator}$coverFileName');
+      return coverFileName;
     } catch (e) {
       // 复制失败，返回 null
       return null;
+    }
+  }
+
+  /// 删除作品目录下指定的封面文件
+  /// 
+  /// [coverFileName] 为空表示原本没有封面，无需删除
+  void _deleteCoverFile(String bookFolderPath, String coverFileName) {
+    if (coverFileName.isEmpty) {
+      return;
+    }
+
+    final coverFile = File('$bookFolderPath${Platform.pathSeparator}$coverFileName');
+    if (coverFile.existsSync()) {
+      coverFile.deleteSync();
     }
   }
 
@@ -178,12 +204,12 @@ class _NewBookDialogContentState extends State<_NewBookDialogContent> {
       final bookFolderPath = await _createBookDirectory(title);
 
       // 2. 复制封面到作品目录（如果有选择封面）
-      final coverPath = await _copyCoverToBookDirectory(bookFolderPath);
+      final coverFileName = await _copyCoverToBookDirectory(bookFolderPath);
 
       // 3. 调用 Provider 创建作品（只操作数据库）
       final result = await bookshelfProvider.addBook(
         bookTitle: title,
-        coverPath: coverPath ?? '',
+        coverFileName: coverFileName ?? '',
         synopsis: synopsis,
       );
 
@@ -233,16 +259,15 @@ class _NewBookDialogContentState extends State<_NewBookDialogContent> {
     final worksPath = await AppPaths.instance.getBooksPath();
 
     try {
-      String finalCoverPath = _originalCoverPath;
-      bool coverChanged = _coverPath != null && _coverPath != _originalCoverPath;
-      bool coverCleared = _coverPath == null && _originalCoverPath.isNotEmpty;
-      bool titleChanged = title != oldTitle;
+      // 保存后的作品目录（书名变化时文件夹会先重命名到该目录）
+      final bookFolderPath = '$worksPath${Platform.pathSeparator}$title';
+      final titleChanged = title != oldTitle;
 
-      // 1. 如果书名变化，先重命名文件夹
+      // 1. 如果书名变化，先重命名文件夹（作品目录下的封面等文件随之移动）
       if (titleChanged) {
         final oldPath = '$worksPath${Platform.pathSeparator}$oldTitle';
-        final newPath = '$worksPath${Platform.pathSeparator}$title';
-        
+        final newPath = bookFolderPath;
+
         final oldDir = Directory(oldPath);
         if (oldDir.existsSync()) {
           // 检查新路径是否已存在
@@ -258,38 +283,25 @@ class _NewBookDialogContentState extends State<_NewBookDialogContent> {
           }
           // 重命名文件夹
           await oldDir.rename(newPath);
-          // 更新封面路径（如果封面没变，需要更新路径中的书名部分）
-          if (!coverChanged && !coverCleared && _originalCoverPath.isNotEmpty) {
-            final coverFileName = _originalCoverPath.split(Platform.pathSeparator).last;
-            finalCoverPath = '$newPath${Platform.pathSeparator}$coverFileName';
-          }
         }
       }
 
       // 2. 处理封面变化
-      if (coverChanged) {
-        // 封面有变化，需要删除旧封面并复制新封面
-        final bookFolderPath = '$worksPath${Platform.pathSeparator}$title';
-        
-        // 删除旧封面文件
-        if (_originalCoverPath.isNotEmpty) {
-          final oldCoverFile = File(_originalCoverPath);
-          if (oldCoverFile.existsSync()) {
-            oldCoverFile.deleteSync();
-          }
-        }
-        
-        // 复制新封面
-        finalCoverPath = await _copyCoverToBookDirectory(bookFolderPath) ?? '';
+      // 封面被清空：未重新选择封面且原本有封面
+      final bool coverCleared =
+          !_coverReplaced && _coverPath == null && _originalCoverFileName.isNotEmpty;
+
+      // 更换或清空封面时，先删除作品目录下的旧封面文件
+      if (_coverReplaced || coverCleared) {
+        _deleteCoverFile(bookFolderPath, _originalCoverFileName);
+      }
+
+      String finalCoverFileName = _originalCoverFileName;
+      if (_coverReplaced) {
+        // 复制新封面到作品目录
+        finalCoverFileName = await _copyCoverToBookDirectory(bookFolderPath) ?? '';
       } else if (coverCleared) {
-        // 封面被清空，删除旧封面文件
-        if (_originalCoverPath.isNotEmpty) {
-          final oldCoverFile = File(_originalCoverPath);
-          if (oldCoverFile.existsSync()) {
-            oldCoverFile.deleteSync();
-          }
-        }
-        finalCoverPath = '';
+        finalCoverFileName = '';
       }
 
       // 3. 更新数据库
@@ -297,7 +309,7 @@ class _NewBookDialogContentState extends State<_NewBookDialogContent> {
         bookUuid: widget.book!.uuid,
         title: title,
         synopsis: synopsis,
-        coverPath: finalCoverPath,
+        coverFileName: finalCoverFileName,
       );
 
       if (mounted) {
@@ -329,33 +341,96 @@ class _NewBookDialogContentState extends State<_NewBookDialogContent> {
 
     return Padding(
       padding: const EdgeInsets.all(20),
-      child: Column(
-        children: [
-          // 主内容区域：左侧封面 + 右侧输入框
-          Expanded(
-            child: Row(
+      // 测量内容区的实际可用宽度，供封面按比例推导尺寸
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final double availableWidth = constraints.maxWidth;
+
+          // 移动端：居中封面、书名、简介自上而下竖向排列
+          if (PlatformCapabilities.isMobile) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // 左侧：封面选择区域
-                _buildCoverSection(colorScheme),
-                const SizedBox(width: 20),
-                // 右侧：书名和简介输入区域
-                Expanded(
-                  child: _buildInputSection(colorScheme),
+                // 封面（水平居中）
+                _buildCoverSection(colorScheme, availableWidth),
+                const SizedBox(height: 16),
+                // 书名（必填）
+                _buildTitleField(colorScheme),
+                const SizedBox(height: 16),
+                // 简介（非必填，多行）
+                SizedBox(
+                  height: _mobileSynopsisHeight,
+                  child: _buildSynopsisField(),
                 ),
+                const SizedBox(height: 20),
+                // 底部按钮区域
+                _buildButtonRow(),
               ],
-            ),
-          ),
-          // 底部按钮区域
-          const SizedBox(height: 16),
-          _buildButtonRow(),
-        ],
+            );
+          }
+
+          // 桌面端：左侧封面 + 右侧输入框
+          return Column(
+            children: [
+              // 主内容区域
+              Expanded(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // 左侧：封面选择区域
+                    _buildCoverSection(colorScheme, availableWidth),
+                    const SizedBox(width: 20),
+                    // 右侧：书名和简介输入区域
+                    Expanded(
+                      child: _buildInputSection(colorScheme),
+                    ),
+                  ],
+                ),
+              ),
+              // 底部按钮区域
+              const SizedBox(height: 16),
+              _buildButtonRow(),
+            ],
+          );
+        },
       ),
     );
   }
 
   /// 构建封面选择区域
-  Widget _buildCoverSection(ColorScheme colorScheme) {
+  ///
+  /// 桌面端：固定宽度的封面预览框 + 下方「选择封面」按钮
+  /// 移动端：封面等比缩小到与书架页封面相当的大小，水平居中，去掉按钮，改由点击封面本身选择封面
+  Widget _buildCoverSection(ColorScheme colorScheme, double availableWidth) {
+    // 移动端：封面宽度取内容区可用宽度的三分之一，
+    // 与书架页每行三列时单本书的封面视觉大小相当
+    if (PlatformCapabilities.isMobile) {
+      final double coverWidth = availableWidth / 3;
+
+      // 竖向排列下封面单独占一行，水平居中显示
+      return Center(
+        // 点击封面即可选择封面图片
+        child: GestureDetector(
+          onTap: _pickCoverImage,
+          child: Container(
+            // 宽高比 3:4，与书架页封面保持一致
+            width: coverWidth,
+            height: coverWidth * 4 / 3,
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: colorScheme.outline.withValues(alpha: 0.3),
+              ),
+            ),
+            // 根据是否选择了封面显示不同内容
+            child: _buildCoverImage(colorScheme),
+          ),
+        ),
+      );
+    }
+
     return Column(
       children: [
         // 封面预览框 - 使用 Expanded 让高度自适应
@@ -391,12 +466,11 @@ class _NewBookDialogContentState extends State<_NewBookDialogContent> {
   /// 构建封面图片
   Widget _buildCoverImage(ColorScheme colorScheme) {
     if (_coverPath == null || _coverPath!.isEmpty) {
-      return Center(
-        child: Icon(
-          Icons.image_outlined,
-          size: 48,
-          color: colorScheme.onSurface.withValues(alpha: 0.3),
-        ),
+      // 移动端没有独立的选择按钮，用文字提示引导用户点击封面选择图片
+      return _buildCoverPlaceholder(
+        colorScheme,
+        icon: Icons.image_outlined,
+        hint: PlatformCapabilities.isMobile ? '点击选择封面' : null,
       );
     }
 
@@ -410,77 +484,105 @@ class _NewBookDialogContentState extends State<_NewBookDialogContent> {
               fit: BoxFit.cover,
               errorBuilder: (context, error, stackTrace) {
                 // 图片加载失败时显示占位图标
-                return Icon(
-                  Icons.broken_image_outlined,
-                  size: 48,
-                  color: colorScheme.onSurface.withValues(alpha: 0.3),
-                );
+                return _buildCoverPlaceholder(colorScheme, icon: Icons.broken_image_outlined);
               },
             )
-          : Center(
-              child: Icon(
-                Icons.broken_image_outlined,
-                size: 48,
-                color: colorScheme.onSurface.withValues(alpha: 0.3),
-              ),
+          : _buildCoverPlaceholder(colorScheme, icon: Icons.broken_image_outlined),
+    );
+  }
+
+  /// 构建封面占位内容
+  ///
+  /// 未选择封面或图片加载失败时显示图标；移动端封面较小，图标等比缩小，
+  /// 并可在图标下方附带一段提示文字
+  Widget _buildCoverPlaceholder(
+    ColorScheme colorScheme, {
+    required IconData icon,
+    String? hint,
+  }) {
+    final double iconSize = PlatformCapabilities.isMobile ? 32 : 48;
+    final Color placeholderColor = colorScheme.onSurface.withValues(alpha: 0.3);
+
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: iconSize, color: placeholderColor),
+          if (hint != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              hint,
+              textAlign: TextAlign.center,
+              style: context.bodySmall?.copyWith(color: placeholderColor),
             ),
+          ],
+        ],
+      ),
     );
   }
 
   /// 构建输入区域（书名 + 简介）
+  ///
+  /// 桌面端横向布局：简介输入框撑满封面右侧的剩余高度
   Widget _buildInputSection(ColorScheme colorScheme) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // 书名输入框（必填）
-        // 用 ImeCursorFixerWrapper 包裹 TextField，修复中文输入法光标跟随问题
-        ImeCursorFixerWrapper(
-          controller: _titleController,
-          focusNode: _titleFocusNode,
-          child: TextField(
-            controller: _titleController,
-            focusNode: _titleFocusNode,
-            autofocus: true,
-            decoration: InputDecoration(
-              labelText: '书名',
-              hintText: '请输入书名',
-              errorText: _errorMessage,
-              suffix: Text(
-                '*',
-                style: context.titleLarge?.copyWith(color: colorScheme.error),
-              ),
-            ),
-            onChanged: (_) {
-              // 输入时清除错误信息
-              if (_errorMessage != null) {
-                setState(() => _errorMessage = null);
-              }
-            },
-            onSubmitted: (_) => _handleSubmit(),
-          ),
-        ),
+        _buildTitleField(colorScheme),
         const SizedBox(height: 16),
-        // 简介输入框（非必填，多行）
-        // 用 ImeCursorFixerWrapper 包裹 TextField，修复中文输入法光标跟随问题
-        Expanded(
-          child: ImeCursorFixerWrapper(
-            controller: _synopsisController,
-            focusNode: _synopsisFocusNode,
-            child: TextField(
-              controller: _synopsisController,
-              focusNode: _synopsisFocusNode,
-              maxLines: null,
-              expands: true,
-              textAlignVertical: TextAlignVertical.top,
-              decoration: const InputDecoration(
-                labelText: '简介',
-                hintText: '请输入作品简介（选填）',
-                alignLabelWithHint: true,
-              ),
-            ),
+        Expanded(child: _buildSynopsisField()),
+      ],
+    );
+  }
+
+  /// 构建书名输入框（必填）
+  Widget _buildTitleField(ColorScheme colorScheme) {
+    // 用 ImeCursorFixerWrapper 包裹 TextField，修复中文输入法光标跟随问题
+    return ImeCursorFixerWrapper(
+      controller: _titleController,
+      focusNode: _titleFocusNode,
+      child: TextField(
+        controller: _titleController,
+        focusNode: _titleFocusNode,
+        autofocus: true,
+        decoration: InputDecoration(
+          labelText: '书名',
+          hintText: '请输入书名',
+          errorText: _errorMessage,
+          suffix: Text(
+            '*',
+            style: context.titleLarge?.copyWith(color: colorScheme.error),
           ),
         ),
-      ],
+        onChanged: (_) {
+          // 输入时清除错误信息
+          if (_errorMessage != null) {
+            setState(() => _errorMessage = null);
+          }
+        },
+        onSubmitted: (_) => _handleSubmit(),
+      ),
+    );
+  }
+
+  /// 构建简介输入框（非必填，多行）
+  Widget _buildSynopsisField() {
+    // 用 ImeCursorFixerWrapper 包裹 TextField，修复中文输入法光标跟随问题
+    return ImeCursorFixerWrapper(
+      controller: _synopsisController,
+      focusNode: _synopsisFocusNode,
+      child: TextField(
+        controller: _synopsisController,
+        focusNode: _synopsisFocusNode,
+        maxLines: null,
+        expands: true,
+        textAlignVertical: TextAlignVertical.top,
+        decoration: const InputDecoration(
+          labelText: '简介',
+          hintText: '请输入作品简介（选填）',
+          alignLabelWithHint: true,
+        ),
+      ),
     );
   }
 

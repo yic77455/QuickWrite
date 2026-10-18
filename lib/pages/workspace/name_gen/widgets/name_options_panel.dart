@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/models/name_gen/name_dictionary.dart';
 import 'package:quick_write/core/models/name_gen/name_gen_options.dart';
+import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/qw_dropdown.dart';
 
@@ -27,6 +28,12 @@ class NameOptionsPanel extends StatelessWidget {
   /// 自定义后缀输入控制器
   final TextEditingController suffixController;
 
+  /// 自定义姓氏输入框的焦点节点（与输入法光标修复包装器共用）
+  final FocusNode surnameFocusNode;
+
+  /// 自定义后缀输入框的焦点节点（与输入法光标修复包装器共用）
+  final FocusNode suffixFocusNode;
+
   /// 参数变化回调
   final ValueChanged<NameGenOptions> onChanged;
 
@@ -37,6 +44,8 @@ class NameOptionsPanel extends StatelessWidget {
     required this.options,
     required this.surnameController,
     required this.suffixController,
+    required this.surnameFocusNode,
+    required this.suffixFocusNode,
     required this.onChanged,
   });
 
@@ -127,7 +136,8 @@ class NameOptionsPanel extends StatelessWidget {
             context,
             label: '姓氏',
             controller: surnameController,
-            hintText: '留空随机',
+            focusNode: surnameFocusNode,
+            hintText: '随机',
             onChanged: (value) => onChanged(options.copyWith(customSurname: value)),
           ),
         ] else ...[
@@ -143,7 +153,8 @@ class NameOptionsPanel extends StatelessWidget {
             context,
             label: '后缀',
             controller: suffixController,
-            hintText: '留空随机',
+            focusNode: suffixFocusNode,
+            hintText: '随机',
             onChanged: (value) => onChanged(options.copyWith(customSuffix: value)),
           ),
         ],
@@ -191,6 +202,7 @@ class NameOptionsPanel extends StatelessWidget {
     BuildContext context, {
     required String label,
     required TextEditingController controller,
+    required FocusNode focusNode,
     required String hintText,
     required ValueChanged<String> onChanged,
   }) {
@@ -205,26 +217,31 @@ class NameOptionsPanel extends StatelessWidget {
         SizedBox(
           width: _fieldWidth,
           height: _controlHeight-4,
-          child: TextField(
+          child: ImeCursorFixerWrapper(
             controller: controller,
-            onChanged: onChanged,
-            style: context.bodySmall,
-            expands: true,
-            maxLines: null,
-            minLines: null,
-            textAlignVertical: TextAlignVertical.center,
-            decoration: InputDecoration(
-              hintText: hintText,
-              hintStyle: context.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-              ),
-              filled: true,
-              fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-              isDense: true,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 10),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(6),
-                borderSide: BorderSide.none,
+            focusNode: focusNode,
+            child: TextField(
+              controller: controller,
+              focusNode: focusNode,
+              onChanged: onChanged,
+              style: context.bodyMedium,
+              expands: true,
+              maxLines: null,
+              minLines: null,
+              textAlignVertical: TextAlignVertical.center,
+              decoration: InputDecoration(
+                hintText: hintText,
+                hintStyle: context.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                ),
+                filled: true,
+                fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(6),
+                  borderSide: BorderSide.none,
+                ),
               ),
             ),
           ),

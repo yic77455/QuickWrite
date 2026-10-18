@@ -2,13 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:quick_write/core/constants/material_icons.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/models/outline_models.dart';
 import 'package:quick_write/shared/widgets/toolbar_button.dart';
 
 /// 大纲编辑器顶部工具栏
 ///
-/// 提供展开全部、折叠全部、添加节点等操作入口
+/// 标题后提供布局设置入口，右侧提供展开全部、折叠全部、添加节点等操作入口
 class OutlineEditorTopBar extends StatelessWidget {
   /// 工具栏高度（垂直 padding 8*2 + 图标按钮 32）
   ///
@@ -39,6 +40,35 @@ class OutlineEditorTopBar extends StatelessWidget {
   /// 切换快捷键列表面板显示状态回调
   final VoidCallback onToggleShortcutPanel;
 
+  /// 是否处于批量选择模式
+  final bool isBatchMode;
+
+  /// 批量选择模式下是否已选中全部节点
+  final bool isAllNodesSelected;
+
+  /// 批量选择模式下是否仅选中了部分节点（有选中项但未全选）
+  final bool isPartialNodesSelected;
+
+  /// 进入批量选择模式回调
+  final VoidCallback onEnterBatchMode;
+
+  /// 退出批量选择模式回调
+  final VoidCallback onExitBatchMode;
+
+  /// 切换全选/取消全选回调
+  final VoidCallback onToggleSelectAll;
+
+  /// 布局设置入口按钮的键
+  ///
+  /// 供外部定位设置卡片的弹出位置使用
+  final Key settingsButtonKey;
+
+  /// 布局设置卡片是否已展开
+  final bool isSettingsCardVisible;
+
+  /// 打开布局设置卡片回调
+  final VoidCallback onOpenSettings;
+
   const OutlineEditorTopBar({
     super.key,
     required this.colorScheme,
@@ -49,12 +79,24 @@ class OutlineEditorTopBar extends StatelessWidget {
     required this.onAddRoot,
     required this.isShortcutPanelVisible,
     required this.onToggleShortcutPanel,
+    required this.isBatchMode,
+    required this.isAllNodesSelected,
+    required this.isPartialNodesSelected,
+    required this.onEnterBatchMode,
+    required this.onExitBatchMode,
+    required this.onToggleSelectAll,
+    required this.settingsButtonKey,
+    required this.isSettingsCardVisible,
+    required this.onOpenSettings,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      // 移动端取消右侧留白，让操作图标贴近屏幕右边缘
+      padding: PlatformCapabilities.isMobile
+          ? const EdgeInsets.fromLTRB(12, 8, 2, 8)
+          : const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: backgroundColor,
         // border: Border(bottom: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.5))),
@@ -65,25 +107,57 @@ class OutlineEditorTopBar extends StatelessWidget {
           Icon(Icons.account_tree_outlined, size: 18, color: colorScheme.primary),
           const SizedBox(width: 8),
           Text('大纲编辑器', style: context.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
-          const Spacer(),
-          // 快捷键列表面板开关
+          const SizedBox(width: 2),
+          // 设置入口：在标题后提供齿轮图标，弹出大纲编辑器设置卡片
           _buildIconButton(
-            icon: Icons.keyboard_outlined,
-            tooltip: '快捷键',
-            onTap: onToggleShortcutPanel,
-            isSelected: isShortcutPanelVisible,
+            key: settingsButtonKey,
+            icon: Icons.settings_outlined,
+            tooltip: '设置',
+            onTap: onOpenSettings,
+            isSelected: isSettingsCardVisible,
+            showSelectedBackground: false,
           ),
-          const SizedBox(width: 6),
-          // 分隔线：将快捷键查阅入口与节点操作按钮区分开
-          _buildVerticalDivider(),
-          const SizedBox(width: 6),
-          // 展开全部
-          _buildIconButton(icon: Icons.unfold_more_rounded, tooltip: '展开全部', onTap: onExpandAll),
-          // 折叠全部
-          _buildIconButton(icon: Icons.unfold_less_rounded, tooltip: '折叠全部', onTap: onCollapseAll),
-          const SizedBox(width: 4),
-          // 添加根节点
-          _buildIconButton(icon: Icons.add_rounded, tooltip: '添加节点', onTap: onAddRoot, enabled: !readOnly),
+          const Spacer(),
+          if (isBatchMode) ...[
+            // 批量选择模式：全选/取消全选
+            // 图标随选中情况变化：全选为实心勾选框，部分选中为中间态，未选中为空心框
+            _buildIconButton(
+              icon: isAllNodesSelected
+                  ? Icons.check_box_rounded
+                  : isPartialNodesSelected
+                      ? Icons.indeterminate_check_box_rounded
+                      : Icons.check_box_outline_blank_rounded,
+              tooltip: isAllNodesSelected ? '取消全选' : '全选',
+              onTap: onToggleSelectAll,
+              isSelected: isAllNodesSelected || isPartialNodesSelected,
+              showSelectedBackground: false,
+            ),
+            const SizedBox(width: 4),
+            // 批量选择模式：退出
+            _buildIconButton(icon: Icons.close_rounded, tooltip: '退出批量选择', onTap: onExitBatchMode),
+          ] else ...[
+            // 入口开关：与节点操作按钮以分隔线区分开
+            // 桌面端提供快捷键查阅入口，移动端没有物理键盘，改为提供批量选择入口
+            if (!PlatformCapabilities.isMobile)
+              _buildIconButton(
+                icon: Icons.keyboard_outlined,
+                tooltip: '快捷键',
+                onTap: onToggleShortcutPanel,
+                isSelected: isShortcutPanelVisible,
+              )
+            else
+              _buildIconButton(icon: Icons.checklist_rounded, tooltip: '批量选择', onTap: onEnterBatchMode),
+            const SizedBox(width: 6),
+            _buildVerticalDivider(),
+            const SizedBox(width: 6),
+            // 展开全部
+            _buildIconButton(icon: Icons.unfold_more_rounded, tooltip: '展开全部', onTap: onExpandAll),
+            // 折叠全部
+            _buildIconButton(icon: Icons.unfold_less_rounded, tooltip: '折叠全部', onTap: onCollapseAll),
+            const SizedBox(width: 4),
+            // 添加根节点
+            _buildIconButton(icon: Icons.add_rounded, tooltip: '添加节点', onTap: onAddRoot, enabled: !readOnly),
+          ],
         ],
       ),
     );
@@ -96,14 +170,18 @@ class OutlineEditorTopBar extends StatelessWidget {
 
   /// 构建工具栏图标按钮
   ///
-  /// [isSelected] 为 true 时以选中态样式呈现（背景与图标着色为主题色），
-  /// 适用于开关式按钮。
+  /// [isSelected] 为 true 时以选中态样式呈现（图标着色为主题色），
+  /// 适用于开关式按钮；
+  /// [showSelectedBackground] 控制选中态是否额外绘制主题色底衬，
+  /// 关闭时仅保留图标着色高亮。
   Widget _buildIconButton({
+    Key? key,
     required IconData icon,
     required String tooltip,
     required VoidCallback onTap,
     bool enabled = true,
     bool isSelected = false,
+    bool showSelectedBackground = true,
   }) {
     final Color iconColor = !enabled
         ? colorScheme.onSurfaceVariant.withValues(alpha: 0.3)
@@ -112,10 +190,11 @@ class OutlineEditorTopBar extends StatelessWidget {
             : colorScheme.onSurfaceVariant;
 
     return SizedBox(
+      key: key,
       width: 32,
       height: 32,
       child: Material(
-        color: isSelected ? colorScheme.primary.withValues(alpha: 0.12) : Colors.transparent,
+        color: isSelected && showSelectedBackground ? colorScheme.primary.withValues(alpha: 0.12) : Colors.transparent,
         borderRadius: BorderRadius.circular(6),
         child: InkWell(
           onTap: enabled ? onTap : null,

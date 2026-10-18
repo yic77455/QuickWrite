@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
 import 'package:quick_write/core/services/cache_services/window_cache_service.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:window_manager/window_manager.dart';
 
 /// 窗口类型枚举
@@ -91,10 +92,13 @@ class WindowProvider extends ChangeNotifier with WindowListener {
   })  : _windowType = windowType,
         _bookId = bookId,
         _mainWindowId = mainWindowId {
-    windowManager.addListener(this); // 注册窗口监听器
-    // 所有的窗口都需要阻止直接关闭，以便在关闭前执行清理操作并通知主窗口
-    windowManager.setPreventClose(true);
-    _initWindowState(); // 初始化窗口状态
+    // 窗口监听与状态依赖原生窗口，仅在支持原生窗口控制的平台注册
+    if (PlatformCapabilities.supportsNativeWindowControl) {
+      windowManager.addListener(this); // 注册窗口监听器
+      // 所有的窗口都需要阻止直接关闭，以便在关闭前执行清理操作并通知主窗口
+      windowManager.setPreventClose(true);
+      _initWindowState(); // 初始化窗口状态
+    }
   }
 
   // ================= 初始化方法 =================
@@ -312,8 +316,10 @@ class WindowProvider extends ChangeNotifier with WindowListener {
   void dispose() {
     // 取消可能存在的防抖定时器
     _saveTimer?.cancel();
-    // 注销窗口监听器
-    windowManager.removeListener(this);
+    // 注销窗口监听器（与构造时的注册保持对应，仅支持原生窗口控制的平台注册过）
+    if (PlatformCapabilities.supportsNativeWindowControl) {
+      windowManager.removeListener(this);
+    }
     // 调用父类的 dispose
     super.dispose();
   }

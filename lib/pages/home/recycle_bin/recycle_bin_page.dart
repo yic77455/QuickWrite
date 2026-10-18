@@ -8,6 +8,7 @@ import 'package:quick_write/core/models/volume.dart';
 import 'package:quick_write/core/providers/bookshelf_provider.dart';
 import 'package:quick_write/core/providers/home_state_provider.dart';
 import 'package:quick_write/core/providers/recycle_bin_provider.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 import 'widgets/widgets.dart';
@@ -67,6 +68,11 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
 
   /// 获取当前 Tab 是否有选中项
   bool get _hasSelection => _currentSelectedCount > 0;
+
+  /// 获取当前 Tab 的说明文字
+  String get _currentDescription => _currentTab == 0
+      ? '删除的作品会在这里保留，可随时恢复'
+      : '删除的章节和设定项会在这里保留，可随时恢复';
 
   // ================= 选中状态管理 =================
 
@@ -582,6 +588,8 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
 
         return Column(
           children: [
+            // 页面标题：仅移动端展示，同时提供返回入口
+            if (PlatformCapabilities.isMobile) _buildMobileHeader(context),
             // 顶部：Tab 切换栏
             _buildTabBar(context),
             // 工具栏（仅在对应视图有数据时显示）
@@ -598,7 +606,10 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
                 onRestore: _restoreSelected,
                 onDelete: _deleteSelectedPermanently,
                 onEmpty: _emptyRecycleBin,
-                emptyLabel: _currentTab == 0 ? '清空书籍回收站' : '清空章节回收站',
+                // 移动端的 Tab 切换栏已标明当前视图，清空按钮无需再区分书籍与章节
+                emptyLabel: PlatformCapabilities.isMobile
+                    ? '清空回收站'
+                    : (_currentTab == 0 ? '清空书籍回收站' : '清空章节回收站'),
               ),
             // 内容区域
             Expanded(
@@ -623,9 +634,43 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
                       onDelete: _deleteSingleItemPermanently,
                     ),
             ),
+            // 移动端：批量操作栏位于列表下方，仅在存在选中项时展示
+            if (PlatformCapabilities.isMobile && _hasSelection)
+              RecycleBinActionBar(
+                onRestore: _restoreSelected,
+                onDelete: _deleteSelectedPermanently,
+              ),
           ],
         );
       },
+    );
+  }
+
+  /// 构建移动端页面标题区域
+  ///
+  /// 大标题下方展示当前视图的说明文字，并提供返回进入回收站前的「工具」页面的入口
+  Widget _buildMobileHeader(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+      child: MobilePageHeader(
+        title: Text(
+          '回收站',
+          style: context.headlineMedium?.copyWith(
+            fontWeight: FontWeight.bold,
+            letterSpacing: 0.2,
+          ),
+        ),
+        subtitle: Text(
+          '删除的作品、章节和设定项会在这里保留，可随时恢复',
+          style: context.bodyMedium?.copyWith(
+            color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+          ),
+        ),
+        onBack: () =>
+            context.read<HomeStateProvider>().setPage(HomePageEnum.tools),
+      ),
     );
   }
 
@@ -633,6 +678,23 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
   Widget _buildTabBar(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final provider = context.read<RecycleBinProvider>();
+    final labels = [
+      '书籍回收站 (${provider.recycledBooksCount})',
+      '章节回收站 (${provider.recycledItemsCount})',
+    ];
+
+    // 移动端：Tab 切换栏占满整行，说明文字已移至页面标题下方
+    if (PlatformCapabilities.isMobile) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+        child: SegmentedControl(
+          labels: labels,
+          selectedIndex: _currentTab,
+          onChanged: _switchTab,
+          height: 36,
+        ),
+      );
+    }
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(32, 24, 32, 8),
@@ -642,10 +704,7 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
           SizedBox(
             width: 280,
             child: SegmentedControl(
-              labels: [
-                '书籍回收站 (${provider.recycledBooksCount})',
-                '章节回收站 (${provider.recycledItemsCount})',
-              ],
+              labels: labels,
               selectedIndex: _currentTab,
               onChanged: _switchTab,
             ),
@@ -654,9 +713,7 @@ class _RecycleBinPageState extends State<RecycleBinPage> {
           // 右侧：说明文字
           Expanded(
             child: Text(
-              _currentTab == 0
-                  ? '删除的作品会在这里保留，可随时恢复'
-                  : '删除的章节和设定项会在这里保留，可随时恢复',
+              _currentDescription,
               style: context.bodySmall?.copyWith(
                 color: colorScheme.onSurface.withValues(alpha: 0.5),
               ),

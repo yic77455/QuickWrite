@@ -17,9 +17,9 @@ const BookModelSchema = CollectionSchema(
   name: r'BookModel',
   id: -8798672064070329451,
   properties: {
-    r'coverPath': PropertySchema(
+    r'coverFileName': PropertySchema(
       id: 0,
-      name: r'coverPath',
+      name: r'coverFileName',
       type: IsarType.string,
     ),
     r'createdAt': PropertySchema(
@@ -102,7 +102,7 @@ int _bookModelEstimateSize(
   Map<Type, List<int>> allOffsets,
 ) {
   var bytesCount = offsets.last;
-  bytesCount += 3 + object.coverPath.length * 3;
+  bytesCount += 3 + object.coverFileName.length * 3;
   bytesCount += 3 + object.groupId.length * 3;
   bytesCount += 3 + object.latestChapter.length * 3;
   bytesCount += 3 + object.synopsis.length * 3;
@@ -117,7 +117,7 @@ void _bookModelSerialize(
   List<int> offsets,
   Map<Type, List<int>> allOffsets,
 ) {
-  writer.writeString(offsets[0], object.coverPath);
+  writer.writeString(offsets[0], object.coverFileName);
   writer.writeDateTime(offsets[1], object.createdAt);
   writer.writeString(offsets[2], object.groupId);
   writer.writeString(offsets[3], object.latestChapter);
@@ -136,7 +136,7 @@ BookModel _bookModelDeserialize(
   Map<Type, List<int>> allOffsets,
 ) {
   final object = BookModel();
-  object.coverPath = reader.readString(offsets[0]);
+  object.coverFileName = reader.readString(offsets[0]);
   object.createdAt = reader.readDateTime(offsets[1]);
   object.groupId = reader.readString(offsets[2]);
   object.id = id;
@@ -372,13 +372,14 @@ extension BookModelQueryWhere
 
 extension BookModelQueryFilter
     on QueryBuilder<BookModel, BookModel, QFilterCondition> {
-  QueryBuilder<BookModel, BookModel, QAfterFilterCondition> coverPathEqualTo(
+  QueryBuilder<BookModel, BookModel, QAfterFilterCondition>
+      coverFileNameEqualTo(
     String value, {
     bool caseSensitive = true,
   }) {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.equalTo(
-        property: r'coverPath',
+        property: r'coverFileName',
         value: value,
         caseSensitive: caseSensitive,
       ));
@@ -386,7 +387,7 @@ extension BookModelQueryFilter
   }
 
   QueryBuilder<BookModel, BookModel, QAfterFilterCondition>
-      coverPathGreaterThan(
+      coverFileNameGreaterThan(
     String value, {
     bool include = false,
     bool caseSensitive = true,
@@ -394,14 +395,15 @@ extension BookModelQueryFilter
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.greaterThan(
         include: include,
-        property: r'coverPath',
+        property: r'coverFileName',
         value: value,
         caseSensitive: caseSensitive,
       ));
     });
   }
 
-  QueryBuilder<BookModel, BookModel, QAfterFilterCondition> coverPathLessThan(
+  QueryBuilder<BookModel, BookModel, QAfterFilterCondition>
+      coverFileNameLessThan(
     String value, {
     bool include = false,
     bool caseSensitive = true,
@@ -409,14 +411,15 @@ extension BookModelQueryFilter
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.lessThan(
         include: include,
-        property: r'coverPath',
+        property: r'coverFileName',
         value: value,
         caseSensitive: caseSensitive,
       ));
     });
   }
 
-  QueryBuilder<BookModel, BookModel, QAfterFilterCondition> coverPathBetween(
+  QueryBuilder<BookModel, BookModel, QAfterFilterCondition>
+      coverFileNameBetween(
     String lower,
     String upper, {
     bool includeLower = true,
@@ -425,7 +428,7 @@ extension BookModelQueryFilter
   }) {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.between(
-        property: r'coverPath',
+        property: r'coverFileName',
         lower: lower,
         includeLower: includeLower,
         upper: upper,
@@ -435,70 +438,71 @@ extension BookModelQueryFilter
     });
   }
 
-  QueryBuilder<BookModel, BookModel, QAfterFilterCondition> coverPathStartsWith(
+  QueryBuilder<BookModel, BookModel, QAfterFilterCondition>
+      coverFileNameStartsWith(
     String value, {
     bool caseSensitive = true,
   }) {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.startsWith(
-        property: r'coverPath',
+        property: r'coverFileName',
         value: value,
         caseSensitive: caseSensitive,
       ));
     });
   }
 
-  QueryBuilder<BookModel, BookModel, QAfterFilterCondition> coverPathEndsWith(
+  QueryBuilder<BookModel, BookModel, QAfterFilterCondition>
+      coverFileNameEndsWith(
     String value, {
     bool caseSensitive = true,
   }) {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.endsWith(
-        property: r'coverPath',
+        property: r'coverFileName',
         value: value,
         caseSensitive: caseSensitive,
       ));
     });
   }
 
-  QueryBuilder<BookModel, BookModel, QAfterFilterCondition> coverPathContains(
-      String value,
-      {bool caseSensitive = true}) {
+  QueryBuilder<BookModel, BookModel, QAfterFilterCondition>
+      coverFileNameContains(String value, {bool caseSensitive = true}) {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.contains(
-        property: r'coverPath',
+        property: r'coverFileName',
         value: value,
         caseSensitive: caseSensitive,
       ));
     });
   }
 
-  QueryBuilder<BookModel, BookModel, QAfterFilterCondition> coverPathMatches(
-      String pattern,
-      {bool caseSensitive = true}) {
+  QueryBuilder<BookModel, BookModel, QAfterFilterCondition>
+      coverFileNameMatches(String pattern, {bool caseSensitive = true}) {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.matches(
-        property: r'coverPath',
+        property: r'coverFileName',
         wildcard: pattern,
         caseSensitive: caseSensitive,
       ));
     });
   }
 
-  QueryBuilder<BookModel, BookModel, QAfterFilterCondition> coverPathIsEmpty() {
+  QueryBuilder<BookModel, BookModel, QAfterFilterCondition>
+      coverFileNameIsEmpty() {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.equalTo(
-        property: r'coverPath',
+        property: r'coverFileName',
         value: '',
       ));
     });
   }
 
   QueryBuilder<BookModel, BookModel, QAfterFilterCondition>
-      coverPathIsNotEmpty() {
+      coverFileNameIsNotEmpty() {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.greaterThan(
-        property: r'coverPath',
+        property: r'coverFileName',
         value: '',
       ));
     });
@@ -1439,15 +1443,15 @@ extension BookModelQueryLinks
     on QueryBuilder<BookModel, BookModel, QFilterCondition> {}
 
 extension BookModelQuerySortBy on QueryBuilder<BookModel, BookModel, QSortBy> {
-  QueryBuilder<BookModel, BookModel, QAfterSortBy> sortByCoverPath() {
+  QueryBuilder<BookModel, BookModel, QAfterSortBy> sortByCoverFileName() {
     return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'coverPath', Sort.asc);
+      return query.addSortBy(r'coverFileName', Sort.asc);
     });
   }
 
-  QueryBuilder<BookModel, BookModel, QAfterSortBy> sortByCoverPathDesc() {
+  QueryBuilder<BookModel, BookModel, QAfterSortBy> sortByCoverFileNameDesc() {
     return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'coverPath', Sort.desc);
+      return query.addSortBy(r'coverFileName', Sort.desc);
     });
   }
 
@@ -1562,15 +1566,15 @@ extension BookModelQuerySortBy on QueryBuilder<BookModel, BookModel, QSortBy> {
 
 extension BookModelQuerySortThenBy
     on QueryBuilder<BookModel, BookModel, QSortThenBy> {
-  QueryBuilder<BookModel, BookModel, QAfterSortBy> thenByCoverPath() {
+  QueryBuilder<BookModel, BookModel, QAfterSortBy> thenByCoverFileName() {
     return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'coverPath', Sort.asc);
+      return query.addSortBy(r'coverFileName', Sort.asc);
     });
   }
 
-  QueryBuilder<BookModel, BookModel, QAfterSortBy> thenByCoverPathDesc() {
+  QueryBuilder<BookModel, BookModel, QAfterSortBy> thenByCoverFileNameDesc() {
     return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'coverPath', Sort.desc);
+      return query.addSortBy(r'coverFileName', Sort.desc);
     });
   }
 
@@ -1697,10 +1701,11 @@ extension BookModelQuerySortThenBy
 
 extension BookModelQueryWhereDistinct
     on QueryBuilder<BookModel, BookModel, QDistinct> {
-  QueryBuilder<BookModel, BookModel, QDistinct> distinctByCoverPath(
+  QueryBuilder<BookModel, BookModel, QDistinct> distinctByCoverFileName(
       {bool caseSensitive = true}) {
     return QueryBuilder.apply(this, (query) {
-      return query.addDistinctBy(r'coverPath', caseSensitive: caseSensitive);
+      return query.addDistinctBy(r'coverFileName',
+          caseSensitive: caseSensitive);
     });
   }
 
@@ -1773,9 +1778,9 @@ extension BookModelQueryProperty
     });
   }
 
-  QueryBuilder<BookModel, String, QQueryOperations> coverPathProperty() {
+  QueryBuilder<BookModel, String, QQueryOperations> coverFileNameProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addPropertyName(r'coverPath');
+      return query.addPropertyName(r'coverFileName');
     });
   }
 

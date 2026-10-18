@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:quick_write/core/providers/home_state_provider.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
+import 'package:quick_write/shared/widgets/widgets.dart';
 import 'widgets/widgets.dart';
 
 /// 云同步页面
@@ -15,9 +19,12 @@ class CloudSyncPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    // 左右边距：移动端屏幕较窄，收窄留白以提升内容占比
+    final double horizontalPadding = PlatformCapabilities.isMobile ? 20 : 32;
+    final double topPadding = PlatformCapabilities.isMobile ? 16 : 32;
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(32, 32, 32, 40),
+      padding: EdgeInsets.fromLTRB(horizontalPadding, topPadding, horizontalPadding, 40),
       children: [
         // 页面标题
         _buildPageHeader(context, colorScheme),
@@ -45,24 +52,40 @@ class CloudSyncPage extends StatelessWidget {
   }
 
   /// 构建页面顶部标题区域
+  ///
+  /// 移动端在标题左侧放置返回按钮，与标题同行展示；
+  /// 桌面端仅渲染标题与说明
   Widget _buildPageHeader(BuildContext context, ColorScheme colorScheme) {
+    final title = Text(
+      '云同步',
+      style: context.headlineMedium?.copyWith(
+        fontWeight: FontWeight.bold,
+        letterSpacing: 0.2,
+      ),
+    );
+    final subtitle = Text(
+      '通过 WebDAV 将书籍和应用数据备份到云端，实现多设备间同步',
+      style: context.bodyMedium?.copyWith(
+        color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+      ),
+    );
+
+    // 移动端：返回进入云同步前的「工具」页面
+    if (PlatformCapabilities.isMobile) {
+      return MobilePageHeader(
+        title: title,
+        subtitle: subtitle,
+        onBack: () =>
+            context.read<HomeStateProvider>().setPage(HomePageEnum.tools),
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          '云同步',
-          style: context.headlineMedium?.copyWith(
-            fontWeight: FontWeight.bold,
-            letterSpacing: 0.2,
-          ),
-        ),
+        title,
         const SizedBox(height: 8),
-        Text(
-          '通过 WebDAV 将书籍和应用数据备份到云端，实现多设备间同步',
-          style: context.bodyMedium?.copyWith(
-            color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-          ),
-        ),
+        subtitle,
       ],
     );
   }

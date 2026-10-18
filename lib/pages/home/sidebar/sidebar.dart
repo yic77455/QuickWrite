@@ -1,113 +1,96 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:quick_write/core/constants/material_icons.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:quick_write/core/constants/constants.dart';
 import 'package:quick_write/core/providers/cloud_sync_provider.dart';
 import 'package:quick_write/core/providers/home_state_provider.dart';
 import 'package:quick_write/core/providers/home_sidebar_provider.dart';
+import 'package:quick_write/core/providers/update_provider.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 
 /// 侧边栏组件
 ///
-/// - 展开/折叠
-/// - 导航栏
-/// - 状态栏
-/// - 设置
+/// 桌面端的固定侧边栏，可展开/折叠，承载全部主页面入口
 class SidebarWidget extends StatelessWidget {
   const SidebarWidget({super.key});
 
-  // ---------------------------------------------------------
-  // 侧边栏
-  // ---------------------------------------------------------
   @override
   Widget build(BuildContext context) {
     // 使用 context.watch 监听 SidebarProvider 和 HomeStateProvider 的变化
     // 当状态改变时，会自动重新构建此组件
     final sidebarProvider = context.watch<HomeSidebarProvider>();
     final homeStateProvider = context.watch<HomeStateProvider>();
+    final bool isExpanded = sidebarProvider.isExpanded;
 
+    return _buildContainer(
+      context,
+      width: isExpanded ? 200 : 64, // 展开宽200，折叠宽64
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 8, left: 8, right: 8),
+          child: _buildLogo(context, sidebarProvider),
+        ),
+
+        // 中间导航区 (使用 Expanded 包裹 ListView，防止无限高度溢出报错)
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            children: [
+              _buildNavItem(context, homeStateProvider, HomePageEnum.bookshelf, isExpanded: isExpanded),
+              _buildNavItem(context, homeStateProvider, HomePageEnum.stats, isExpanded: isExpanded),
+              _buildNavItem(context, homeStateProvider, HomePageEnum.recycle, isExpanded: isExpanded),
+              _buildNavItem(
+                context,
+                homeStateProvider,
+                HomePageEnum.about,
+                isExpanded: isExpanded,
+                // 启动检查发现有新版本时显示角标，提醒用户前往关于页查看
+                showBadge: context.watch<UpdateProvider>().hasUpdate,
+              ),
+            ],
+          ),
+        ),
+
+        // 底部固定区域：云同步与设置
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            children: [
+              _buildNavItem(
+                context,
+                homeStateProvider,
+                HomePageEnum.cloudSync,
+                isExpanded: isExpanded,
+                // 存在待用户确认的高风险同步时显示角标，提醒用户前往处理
+                showBadge: context.watch<CloudSyncProvider>().pendingRisk != null,
+              ),
+              _buildNavItem(context, homeStateProvider, HomePageEnum.settings, isExpanded: isExpanded),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ---------------------------------------------------------
+  // 侧边栏外框
+  // ---------------------------------------------------------
+
+  Widget _buildContainer(
+    BuildContext context, {
+    required double width,
+    required List<Widget> children,
+  }) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 130),
       curve: Curves.easeInOut,
-      width: sidebarProvider.isExpanded ? 200 : 64, // 展开宽200，折叠宽64
+      width: width,
       color: Theme.of(context).colorScheme.surfaceContainerLow,
       child: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 8, left: 8, right: 8),
-            child: _buildLogo(context, sidebarProvider),
-          ),
-
-          // 中间导航区 (使用 Expanded 包裹 ListView，防止无限高度溢出报错)
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              children: [
-                _buildNavItem(
-                  context,
-                  sidebarProvider,
-                  homeStateProvider,
-                  0,
-                  Icons.auto_stories_rounded,
-                  '书架',
-                ),
-                _buildNavItem(
-                  context,
-                  sidebarProvider,
-                  homeStateProvider,
-                  1,
-                  Icons.bar_chart_rounded,
-                  '码字统计',
-                ),
-                _buildNavItem(
-                  context,
-                  sidebarProvider,
-                  homeStateProvider,
-                  2,
-                  MaterialIcons.delete,
-                  '回收站',
-                ),
-                _buildNavItem(
-                  context,
-                  sidebarProvider,
-                  homeStateProvider,
-                  5,
-                  Icons.info_outline_rounded,
-                  '关于',
-                ),
-              ],
-            ),
-          ),
-
-          // 底部固定区域：云同步与设置
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            child: Column(
-              children: [
-                _buildNavItem(
-                  context,
-                  sidebarProvider,
-                  homeStateProvider,
-                  3,
-                  Icons.cloud_outlined,
-                  '云同步',
-                  // 存在待用户确认的高风险同步时显示角标，提醒用户前往处理
-                  showBadge: context.watch<CloudSyncProvider>().pendingRisk != null,
-                ),
-                _buildNavItem(
-                  context,
-                  sidebarProvider,
-                  homeStateProvider,
-                  4,
-                  Icons.settings_rounded,
-                  '设置',
-                ),
-              ],
-            ),
-          ),
-        ],
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: children,
       ),
     );
   }
@@ -115,7 +98,12 @@ class SidebarWidget extends StatelessWidget {
   // ---------------------------------------------------------
   // LOGO区域
   // ---------------------------------------------------------
+
+  /// 桌面端 LOGO 区域：点击图标可展开/折叠侧边栏
   Widget _buildLogo(BuildContext context, HomeSidebarProvider sidebarProvider) {
+    // LOGO 文字区域
+    final Widget titleArea = _buildTitleArea(context);
+
     return Container(
       height: 48,
       decoration: BoxDecoration(borderRadius: BorderRadius.circular(8)),
@@ -153,15 +141,7 @@ class SidebarWidget extends StatelessWidget {
                                 : Icons.keyboard_double_arrow_right_rounded,
                             size: 24,
                           )
-                        : Image.asset(
-                            // 浅色模式使用 icon1，深色模式使用 icon2
-                            Theme.of(context).brightness == Brightness.dark
-                                ? 'assets/icon/icon2.png'
-                                : 'assets/icon/icon1.png',
-                            width: 36,
-                            height: 36,
-                            fit: BoxFit.contain, // 保持比例，避免拉伸变形
-                          ),
+                        : _buildAppIcon(context),
                   ),
                 ),
               ),
@@ -169,23 +149,40 @@ class SidebarWidget extends StatelessWidget {
           ),
           if (sidebarProvider.isExpanded)
             Expanded(
-              child: DragToMoveArea(
-                // 加入 DragToMoveArea，让LOGO的文字区域也能拖动窗口，再套个OverflowBox，解决文字超出宽度时的闪烁问题
-                child: OverflowBox(
-                  maxWidth: 200,
-                  alignment: Alignment.centerLeft,
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 8),
-                    child: Text(
-                      GlobalConstants.appTitle,
-                      style: context.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-              ),
+              // 桌面端允许拖动该文字区域移动窗口，其他平台仅为普通文字
+              child: PlatformCapabilities.supportsNativeWindowControl
+                  ? DragToMoveArea(child: titleArea)
+                  : titleArea,
             ),
         ],
       ),
+    );
+  }
+
+  /// LOGO 文字区域：套 OverflowBox 解决文字超出宽度时的闪烁问题
+  Widget _buildTitleArea(BuildContext context) {
+    return OverflowBox(
+      maxWidth: 200,
+      alignment: Alignment.centerLeft,
+      child: Padding(
+        padding: const EdgeInsets.only(left: 8),
+        child: Text(
+          GlobalConstants.appTitle,
+          style: context.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+  }
+
+  /// 应用图标：浅色模式使用 icon1，深色模式使用 icon2
+  Widget _buildAppIcon(BuildContext context) {
+    return Image.asset(
+      Theme.of(context).brightness == Brightness.dark
+          ? 'assets/icon/icon2.png'
+          : 'assets/icon/icon1.png',
+      width: 36,
+      height: 36,
+      fit: BoxFit.contain, // 保持比例，避免拉伸变形
     );
   }
 
@@ -194,23 +191,20 @@ class SidebarWidget extends StatelessWidget {
   // ---------------------------------------------------------
   Widget _buildNavItem(
     BuildContext context,
-    HomeSidebarProvider sidebarProvider,
     HomeStateProvider homeStateProvider,
-    int index,
-    IconData icon,
-    String title, {
+    HomePageEnum page, {
+    required bool isExpanded,
     bool showBadge = false,
   }) {
-    // 使用 Provider 获取当前选中的页面索引
-    final isSelected = homeStateProvider.selectedIndex == index;
+    final isSelected = homeStateProvider.currentPage == page;
     final colorScheme = Theme.of(context).colorScheme;
 
     // 使用 TooltipTarget 包裹，在导航栏收起状态时显示带箭头的提示框
     return TooltipTarget(
-      showTooltip: !sidebarProvider.isExpanded, // 仅在收起状态显示提示
+      showTooltip: !isExpanded, // 仅在收起状态显示提示
       direction: TooltipDirection.right, // 提示框显示在右侧
       tooltipContent: Text(
-        title,
+        page.title,
         style: context.bodySmall?.copyWith(
           color: colorScheme.onSurface,
           fontWeight: FontWeight.w600,
@@ -228,7 +222,7 @@ class SidebarWidget extends StatelessWidget {
             hoverColor: colorScheme.primary.withValues(alpha: 0.1),
             onTap: () {
               // 使用 Provider 的方法设置页面，而不是调用父组件的回调函数
-              homeStateProvider.setPageByIndex(index);
+              homeStateProvider.setPage(page);
             },
             child: Container(
               color: isSelected
@@ -237,12 +231,12 @@ class SidebarWidget extends StatelessWidget {
               height: 48,
               child: _buildSidebarItem(
                 context: context,
-                icon: icon,
-                title: title,
+                icon: page.icon,
+                title: page.title,
                 color: isSelected
                     ? colorScheme.primary
                     : colorScheme.onSurfaceVariant,
-                isExpanded: sidebarProvider.isExpanded,
+                isExpanded: isExpanded,
                 showBadge: showBadge,
               ),
             ),

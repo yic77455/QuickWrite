@@ -100,12 +100,10 @@ class _QwSwitchState extends State<QwSwitch>
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final isDark = colorScheme.brightness == Brightness.dark;
 
     final activeColor = widget.activeColor ?? colorScheme.primary;
-    // 关闭态轨道色：深浅色主题分别取中性灰，保证与背景有合适对比
-    final inactiveTrackColor =
-        isDark ? const Color(0xFF3A3A3C) : const Color(0xFFDFDFDF);
+    // 关闭态轨道色取自主题的表面容器色，保证与背景留有合适的对比
+    final inactiveTrackColor = colorScheme.surfaceContainerHighest;
 
     return RepaintBoundary(
       child: Semantics(

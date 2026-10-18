@@ -6,6 +6,7 @@ import 'package:quick_write/core/models/chapter.dart';
 import 'package:quick_write/core/models/setting_item.dart';
 import 'package:quick_write/core/models/volume.dart';
 import 'package:quick_write/core/providers/bookshelf_provider.dart';
+import 'package:quick_write/core/services/workspace/book_folder_service.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/utils/word_count_utils.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
@@ -137,13 +138,15 @@ class _BookDetailContentState extends State<_BookDetailContent> {
 
   /// 构建头部区域：封面、书名、最新章节、作品字数
   Widget _buildHeader(BuildContext context, ColorScheme colorScheme) {
-    // 封面：有路径时显示图片，否则使用书名生成的默认渐变封面
+    // 封面：有封面时显示图片，否则使用书名生成的默认渐变封面
+    // 封面固定存放在作品目录下，数据库只记录文件名，此处拼接出完整路径
+    final coverPath = BookFolderService().coverFilePath(widget.book);
     final coverWidget = ClipRRect(
       borderRadius: BorderRadius.circular(6),
       child: SizedBox(
         width: 120,
         height: 160,
-        child: widget.book.coverPath.isEmpty
+        child: coverPath.isEmpty
             ? DefaultCover.buildThemed(
                 title: widget.book.title,
                 context: context,
@@ -151,7 +154,7 @@ class _BookDetailContentState extends State<_BookDetailContent> {
                 borderRadius: 0,
               )
             : ThemedCoverImage(
-                coverPath: widget.book.coverPath,
+                coverPath: coverPath,
                 cacheKey: widget.book.updatedAt.millisecondsSinceEpoch.toString(),
                 errorBuilder: (context, error, stackTrace) => DefaultCover.buildThemed(
                   title: widget.book.title,

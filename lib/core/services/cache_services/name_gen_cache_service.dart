@@ -177,7 +177,14 @@ class NameGenCacheService extends CacheService<NameGenCacheData> {
   // ================= 生成参数 =================
 
   /// 获取最近一次使用的生成参数
-  NameGenOptions getOptions() => _data.options;
+  ///
+  /// 尚未保存过参数时返回默认参数。
+  NameGenOptions getOptions() => _data.options ?? const NameGenOptions();
+
+  /// 获取已保存的生成参数，尚未保存过时返回 null
+  ///
+  /// 供各端在未保存过参数时自行决定默认值。
+  NameGenOptions? getSavedOptions() => _data.options;
 
   /// 保存生成参数
   Future<bool> saveOptions(NameGenOptions options) async {

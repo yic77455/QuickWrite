@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 
 // ============================================================================
 // 右键菜单实现说明
@@ -329,11 +330,11 @@ class ContextMenu extends StatefulWidget {
 
   /// 右键按下回调（可选）
   ///
-  /// 检测到右键按下时触发，在显示菜单之前调用。
-  /// 用于让调用方获取右键事件信息（如点击位置），自行处理光标定位等逻辑。
+  /// 检测到右键按下时触发，在显示菜单之前调用，参数为触发位置（屏幕坐标）。
+  /// 用于让调用方获取触发位置，自行处理光标定位等逻辑。
   /// 支持同步或异步回调：若返回 [Future]，菜单会在 Future 完成后再显示，
   /// 便于调用方在菜单显示前完成异步状态刷新（如剪贴板内容检测）。
-  final FutureOr<void> Function(PointerDownEvent)? onSecondaryTapDown;
+  final FutureOr<void> Function(Offset position)? onSecondaryTapDown;
 
   /// 菜单关闭回调（可选）
   ///
@@ -364,10 +365,17 @@ class ContextMenu extends StatefulWidget {
 
   /// 点击菜单外部时是否仅关闭菜单而不响应点击（可选，默认为 null）
   ///
-  /// - null：根据 [type] 自动决定（右键菜单为 false，下拉菜单为 true）
+  /// - null：自动决定（下拉菜单、移动端菜单为 true，桌面端右键菜单为 false）
   /// - true：点击外部仅关闭菜单，不响应点击
   /// - false：点击外部关闭菜单的同时响应点击
   final bool? consumeOutsideClicks;
+
+  /// 移动端是否通过长按触发菜单（可选，默认为 true）
+  ///
+  /// 移动端没有右键，默认由长按弹出菜单。
+  /// 设为 false 时不再注册长按识别器，改由调用方在合适的时机自行弹出菜单，
+  /// 避免与调用方自身的长按手势在同一指针上竞争
+  final bool enableMobileLongPress;
 
   const ContextMenu({
     super.key,
@@ -382,6 +390,7 @@ class ContextMenu extends StatefulWidget {
     this.type = ContextMenuType.contextMenu,
     this.menuPadding,
     this.consumeOutsideClicks,
+    this.enableMobileLongPress = true,
   }) : assert(
          menuItems != null || getMenuItems != null,
          'menuItems 或 getMenuItems 必须提供一个',
@@ -486,6 +495,19 @@ class _ContextMenuState extends State<ContextMenu> {
     return widget.getMenuItems?.call() ?? widget.menuItems ?? [];
   }
 
+  /// 处理菜单触发（桌面端右键、移动端长按）
+  ///
+  /// 先通知调用方（用于光标定位等自定义逻辑），再在触发位置显示菜单。
+  /// 支持异步回调：等待调用方完成异步状态刷新后再显示菜单
+  Future<void> _handleTrigger(Offset position) async {
+    final dynamic result = widget.onSecondaryTapDown?.call(position);
+    if (result is Future) await result;
+    // 组件可能在 await 期间被销毁，需检查后再显示菜单
+    if (!mounted) return;
+    // 显示菜单
+    _showMenu(position);
+  }
+
   /// 显示右键菜单
   ///
   /// 实现步骤：
@@ -554,24 +576,30 @@ class _ContextMenuState extends State<ContextMenu> {
     // 使用 RawGestureDetector + _SecondaryButtonGestureRecognizer 监听右键事件
     // EagerGestureRecognizer 会立即消费右键指针序列，阻止穿透到子组件
     // 左键等非右键事件不受影响，正常传递给子组件处理
+    // 移动端没有右键，改由长按触发同一套菜单
     return RawGestureDetector(
       gestures: <Type, GestureRecognizerFactory>{
         _SecondaryButtonGestureRecognizer: GestureRecognizerFactoryWithHandlers<
             _SecondaryButtonGestureRecognizer>(
           () => _SecondaryButtonGestureRecognizer(),
           (_SecondaryButtonGestureRecognizer instance) {
-            instance.onSecondaryDown = (PointerDownEvent event) async {
-              // 先通知调用方（用于光标定位等自定义逻辑）
-              // 支持异步回调：等待调用方完成异步状态刷新后再显示菜单
-              final dynamic result = widget.onSecondaryTapDown?.call(event);
-              if (result is Future) await result;
-              // 组件可能在 await 期间被销毁，需检查后再显示菜单
-              if (!mounted) return;
-              // 显示菜单
-              _showMenu(event.position);
+            instance.onSecondaryDown = (PointerDownEvent event) {
+              _handleTrigger(event.position);
             };
           },
         ),
+        // 移动端注册长按识别器，触发位置取长按点
+        // 调用方若自行处理长按（如书架网格需要在长按抬起后未移动时才弹菜单），
+        // 可通过 enableMobileLongPress 关闭该识别器，避免同指针上的手势竞争
+        if (PlatformCapabilities.isMobile && widget.enableMobileLongPress)
+          LongPressGestureRecognizer: GestureRecognizerFactoryWithHandlers<LongPressGestureRecognizer>(
+            () => LongPressGestureRecognizer(),
+            (LongPressGestureRecognizer instance) {
+              instance.onLongPressStart = (LongPressStartDetails details) {
+                _handleTrigger(details.globalPosition);
+              };
+            },
+          ),
       },
       behavior: HitTestBehavior.translucent,
       child: widget.child,
@@ -618,7 +646,7 @@ class _MenuOverlay extends StatefulWidget {
 
   /// 点击菜单外部时是否仅关闭菜单而不响应点击（可选，默认为 null）
   ///
-  /// - null：根据 [type] 自动决定（右键菜单为 false，下拉菜单为 true）
+  /// - null：自动决定（下拉菜单、移动端菜单为 true，桌面端右键菜单为 false）
   /// - true：点击外部仅关闭菜单，不响应点击
   /// - false：点击外部关闭菜单的同时响应点击
   final bool? consumeOutsideClicks;
@@ -1062,6 +1090,24 @@ class _MenuOverlayState extends State<_MenuOverlay>
     // 不立即关闭子菜单，等待鼠标移动到其他地方
   }
 
+  /// 无悬停平台（如移动端）点按带子菜单的菜单项时的处理
+  ///
+  /// 点按同一项可开合其二级菜单。
+  void _onMenuItemActivate(int index, Rect itemRect) {
+    if (_openedSubmenuIndex == index) {
+      _closeSubmenu();
+      return;
+    }
+
+    _isMouseInMainMenu = true;
+    _cancelCloseSubmenuTimer();
+    _submenuParentRect = itemRect;
+    setState(() {
+      _selectedIndex = index;
+    });
+    _openSubmenu(index, itemRect);
+  }
+
   /// 鼠标离开整个菜单区域时的处理
   void _onMenuExit() {
     _isMouseInMainMenu = false;
@@ -1190,8 +1236,10 @@ class _MenuOverlayState extends State<_MenuOverlay>
     // 右键菜单：点击外部关闭菜单的同时响应点击事件
     final isDropdown = widget.type == ContextMenuType.dropdown;
     // 是否消费菜单外部的点击事件
-    // null 时根据菜单类型自动决定：下拉菜单消费，右键菜单穿透
-    final shouldConsumeClicks = widget.consumeOutsideClicks ?? isDropdown;
+    // null 时自动决定：下拉菜单消费；移动端为触摸操作，菜单外点击仅关闭菜单、
+    // 不触发下层组件的点击，避免误触；桌面端右键菜单保持穿透
+    final shouldConsumeClicks =
+        widget.consumeOutsideClicks ?? (isDropdown || PlatformCapabilities.isMobile);
 
     return KeyboardListener(
       // 焦点节点，用于接收键盘事件
@@ -1259,6 +1307,7 @@ class _MenuOverlayState extends State<_MenuOverlay>
                     openedSubmenuIndex: _openedSubmenuIndex,
                     // 鼠标交互回调
                     onItemHover: _onMenuItemHover,
+                    onItemActivate: _onMenuItemActivate,
                     onItemExit: _onMenuItemExit,
                     onMenuExit: _onMenuExit,
                     // 位置报告回调（用于键盘导航）
@@ -1301,6 +1350,9 @@ class _MenuBody extends StatelessWidget {
   /// 鼠标悬停回调
   final void Function(int index, Rect itemRect)? onItemHover;
 
+  /// 无悬停平台点按带子菜单的项时的回调
+  final void Function(int index, Rect itemRect)? onItemActivate;
+
   /// 鼠标离开回调
   final void Function(int index)? onItemExit;
 
@@ -1321,6 +1373,7 @@ class _MenuBody extends StatelessWidget {
     this.selectedIndex = -1,
     this.openedSubmenuIndex = -1,
     this.onItemHover,
+    this.onItemActivate,
     this.onItemExit,
     this.onMenuExit,
     this.onPositionReport,
@@ -1395,6 +1448,7 @@ class _MenuBody extends StatelessWidget {
                     isSubmenuOpen: openedSubmenuIndex == index,
                     // 鼠标交互回调
                     onHover: onItemHover,
+                    onActivate: onItemActivate,
                     onExit: onItemExit,
                     // 位置报告回调
                     onPositionReport: onPositionReport,
@@ -1443,6 +1497,9 @@ class _MenuItem extends StatefulWidget {
   /// 鼠标悬停回调
   final void Function(int index, Rect itemRect)? onHover;
 
+  /// 无悬停平台点按带子菜单的项时的回调
+  final void Function(int index, Rect itemRect)? onActivate;
+
   /// 鼠标离开回调
   final void Function(int index)? onExit;
 
@@ -1459,6 +1516,7 @@ class _MenuItem extends StatefulWidget {
     this.isSelected = false,
     this.isSubmenuOpen = false,
     this.onHover,
+    this.onActivate,
     this.onExit,
     this.onPositionReport,
   });
@@ -1493,6 +1551,14 @@ class _MenuItemState extends State<_MenuItem> {
     });
   }
 
+  /// 无悬停平台点按带子菜单的项，通知父组件开合其二级菜单
+  void _activateByTap() {
+    final itemBox = _itemKey.currentContext?.findRenderObject() as RenderBox?;
+    if (itemBox == null) return;
+    final itemRect = itemBox.localToGlobal(Offset.zero) & itemBox.size;
+    widget.onActivate?.call(widget.index, itemRect);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -1522,12 +1588,15 @@ class _MenuItemState extends State<_MenuItem> {
       },
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: (hasChildren || !isEnabled)
+        onTap: !isEnabled
             ? null
-            : () {
-                widget.onDismiss();
-                widget.item.onTap?.call();
-              },
+            : (hasChildren
+                // 带子菜单的项：有悬停能力的平台由鼠标悬停唤起，无悬停能力的平台（移动端）改为点按唤起
+                ? (PlatformCapabilities.supportsHover ? null : _activateByTap)
+                : () {
+                    widget.onDismiss();
+                    widget.item.onTap?.call();
+                  }),
         child: Container(
           padding: widget.itemPadding ?? const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           // 键盘选中或鼠标悬停时显示高亮背景

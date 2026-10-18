@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/models/book.dart';
+import 'package:quick_write/core/services/workspace/book_folder_service.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 
 /// 大封面组件
@@ -20,6 +21,8 @@ class _HeroCoverItemState extends State<HeroCoverItem> {
 
   @override
   Widget build(BuildContext context) {
+    // 封面固定存放在作品目录下，数据库只记录文件名，此处拼接出完整路径
+    final coverPath = BookFolderService().coverFilePath(widget.book);
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
@@ -58,9 +61,9 @@ class _HeroCoverItemState extends State<HeroCoverItem> {
             borderRadius: BorderRadius.circular(16),
             child: AspectRatio(
               aspectRatio: 3 / 4,
-              child: widget.book.coverPath.isNotEmpty
+              child: coverPath.isNotEmpty
                   ? ThemedCoverImage(
-                      coverPath: widget.book.coverPath,
+                      coverPath: coverPath,
                       cacheKey: widget.book.updatedAt.millisecondsSinceEpoch.toString(),
                       errorBuilder: (context, error, stackTrace) => _buildDefaultCover(),
                     )

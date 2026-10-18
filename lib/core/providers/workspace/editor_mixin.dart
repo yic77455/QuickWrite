@@ -80,6 +80,12 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
   /// 整棵工作台组件树重建。
   final ValueNotifier<int> wordCountNotifier = ValueNotifier<int>(0);
 
+  /// 撤销/恢复可用状态通知器
+  ///
+  /// 与 [wordCountNotifier] 同理，独立于全局 notifyListeners，
+  /// 仅通知顶部操作栏刷新撤销与恢复按钮的禁用态。
+  final ValueNotifier<int> editHistoryNotifier = ValueNotifier<int>(0);
+
   // ================= Getters =================
 
   bool get isFindReplaceVisible => _isFindReplaceVisible;
@@ -754,6 +760,63 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
     _contentLoadWaiters.remove(tabId)?.complete();
   }
 
+  // ================= 编辑操作 =================
+
+  /// 当前标签页是否可以撤销
+  ///
+  /// 按当前标签页的编辑器类型向对应编辑器查询；无标签页时不可撤销。
+  bool get canUndo {
+    final tab = currentTab;
+    if (tab == null) return false;
+    final editorState = tab.editorKey.currentState;
+    if (editorState is OutlineEditorState) return editorState.canUndo;
+    if (editorState is NovelEditorState) return editorState.canUndo;
+    return false;
+  }
+
+  /// 当前标签页是否可以重做
+  ///
+  /// 与 [canUndo] 同理，按当前标签页的编辑器类型向对应编辑器查询。
+  bool get canRedo {
+    final tab = currentTab;
+    if (tab == null) return false;
+    final editorState = tab.editorKey.currentState;
+    if (editorState is OutlineEditorState) return editorState.canRedo;
+    if (editorState is NovelEditorState) return editorState.canRedo;
+    return false;
+  }
+
+  /// 撤销当前标签页的编辑
+  ///
+  /// 按当前标签页的编辑器类型分派：大纲编辑器标签页调用大纲编辑器的撤销，
+  /// 小说编辑器标签页调用小说编辑器的撤销。供顶部工具栏等外部入口调用。
+  void undo() {
+    final tab = currentTab;
+    if (tab == null) return;
+    final editorState = tab.editorKey.currentState;
+    if (tab.usesOutlineEditor) {
+      if (editorState is OutlineEditorState) editorState.undo();
+    } else if (editorState is NovelEditorState) {
+      editorState.undo();
+    }
+    notifyEditHistoryChanged();
+  }
+
+  /// 重做当前标签页的编辑
+  ///
+  /// 与 [undo] 同理，按当前标签页的编辑器类型分派到对应编辑器的重做。
+  void redo() {
+    final tab = currentTab;
+    if (tab == null) return;
+    final editorState = tab.editorKey.currentState;
+    if (tab.usesOutlineEditor) {
+      if (editorState is OutlineEditorState) editorState.redo();
+    } else if (editorState is NovelEditorState) {
+      editorState.redo();
+    }
+    notifyEditHistoryChanged();
+  }
+
   // ================= 标签页管理 =================
 
   /// 打开新标签页
@@ -1188,9 +1251,20 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
   ///
   /// 当编辑器内容变化时调用，通过 [wordCountNotifier] 局部通知底部状态栏
   /// 刷新字数显示，不触发全局 notifyListeners。
+  /// 内容变化同样会改变撤销/恢复的可用状态，故一并刷新顶部操作栏。
   void notifyWordCountUpdated() {
     if (_isDisposed) return;
     wordCountNotifier.value++;
+    notifyEditHistoryChanged();
+  }
+
+  /// 通知撤销/恢复可用状态变化
+  ///
+  /// 通过 [editHistoryNotifier] 局部通知顶部操作栏刷新撤销与恢复按钮的
+  /// 禁用态，不触发全局 notifyListeners。
+  void notifyEditHistoryChanged() {
+    if (_isDisposed) return;
+    editHistoryNotifier.value++;
   }
 
   // ================= 标签页会话持久化 =================
@@ -1553,6 +1627,8 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
       });
       tab.isModified = true;
       tab.updateWordCount();
+      // 恢复后内容已变化，触发自动保存
+      triggerAutoSave();
       notifyListeners();
       return;
     }
@@ -1563,6 +1639,8 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
       if (state is OutlineEditorState) {
         state.parseFromText(content);
         tab.isModified = true;
+        // 恢复后内容已变化，触发自动保存
+        triggerAutoSave();
         notifyListeners();
       }
     }
@@ -1590,6 +1668,9 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
         chapterTab.updateWordCount();
       }
 
+      // 恢复后内容已变化，触发自动保存
+      triggerAutoSave();
+
       // 如果当前标签页不是被恢复的章节，跳转到该标签页
       if (_currentTabIndex != chapterIndex) {
         _currentTabIndex = chapterIndex;
@@ -1612,6 +1693,9 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
       state.parseFromText(content);
       outlineTab.isModified = true;
     }
+
+    // 恢复后内容已变化，触发自动保存
+    triggerAutoSave();
 
     // 如果当前标签页不是被恢复的大纲，跳转到该标签页
     if (_currentTabIndex != outlineIndex) {
@@ -1644,7 +1728,8 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
     }
     _openedTabs.clear();
 
-    // 释放字数统计通知器
+    // 释放字数统计通知器与撤销/恢复可用状态通知器
     wordCountNotifier.dispose();
+    editHistoryNotifier.dispose();
   }
 }

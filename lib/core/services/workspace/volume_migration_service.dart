@@ -9,6 +9,7 @@ import 'package:uuid/uuid.dart';
 import 'package:quick_write/core/models/book.dart';
 import 'package:quick_write/core/models/chapter.dart';
 import 'package:quick_write/core/models/volume.dart';
+import 'package:quick_write/core/utils/relative_path_utils.dart';
 import 'book_folder_service.dart';
 
 /// 分卷数据迁移服务
@@ -66,8 +67,8 @@ class VolumeMigrationService {
     // 根据章节的 filePath 判断其所属分卷，设置 volumeUuid
     // filePath 格式："分卷名/章节名.txt" 或 "章节名.txt"
     for (final chapter in chapters) {
-      if (chapter.filePath.contains(Platform.pathSeparator)) {
-        final pathParts = chapter.filePath.split(Platform.pathSeparator);
+      if (chapter.filePath.contains(kRelativePathSeparator)) {
+        final pathParts = chapter.filePath.split(kRelativePathSeparator);
         final dirName = pathParts.first;
         if (volumeNameToUuid.containsKey(dirName)) {
           chapter.volumeUuid = volumeNameToUuid[dirName]!;

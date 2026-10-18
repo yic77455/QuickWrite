@@ -2,6 +2,8 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:convert';
 
+import 'package:quick_write/core/utils/platform_capabilities.dart';
+
 class FontInfo {
   final String fontFamily; // Flutter 需要的英文/系统名
   final String displayName; // 展示用的中文/本地化名
@@ -217,19 +219,19 @@ class SystemFontParser {
 
   static List<File> _getSystemFontFiles() {
     List<String> dirs = [];
-    if (Platform.isWindows) {
+    if (PlatformCapabilities.isWindows) {
       dirs.add(r'C:\Windows\Fonts');
       String? localAppData = Platform.environment['LOCALAPPDATA'];
       if (localAppData != null) {
         dirs.add('$localAppData\\Microsoft\\Windows\\Fonts');
       }
-    } else if (Platform.isMacOS) {
+    } else if (PlatformCapabilities.isMacOS) {
       dirs.addAll([
         '/System/Library/Fonts',
         '/Library/Fonts',
         '${Platform.environment['HOME']}/Library/Fonts'
       ]);
-    } else if (Platform.isLinux) {
+    } else if (PlatformCapabilities.isLinux) {
       dirs.addAll([
         '/usr/share/fonts',
         '/usr/local/share/fonts',

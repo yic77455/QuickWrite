@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/services/writing_stats_service.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/utils/word_count_utils.dart';
 
@@ -26,12 +27,13 @@ class TodayStatsCard extends StatelessWidget {
     // 码字速度 = 键盘输入字数 / 时长（小时），排除粘贴字数，无时长时为 0
     final hours = stat.durationSeconds / 3600.0;
     final speed = hours > 0 ? (stat.typedWords / hours).round() : 0;
+    final bool isMobile = PlatformCapabilities.isMobile;
 
     return Card(
       margin: EdgeInsets.zero,
       clipBehavior: Clip.antiAlias,
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: EdgeInsets.all(isMobile ? 16 : 20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -46,10 +48,10 @@ class TodayStatsCard extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 20),
+            SizedBox(height: isMobile ? 16 : 20),
             // 码字字数（核心指标，放大显示）
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16),
+              padding: EdgeInsets.symmetric(vertical: isMobile ? 12 : 16),
               child: _buildPrimaryMetric(
                 context,
                 label: '码字字数',
@@ -60,45 +62,73 @@ class TodayStatsCard extends StatelessWidget {
             ),
             const Divider(height: 32),
             const SizedBox(height: 8),
-            // 次要指标网格
-            Row(
-              children: [
-                Expanded(
-                  child: _buildMetric(
-                    context,
-                    label: '码字时长',
-                    value: _formatDuration(stat.durationSeconds),
-                    icon: Icons.timer_outlined,
-                  ),
-                ),
-                Expanded(
-                  child: _buildMetric(
-                    context,
-                    label: '码字速度',
-                    value: '$speed 字/时',
-                    icon: Icons.speed_rounded,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildMetric(
-                    context,
-                    label: '连续码字',
-                    value: '$consecutiveDays 天',
-                    icon: Icons.local_fire_department_outlined,
-                  ),
-                ),
-                const Expanded(child: SizedBox()),
-              ],
-            ),
+            // 次要指标：移动端每项独占一行，桌面端两列并排
+            ...(isMobile ? _buildMobileMetrics(context, speed: speed) : _buildDesktopMetrics(context, speed: speed)),
           ],
         ),
       ),
     );
+  }
+
+  /// 构建桌面端次要指标：时长与速度两列并排，连续码字单独一行
+  List<Widget> _buildDesktopMetrics(BuildContext context, {required int speed}) {
+    return [
+      Row(
+        children: [
+          Expanded(
+            child: _buildMetric(
+              context,
+              label: '码字时长',
+              value: _formatDuration(stat.durationSeconds),
+              icon: Icons.timer_outlined,
+            ),
+          ),
+          Expanded(
+            child: _buildMetric(
+              context,
+              label: '码字速度',
+              value: '$speed 字/时',
+              icon: Icons.speed_rounded,
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(height: 16),
+      Row(
+        children: [
+          Expanded(
+            child: _buildMetric(
+              context,
+              label: '连续码字',
+              value: '$consecutiveDays 天',
+              icon: Icons.local_fire_department_outlined,
+            ),
+          ),
+          const Expanded(child: SizedBox()),
+        ],
+      ),
+    ];
+  }
+
+  /// 构建移动端次要指标：每项独占一行，标签居左、数值居右，避免数值被横向挤压
+  List<Widget> _buildMobileMetrics(BuildContext context, {required int speed}) {
+    return [
+      _buildMetricRow(
+        context,
+        label: '码字时长',
+        value: _formatDuration(stat.durationSeconds),
+        icon: Icons.timer_outlined,
+      ),
+      const SizedBox(height: 12),
+      _buildMetricRow(context, label: '码字速度', value: '$speed 字/时', icon: Icons.speed_rounded),
+      const SizedBox(height: 12),
+      _buildMetricRow(
+        context,
+        label: '连续码字',
+        value: '$consecutiveDays 天',
+        icon: Icons.local_fire_department_outlined,
+      ),
+    ];
   }
 
   /// 构建主要指标（大字号突出显示）
@@ -149,6 +179,33 @@ class TodayStatsCard extends StatelessWidget {
               Text(label, style: context.labelMedium?.copyWith(color: colorScheme.onSurfaceVariant)),
               Text(value, style: context.titleLarge?.copyWith(fontWeight: FontWeight.w600)),
             ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 构建移动端次要指标条目（标签居左、数值居右）
+  Widget _buildMetricRow(
+    BuildContext context, {
+    required String label,
+    required String value,
+    required IconData icon,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        Icon(icon, size: 20, color: colorScheme.onSurfaceVariant),
+        const SizedBox(width: 8),
+        Text(label, style: context.labelMedium?.copyWith(color: colorScheme.onSurfaceVariant)),
+        const Spacer(),
+        Flexible(
+          child: Text(
+            value,
+            style: context.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+            textAlign: TextAlign.right,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
         ),
       ],

@@ -4,6 +4,7 @@ import 'package:quick_write/core/constants/constants.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/theme/tab_colors.dart';
 import 'package:quick_write/core/utils/file_explorer.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/tab_close_guard.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/context_menu.dart';
@@ -43,6 +44,9 @@ class HoverableTabButton extends StatefulWidget {
   /// 关闭回调
   final VoidCallback onClose;
 
+  /// 是否使用紧凑尺寸（移动端窄屏下整体收缩按钮）
+  final bool compact;
+
   const HoverableTabButton({
     super.key,
     required this.isModified,
@@ -51,6 +55,7 @@ class HoverableTabButton extends StatefulWidget {
     required this.normalColor,
     required this.hoverColor,
     required this.onClose,
+    this.compact = false,
   });
 
   @override
@@ -60,6 +65,18 @@ class HoverableTabButton extends StatefulWidget {
 class _HoverableTabButtonState extends State<HoverableTabButton> {
   /// 按钮是否被悬停
   bool _isButtonHovered = false;
+
+  /// 按钮尺寸
+  double get _buttonSize => widget.compact ? 20 : 24;
+
+  /// 修改标记圆点尺寸
+  double get _markSize => widget.compact ? 8 : 8;
+
+  /// 关闭图标尺寸
+  double get _closeIconSize => widget.compact ? 12 : 12;
+
+  /// 关闭按钮悬停背景圆尺寸
+  double get _hoverCircleSize => widget.compact ? 16 : 16;
 
   @override
   Widget build(BuildContext context) {
@@ -90,10 +107,10 @@ class _HoverableTabButtonState extends State<HoverableTabButton> {
       child: GestureDetector(
         onTap: widget.onClose,
         child: Container(
-          width: 24,
-          height: 24,
+          width: _buttonSize,
+          height: _buttonSize,
           alignment: Alignment.center,
-          child: Icon(Icons.circle, size: 8, color: widget.normalColor),
+          child: Icon(Icons.circle, size: _markSize, color: widget.normalColor),
         ),
       ),
     );
@@ -107,16 +124,16 @@ class _HoverableTabButtonState extends State<HoverableTabButton> {
       child: GestureDetector(
         onTap: widget.onClose,
         child: SizedBox(
-          width: 24,
-          height: 24,
+          width: _buttonSize,
+          height: _buttonSize,
           child: Stack(
             alignment: Alignment.center,
             children: [
-              Icon(Icons.close, size: 12, color: widget.normalColor),
+              Icon(Icons.close, size: _closeIconSize, color: widget.normalColor),
               AnimatedContainer(
                 duration: const Duration(milliseconds: 100),
-                width: _isButtonHovered ? 16 : 0,
-                height: _isButtonHovered ? 16 : 0,
+                width: _isButtonHovered ? _hoverCircleSize : 0,
+                height: _isButtonHovered ? _hoverCircleSize : 0,
                 decoration: BoxDecoration(shape: BoxShape.circle, color: widget.hoverColor.withAlpha(25)),
               ),
             ],
@@ -128,7 +145,7 @@ class _HoverableTabButtonState extends State<HoverableTabButton> {
 
   /// 构建空白占位
   Widget _buildPlaceholder() {
-    return const SizedBox(width: 24);
+    return SizedBox(width: _buttonSize);
   }
 }
 
@@ -162,6 +179,12 @@ class TabItem extends StatefulWidget {
   /// 用于获取标签页位置和大小的全局键
   final GlobalKey tabKey;
 
+  /// 是否使用紧凑尺寸（移动端窄屏下整体收缩标签页）
+  final bool compact;
+
+  /// 标签页最大宽度（紧凑模式下由父级按可用宽度均分得出，保证一屏至少容纳三个标签页）
+  final double maxWidth;
+
   const TabItem({
     super.key,
     required this.tab,
@@ -169,6 +192,8 @@ class TabItem extends StatefulWidget {
     required this.isSelected,
     required this.provider,
     required this.tabKey,
+    this.compact = false,
+    this.maxWidth = 200,
   });
 
   @override
@@ -196,12 +221,21 @@ class _TabItemState extends State<TabItem> {
 
     final indicatorColor = widget.isSelected ? colors.selectedIndicator : Colors.transparent;
 
+    // 紧凑模式（移动端窄屏）使用更小的宽度约束、内边距与图标，整体收缩标签页
+    final minWidth = widget.compact ? 44.0 : 50.0;
+    final maxWidth = widget.compact ? widget.maxWidth : 200.0;
+    final paddingLeft = widget.compact ? 8.0 : 10.0;
+    final iconSize = widget.compact ? 14.0 : 16.0;
+    final iconGap = widget.compact ? 4.0 : 6.0;
+
     return ContextMenu(
       getMenuItems: () => _buildContextMenuItems(),
       showIcons: false,
       fontSize: 13,
       itemPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
       menuPadding: const EdgeInsets.symmetric(vertical: 6),
+      // 移动端不弹出标签页菜单：长按手势交由标签栏用于拖拽排序
+      enableMobileLongPress: false,
       child: MouseRegion(
         key: widget.tabKey,
         onEnter: (_) => setState(() => _isHovered = true),
@@ -237,7 +271,7 @@ class _TabItemState extends State<TabItem> {
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
               curve: Curves.easeOut,
-              constraints: const BoxConstraints(minWidth: 50, maxWidth: 200),
+              constraints: BoxConstraints(minWidth: minWidth, maxWidth: maxWidth),
               decoration: BoxDecoration(
                 color: bgColor,
                 border: Border(
@@ -246,13 +280,13 @@ class _TabItemState extends State<TabItem> {
                   bottom: BorderSide(color: widget.isSelected ? bgColor : borderColor, width: 1),
                 ),
               ),
-              padding: const EdgeInsets.only(left: 10),
+              padding: EdgeInsets.only(left: paddingLeft),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   // 图标
-                  Icon(widget.tab.icon ?? widget.tab.defaultIcon, size: 16, color: fgColor),
-                  const SizedBox(width: 6),
+                  Icon(widget.tab.icon ?? widget.tab.defaultIcon, size: iconSize, color: fgColor),
+                  SizedBox(width: iconGap),
                   
                   // // 预览模式指示器（小圆点）
                   // if (widget.tab.isPreview) ...[
@@ -267,9 +301,11 @@ class _TabItemState extends State<TabItem> {
                   //   const SizedBox(width: 5),
                   // ],
                   // 标题（鼠标悬停显示完整章节名）
+                  // 移动端长按已用于标签页拖拽排序，不再注册长按提示手势，避免抢占拖拽
                   Flexible(
                     child: CursorTooltipTarget(
                       tooltipContent: Text(widget.tab.title),
+                      showTooltip: !widget.compact,
                       child: Transform(
                         transform: widget.tab.isPreview ? Matrix4.skewX(-0.2) : Matrix4.identity(), 
                         child: Text(
@@ -294,6 +330,7 @@ class _TabItemState extends State<TabItem> {
                     isTabHovered: _isHovered,
                     normalColor: widget.isSelected ? colors.selectedFg : colors.modifiedMark,
                     hoverColor: colors.closeHoverBg,
+                    compact: widget.compact,
                     // 关闭按钮：若标签页已修改，弹窗确认是否保存
                     onClose: () {
                       TabCloseGuard.confirmCloseTab(
@@ -640,8 +677,12 @@ class _TabBarWidgetState extends State<TabBarWidget> {
       });
     }
 
+    // 移动端窄屏下收缩标签栏高度，整体压缩标签页的纵向尺寸
+    final isMobile = PlatformCapabilities.isMobile;
+    final barHeight = isMobile ? 30.0 : 35.0;
+
     return Container(
-      height: 35,
+      height: barHeight,
       color: colorScheme.surface,
       child: MouseRegion(
         // 监听鼠标进入和退出，控制滚动条显示
@@ -651,59 +692,77 @@ class _TabBarWidgetState extends State<TabBarWidget> {
           children: [
             // 标签页列表（支持拖拽排序和横向滚动）
             Expanded(
-              child: Listener(
-                // 监听鼠标滚轮事件
-                onPointerSignal: _handleScroll,
-                child: ScrollbarTheme(
-                  data: ScrollbarThemeData(
-                    crossAxisMargin: 0, // 滚动条距离底部的距离
-                  ),
-                  child: Scrollbar(
-                    controller: _scrollController,
-                    thumbVisibility: _isHovered, // 只在悬浮时显示滚动条
-                    thickness: 3, // 滚动条厚度
-                    radius: const Radius.circular(3), // 滚动条圆角
-                    child: ReorderableListView.builder(
-                      scrollController: _scrollController,
-                      buildDefaultDragHandles: false,
-                      scrollDirection: Axis.horizontal,
-                      itemCount: widget.provider.openedTabs.length,
-                      onReorder: (oldIndex, newIndex) {
-                        widget.provider.reorderTabs(oldIndex, newIndex);
-                      },
-                      proxyDecorator: (child, index, animation) {
-                        return AnimatedBuilder(
-                          animation: animation,
-                          builder: (context, child) {
-                            return Material(
-                              elevation: 6.0,
-                              color: Colors.transparent,
-                              borderRadius: BorderRadius.circular(4),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  // 移动端按可用宽度均分标签页，保证一屏至少能完整显示三个标签页
+                  final tabMaxWidth = isMobile ? constraints.maxWidth / 2.5 : 200.0;
+
+                  return Listener(
+                    // 监听鼠标滚轮事件
+                    onPointerSignal: _handleScroll,
+                    child: ScrollbarTheme(
+                      // 在应用主题的滚动条配置之上只追加"滚动条贴底"间距，
+                      // 使手柄配色等其余配置继续沿用全局主题
+                      data: Theme.of(context).scrollbarTheme.copyWith(crossAxisMargin: 0),
+                      child: Scrollbar(
+                        controller: _scrollController,
+                        thumbVisibility: _isHovered, // 只在悬浮时显示滚动条
+                        thickness: 3, // 滚动条厚度
+                        radius: const Radius.circular(3), // 滚动条圆角
+                        child: ReorderableListView.builder(
+                          scrollController: _scrollController,
+                          buildDefaultDragHandles: false,
+                          scrollDirection: Axis.horizontal,
+                          itemCount: widget.provider.openedTabs.length,
+                          onReorder: (oldIndex, newIndex) {
+                            widget.provider.reorderTabs(oldIndex, newIndex);
+                          },
+                          proxyDecorator: (child, index, animation) {
+                            return AnimatedBuilder(
+                              animation: animation,
+                              builder: (context, child) {
+                                return Material(
+                                  elevation: 6.0,
+                                  color: Colors.transparent,
+                                  borderRadius: BorderRadius.circular(4),
+                                  child: child,
+                                );
+                              },
                               child: child,
                             );
                           },
-                          child: child,
-                        );
-                      },
-                      itemBuilder: (context, index) {
-                        final tab = widget.provider.openedTabs[index];
-                        final isSelected = widget.provider.currentTabIndex == index;
+                          itemBuilder: (context, index) {
+                            final tab = widget.provider.openedTabs[index];
+                            final isSelected = widget.provider.currentTabIndex == index;
 
-                        return ReorderableDragStartListener(
-                          key: ValueKey(tab.id),
-                          index: index,
-                          child: TabItem(
-                            tab: tab,
-                            index: index,
-                            isSelected: isSelected,
-                            provider: widget.provider,
-                            tabKey: _getTabKey(tab.id),
-                          ),
-                        );
-                      },
+                            final tabItem = TabItem(
+                              tab: tab,
+                              index: index,
+                              isSelected: isSelected,
+                              provider: widget.provider,
+                              tabKey: _getTabKey(tab.id),
+                              compact: isMobile,
+                              maxWidth: tabMaxWidth,
+                            );
+
+                            // 移动端长按后才进入拖拽排序，与横向滚动、点击切换手势区分开
+                            return isMobile
+                                ? ReorderableDelayedDragStartListener(
+                                    key: ValueKey(tab.id),
+                                    index: index,
+                                    child: tabItem,
+                                  )
+                                : ReorderableDragStartListener(
+                                    key: ValueKey(tab.id),
+                                    index: index,
+                                    child: tabItem,
+                                  );
+                          },
+                        ),
+                      ),
                     ),
-                  ),
-                ),
+                  );
+                },
               ),
             ),
             // 右侧操作按钮区域

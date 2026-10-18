@@ -1,8 +1,7 @@
-import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 
 /// 核心工具类：解决 Flutter Windows 平台下 IME 候选框位置不跟随光标的 BUG
 ///
@@ -19,8 +18,8 @@ class ImeCursorFixer {
   /// 与 C++ 侧通信的通道
   static const MethodChannel _channel = MethodChannel('ime_cursor_channel');
 
-  /// 仅在 Windows 桌面端且非 Web 平台启用
-  static bool get _enabled => !kIsWeb && Platform.isWindows;
+  /// 仅在需要修正输入法候选框位置的平台启用
+  static bool get _enabled => PlatformCapabilities.needsImeCursorFix;
 
   /// 上报当前光标绝对坐标到 C++ 侧缓存
   ///
@@ -121,12 +120,16 @@ class _ImeCursorFixerWrapperState extends State<ImeCursorFixerWrapper> with Widg
   /// 使用 addPostFrameCallback 是因为当前帧的布局可能还未完成，
   /// 需要等待 Flutter 渲染树排版完毕后，才能拿到最准确的光标屏幕坐标。
   void _scheduleReport() {
+    // 当前平台不需要修正输入法候选框时，跳过整个上报流程
+    if (!PlatformCapabilities.needsImeCursorFix) return;
     WidgetsBinding.instance.addPostFrameCallback((_) => _tryReportNow());
   }
 
   /// 触发来源 2：焦点获取
   /// 用于修复微软拼音等输入法在输入第一个键时的候选框错位问题。
   void _onFocusChanged() {
+    // 当前平台不需要修正输入法候选框时，跳过整个上报流程
+    if (!PlatformCapabilities.needsImeCursorFix) return;
     if (!widget.focusNode.hasFocus) return;
 
     // 获取焦点时同步上报。

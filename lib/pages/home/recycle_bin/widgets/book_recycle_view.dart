@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/models/recycle_bin.dart';
+import 'package:quick_write/core/services/app_paths.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 import 'hover_icon_button.dart';
@@ -46,7 +48,13 @@ class BookRecycleView extends StatelessWidget {
     }
 
     return ListView.builder(
-      padding: const EdgeInsets.only(top: 8, bottom: 24, left: 32, right: 32),
+      // 左右留白：移动端屏幕较窄，收窄留白以提升内容占比
+      padding: EdgeInsets.only(
+        top: 8,
+        bottom: 24,
+        left: PlatformCapabilities.isMobile ? 20 : 32,
+        right: PlatformCapabilities.isMobile ? 20 : 32,
+      ),
       itemCount: recycledBooks.length,
       itemBuilder: (context, index) {
         final book = recycledBooks[index];
@@ -86,6 +94,7 @@ class _BookRecycleCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final bool isMobile = PlatformCapabilities.isMobile;
 
     return Material(
       color: Colors.transparent,
@@ -95,7 +104,8 @@ class _BookRecycleCard extends StatelessWidget {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeInOut,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          // 左右内边距：移动端收窄，为书名与操作按钮留出更多空间
+          padding: EdgeInsets.symmetric(horizontal: isMobile ? 12 : 16, vertical: 14),
           decoration: BoxDecoration(
             color: isSelected
                 ? colorScheme.primary.withValues(alpha: 0.08)
@@ -117,11 +127,15 @@ class _BookRecycleCard extends StatelessWidget {
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(4),
                 ),
+                // 移动端收窄复选框占用空间，避免挤压书名
+                visualDensity: isMobile ? VisualDensity.compact : null,
+                materialTapTargetSize:
+                    isMobile ? MaterialTapTargetSize.shrinkWrap : null,
               ),
               const SizedBox(width: 8),
               // 封面
               _buildCover(context),
-              const SizedBox(width: 16),
+              SizedBox(width: isMobile ? 12 : 16),
               // 书籍信息
               Expanded(
                 child: Column(
@@ -136,14 +150,15 @@ class _BookRecycleCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 6),
                     // 元信息行：字数 + 删除日期
-                    Row(
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 4,
                       children: [
                         _MetaChip(
                           icon: Icons.text_fields_rounded,
                           text: book.displayWordCount,
                           color: colorScheme.onSurface.withValues(alpha: 0.6),
                         ),
-                        const SizedBox(width: 12),
                         _MetaChip(
                           icon: Icons.delete_outline_rounded,
                           text: book.displayDeletedDate,
@@ -188,9 +203,11 @@ class _BookRecycleCard extends StatelessWidget {
     const double coverHeight = 64;
     const double borderRadius = 4;
 
-    // 有封面路径时尝试加载封面图片
-    if (book.coverPath.isNotEmpty) {
-      final coverFile = File(book.coverPath);
+    // 封面随被删除的作品文件夹移入回收站，此处按回收站目录拼接出完整路径
+    final coverPath =
+        AppPaths.instance.recycleBinCoverPath(book.recycleFolderName, book.coverFileName);
+    if (coverPath.isNotEmpty) {
+      final coverFile = File(coverPath);
       if (coverFile.existsSync()) {
         return ClipRRect(
           borderRadius: BorderRadius.circular(borderRadius),
@@ -198,7 +215,7 @@ class _BookRecycleCard extends StatelessWidget {
             width: coverWidth,
             height: coverHeight,
             child: ThemedCoverImage(
-              coverPath: book.coverPath,
+              coverPath: coverPath,
               errorBuilder: (context, error, stackTrace) {
                 return DefaultCover.buildThemed(
                   title: book.title,

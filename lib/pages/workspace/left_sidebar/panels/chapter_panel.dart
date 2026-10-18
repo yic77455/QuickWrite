@@ -7,8 +7,11 @@ import 'package:quick_write/core/models/chapter.dart';
 import 'package:quick_write/core/models/volume.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/services/cache_services/misc_cache_service.dart';
+import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/chapter_number_utils.dart';
+import 'package:quick_write/core/utils/clean_scroll.dart';
 import 'package:quick_write/core/utils/file_explorer.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/reorder_utils.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/dialogs/new_chapter_dialog.dart';
@@ -57,6 +60,9 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
   /// 分组偏移缓存（在 _buildChapterList 中更新，滚动时查表使用，避免重复计算）
   List<({String uuid, double startOffset, bool isExpanded})> _groupOffsets = [];
 
+  /// 列表布局快照（在 _buildChapterList 中更新，批量模式触摸拖拽时按位置查表命中章节）
+  List<({double startOffset, String? id})> _listSlots = [];
+
   /// 折叠吸顶分组后待跳转的滚动偏移（使折叠后的分组标题保持可见）
   double? _pendingScrollOffset;
 
@@ -80,6 +86,9 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
 
   /// 批量模式下"移动"按钮的 GlobalKey，用于定位下拉菜单
   final GlobalKey _moveButtonKey = GlobalKey();
+
+  /// 章节列表滚动视图的 GlobalKey，用于触摸拖拽时按全局坐标换算列表内容坐标
+  final GlobalKey _listKey = GlobalKey();
 
   /// 章节项固定高度
   static const double _chapterItemExtent = 56.0;
@@ -109,6 +118,8 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
       onChanged: () {
         if (mounted) setState(() {});
       },
+      // 触摸端无悬停事件，长按拖拽时按指针位置命中章节
+      hitTestId: _hitTestChapterAt,
     );
   }
 
@@ -250,6 +261,7 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
           _isChapterReversed = !_isChapterReversed;
         });
         _saveChapterReversedState();
+        SnackBarService.show(context, _isChapterReversed ? '已切换为倒序' : '已切换为正序');
       },
       onToggleSidebar: () {
         context.read<WorkspaceProvider>().toggleLeftSidebar();
@@ -284,7 +296,13 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
       }
       // 倒序时反转显示列表
       final displayChapters = _isChapterReversed ? chapters.reversed.toList() : chapters;
-      return _wrapWithSelectionListener(CustomScrollView(
+      // 记录列表布局快照（顶部 padding 4 + 每项固定高度），供批量模式触摸拖拽时按位置命中章节
+      _listSlots = [
+        for (var i = 0; i < displayChapters.length; i++)
+          (startOffset: 4 + i * _chapterItemExtent, id: displayChapters[i].uuid),
+      ];
+      final listView = CustomScrollView(
+        key: _listKey,
         controller: _scrollController,
         slivers: [
           const SliverPadding(padding: EdgeInsets.only(top: 4)),
@@ -321,7 +339,9 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
           ),
           const SliverPadding(padding: EdgeInsets.only(bottom: 4)),
         ],
-      ));
+      );
+
+      return _wrapWithSelectionListener(_wrapWithScrollbar(listView));
     }
 
     // 有分卷时，按分卷分组显示
@@ -360,6 +380,8 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
 
     // 初始化分组偏移缓存，用于滚动时快速查表计算吸顶分组
     _groupOffsets = [];
+    // 初始化列表布局快照，供批量模式触摸拖拽时按位置命中章节
+    _listSlots = [];
     double currentOffset = 4; // 顶部 padding
 
     for (final entry in displayEntries) {
@@ -375,6 +397,8 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
 
       // 记录该分组的偏移信息（供滚动监听查表使用）
       _groupOffsets.add((uuid: volumeUuid, startOffset: currentOffset, isExpanded: isExpanded));
+      // 记录分组标题在列表中的起始偏移（标题不参与批量拖拽命中，id 记为 null）
+      _listSlots.add((startOffset: currentOffset, id: null));
 
       // 获取分卷名称
       final volumeName = isUnassigned ? '' : (volumeIndex[volumeUuid]?.name ?? '');
@@ -445,6 +469,13 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
       if (isExpanded) {
         // 倒序时反转卷内章节显示列表
         final displayVolumeChapters = _isChapterReversed ? volumeChapters.reversed.toList() : volumeChapters;
+        // 记录卷内章节在列表中的起始偏移（位于分组标题之后）
+        for (var i = 0; i < displayVolumeChapters.length; i++) {
+          _listSlots.add((
+            startOffset: currentOffset + _groupHeaderExtent + i * _chapterItemExtent,
+            id: displayVolumeChapters[i].uuid,
+          ));
+        }
         slivers.add(
           SliverReorderableList(
             itemExtent: _chapterItemExtent,
@@ -490,7 +521,34 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
     // 添加底部 padding
     slivers.add(const SliverPadding(padding: EdgeInsets.only(bottom: 4)));
 
-    return _wrapWithSelectionListener(CustomScrollView(controller: _scrollController, slivers: slivers));
+    final listView = CustomScrollView(key: _listKey, controller: _scrollController, slivers: slivers);
+
+    return _wrapWithSelectionListener(_wrapWithScrollbar(listView));
+  }
+
+  /// 按全局坐标命中章节项，返回命中章节的UUID
+  ///
+  /// 命中分组标题或列表之外区域时返回 null。
+  /// 触摸端没有悬停事件，批量模式长按拖拽多选时以此定位指针下方的章节。
+  String? _hitTestChapterAt(Offset globalPosition) {
+    final listBox = _listKey.currentContext?.findRenderObject() as RenderBox?;
+    if (listBox == null || !_scrollController.hasClients) return null;
+
+    final localY = listBox.globalToLocal(globalPosition).dy;
+    if (localY < 0 || localY > listBox.size.height) return null;
+
+    // 转换为与滚动无关的列表内容坐标
+    final contentY = localY + _scrollController.offset;
+
+    String? hitId;
+    for (final slot in _listSlots) {
+      if (contentY >= slot.startOffset) {
+        hitId = slot.id;
+      } else {
+        break;
+      }
+    }
+    return hitId;
   }
 
   /// 包装列表以监听拖拽多选的指针移动和抬起事件
@@ -501,6 +559,21 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
       onPointerMove: _selectionController.onPointerMove,
       onPointerUp: (_) => _selectionController.onPointerUp(),
       onPointerCancel: (_) => _selectionController.onPointerUp(),
+      child: child,
+    );
+  }
+
+  /// 为章节列表附加滚动条
+  ///
+  /// 移动端没有系统自动绘制的滚动条，需显式提供；桌面端由系统滚动行为自动绘制，
+  /// 直接返回原列表以保持原有表现。
+  Widget _wrapWithScrollbar(Widget child) {
+    if (!PlatformCapabilities.isMobile) return child;
+    return Scrollbar(
+      controller: _scrollController,
+      thumbVisibility: SettingsService.instance.scrollbarAlwaysVisible ? true : null,
+      thickness: editorScrollbarThickness,
+      radius: Radius.circular(editorScrollbarThickness / 2),
       child: child,
     );
   }
@@ -596,10 +669,10 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
             isSelected: isSelected,
             leftIndent: hasVolume ? 16 : 8,
             onTap: () => _selectionController.onItemTap(chapter.uuid),
-            trailing: _buildCheckboxIcon(
+            trailing: _buildSelectableCheckbox(
               context: context,
+              id: chapter.uuid,
               isSelected: isSelected,
-              onTap: () => _selectionController.onItemTap(chapter.uuid),
             ),
           ),
         ),
@@ -984,6 +1057,11 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
         isPreview: true,
       );
     }
+
+    // 移动端打开章节后关闭左侧抽屉，避免抽屉遮挡编辑区
+    if (PlatformCapabilities.isMobile) {
+      Scaffold.maybeOf(context)?.closeDrawer();
+    }
   }
 
   /// 构建章节菜单项
@@ -1063,10 +1141,12 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
       ),
       ContextMenuItem(labelText: '移动至', enabled: hasVolumes, children: hasVolumes ? moveToChildren : null),
       const ContextMenuItem.divider(),
-      ContextMenuItem(
-        labelText: '在文件资源管理器中显示',
-        onTap: () => FileExplorer.revealAll([provider.getChapterFilePath(chapter)]),
-      ),
+      // "在文件资源管理器中显示"依赖桌面端文件管理器能力，移动端不提供
+      if (PlatformCapabilities.supportsFileManagerReveal)
+        ContextMenuItem(
+          labelText: '在文件资源管理器中显示',
+          onTap: () => FileExplorer.revealAll([provider.getChapterFilePath(chapter)]),
+        ),
       ContextMenuItem(
         labelText: '导出本章',
         onTap: () {
@@ -1458,6 +1538,34 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
           ),
         ),
       ),
+    );
+  }
+
+  /// 构建批量模式下可拖拽选择的复选框
+  ///
+  /// 点击复选框切换该项选中状态；
+  /// 触摸端在复选框区域直接纵向拖拽即可进入连续选择，
+  /// 拖拽起点所在项的状态决定本次拖拽的目标状态（选中或取消选中），
+  /// 指针途经的项由列表容器按坐标命中后统一应用。
+  /// 桌面端以鼠标拖拽选择，无需该手势入口。
+  Widget _buildSelectableCheckbox({
+    required BuildContext context,
+    required String id,
+    required bool isSelected,
+  }) {
+    final checkbox = _buildCheckboxIcon(
+      context: context,
+      isSelected: isSelected,
+      onTap: () => _selectionController.onItemTap(id),
+    );
+
+    if (PlatformCapabilities.supportsHover) return checkbox;
+
+    return GestureDetector(
+      onVerticalDragStart: (_) => _selectionController.onCheckboxDragStart(id),
+      onVerticalDragEnd: (_) => _selectionController.onPointerUp(),
+      onVerticalDragCancel: _selectionController.onPointerUp,
+      child: checkbox,
     );
   }
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/providers/window_provider.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:window_manager/window_manager.dart';
 
 /// 自定义标题栏组件
@@ -60,8 +61,10 @@ class _AppTitleBarState extends State<AppTitleBar> {
     final windowProvider = context.watch<WindowProvider>();
 
     return AppBar(
-      // 1. 全局生效的拖拽区域
-      flexibleSpace: const DragToMoveArea(child: SizedBox.expand()),
+      // 1. 全局生效的拖拽区域（拖动移动窗口依赖原生窗口，仅在支持原生窗口控制的平台启用）
+      flexibleSpace: PlatformCapabilities.supportsNativeWindowControl
+          ? const DragToMoveArea(child: SizedBox.expand())
+          : null,
 
       // 2. 接收外部传入的标题和按钮
       leading: widget.leading,
@@ -76,41 +79,42 @@ class _AppTitleBarState extends State<AppTitleBar> {
         if (widget.actions != null)
           ...widget
               .actions!, // 如果外部传了其他按钮，先渲染它们（...是扩展操作符 ：将一个列表中的所有元素展开并插入到另一个列表中）
-        // 固定的系统窗口按钮
+        // 固定的系统窗口按钮（依赖原生窗口，仅在支持原生窗口控制的平台显示）
         // （WindowCaptionButton 是 window_manager 库提供的）
-        Row(
-          mainAxisSize: MainAxisSize.min, // 紧凑布局
-          children: [
-            // 最小化按钮（可选）
-            if (widget.showMinimize)
-              WindowCaptionButton.minimize(
-                brightness: Theme.of(context).brightness,
-                onPressed: () => windowProvider.minimize(),
-              ),
-
-            // 最大化/恢复按钮（可选）
-            if (widget.showMaximize) ...[
-              if (windowProvider.isMaximized)
-                WindowCaptionButton.unmaximize(
-                  // 恢复按钮
+        if (PlatformCapabilities.supportsNativeWindowControl)
+          Row(
+            mainAxisSize: MainAxisSize.min, // 紧凑布局
+            children: [
+              // 最小化按钮（可选）
+              if (widget.showMinimize)
+                WindowCaptionButton.minimize(
                   brightness: Theme.of(context).brightness,
-                  onPressed: () => windowProvider.unmaximize(),
-                )
-              else
-                WindowCaptionButton.maximize(
-                  // 最大化按钮
-                  brightness: Theme.of(context).brightness,
-                  onPressed: () => windowProvider.maximize(),
+                  onPressed: () => windowProvider.minimize(),
                 ),
-            ],
 
-            // 关闭按钮（始终显示）
-            WindowCaptionButton.close(
-              brightness: Theme.of(context).brightness,
-              onPressed: () => windowProvider.close(),
-            ),
-          ],
-        ),
+              // 最大化/恢复按钮（可选）
+              if (widget.showMaximize) ...[
+                if (windowProvider.isMaximized)
+                  WindowCaptionButton.unmaximize(
+                    // 恢复按钮
+                    brightness: Theme.of(context).brightness,
+                    onPressed: () => windowProvider.unmaximize(),
+                  )
+                else
+                  WindowCaptionButton.maximize(
+                    // 最大化按钮
+                    brightness: Theme.of(context).brightness,
+                    onPressed: () => windowProvider.maximize(),
+                  ),
+              ],
+
+              // 关闭按钮（始终显示）
+              WindowCaptionButton.close(
+                brightness: Theme.of(context).brightness,
+                onPressed: () => windowProvider.close(),
+              ),
+            ],
+          ),
       ],
     );
   }

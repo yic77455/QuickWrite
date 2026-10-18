@@ -14,6 +14,7 @@ import 'package:quick_write/core/utils/reorder_utils.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/utils/batch_selection_controller.dart';
 import 'package:quick_write/core/utils/file_explorer.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import '../widgets/contents_list_widgets.dart';
 import '../widgets/contents_top_bar.dart';
 
@@ -61,6 +62,9 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
   /// 分组偏移缓存（在 _buildSettingList 中更新，滚动时查表使用，避免重复计算）
   List<({String uuid, double startOffset, bool isExpanded})> _groupOffsets = [];
 
+  /// 列表布局快照（在 _buildSettingList 中更新，批量模式触摸拖拽时按位置查表命中设定项）
+  List<({double startOffset, String? id})> _listSlots = [];
+
   /// 折叠吸顶分组后待跳转的滚动偏移（使折叠后的分组标题保持可见）
   double? _pendingScrollOffset;
 
@@ -75,6 +79,9 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
 
   /// 批量模式下"移动"按钮的 GlobalKey，用于定位下拉菜单
   final GlobalKey _moveButtonKey = GlobalKey();
+
+  /// 设定列表滚动视图的 GlobalKey，用于触摸拖拽时按全局坐标换算列表内容坐标
+  final GlobalKey _listKey = GlobalKey();
 
   /// 设定列表是否倒序排列
   bool _isReversed = false;
@@ -107,6 +114,8 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
       onChanged: () {
         if (mounted) setState(() {});
       },
+      // 触摸端无悬停事件，长按拖拽时按指针位置命中设定项
+      hitTestId: _hitTestSettingItemAt,
     );
   }
 
@@ -262,6 +271,7 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
           _isReversed = !_isReversed;
         });
         _saveReversedState();
+        SnackBarService.show(context, _isReversed ? '已切换为倒序' : '已切换为正序');
       },
       onToggleSidebar: () {
         context.read<WorkspaceProvider>().toggleLeftSidebar();
@@ -291,7 +301,13 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
     // 无分组时，直接显示设定项列表
     if (!hasGroups) {
       final displayItems = _isReversed ? settingItems.reversed.toList() : settingItems;
+      // 记录列表布局快照（顶部 padding 4 + 每项固定高度），供批量模式触摸拖拽时按位置命中设定项
+      _listSlots = [
+        for (var i = 0; i < displayItems.length; i++)
+          (startOffset: 4 + i * _settingItemExtent, id: displayItems[i].uuid),
+      ];
       return _wrapWithSelectionListener(CustomScrollView(
+        key: _listKey,
         controller: _scrollController,
         slivers: [
           const SliverPadding(padding: EdgeInsets.only(top: 4)),
@@ -354,6 +370,8 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
 
     // 初始化分组偏移缓存，用于滚动时快速查表计算吸顶分组
     _groupOffsets = [];
+    // 初始化列表布局快照，供批量模式触摸拖拽时按位置命中设定项
+    _listSlots = [];
     double currentOffset = 4; // 顶部 padding
 
     for (final entry in displayEntries) {
@@ -367,6 +385,8 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
 
       // 记录该分组的偏移信息（供滚动监听查表使用）
       _groupOffsets.add((uuid: groupUuid, startOffset: currentOffset, isExpanded: isExpanded));
+      // 记录分组标题在列表中的起始偏移（标题不参与批量拖拽命中，id 记为 null）
+      _listSlots.add((startOffset: currentOffset, id: null));
 
       // 构建分组标题组件
       final headerWidget = _isBatchMode
@@ -434,6 +454,13 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
       if (isExpanded) {
         // 倒序时反转组内设定项显示列表
         final displayGroupItems = _isReversed ? groupItems.reversed.toList() : groupItems;
+        // 记录组内设定项在列表中的起始偏移（位于分组标题之后）
+        for (var i = 0; i < displayGroupItems.length; i++) {
+          _listSlots.add((
+            startOffset: currentOffset + _groupHeaderExtent + i * _settingItemExtent,
+            id: displayGroupItems[i].uuid,
+          ));
+        }
         slivers.add(
           SliverReorderableList(
             itemExtent: _settingItemExtent,
@@ -478,7 +505,32 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
 
     slivers.add(const SliverPadding(padding: EdgeInsets.only(bottom: 4)));
 
-    return _wrapWithSelectionListener(CustomScrollView(controller: _scrollController, slivers: slivers));
+    return _wrapWithSelectionListener(CustomScrollView(key: _listKey, controller: _scrollController, slivers: slivers));
+  }
+
+  /// 按全局坐标命中设定项，返回命中设定项的UUID
+  ///
+  /// 命中分组标题或列表之外区域时返回 null。
+  /// 触摸端没有悬停事件，批量模式长按拖拽多选时以此定位指针下方的设定项。
+  String? _hitTestSettingItemAt(Offset globalPosition) {
+    final listBox = _listKey.currentContext?.findRenderObject() as RenderBox?;
+    if (listBox == null || !_scrollController.hasClients) return null;
+
+    final localY = listBox.globalToLocal(globalPosition).dy;
+    if (localY < 0 || localY > listBox.size.height) return null;
+
+    // 转换为与滚动无关的列表内容坐标
+    final contentY = localY + _scrollController.offset;
+
+    String? hitId;
+    for (final slot in _listSlots) {
+      if (contentY >= slot.startOffset) {
+        hitId = slot.id;
+      } else {
+        break;
+      }
+    }
+    return hitId;
   }
 
   /// 构建空状态
@@ -657,10 +709,10 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
             title: item.title,
             isSelected: isSelected,
             onTap: () => _selectionController.onItemTap(item.uuid),
-            trailing: _buildCheckboxIcon(
+            trailing: _buildSelectableCheckbox(
               context: context,
+              id: item.uuid,
               isSelected: isSelected,
-              onTap: () => _selectionController.onItemTap(item.uuid),
             ),
           ),
         ),
@@ -724,7 +776,11 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
   }
 
   /// 构建复选框图标（批量模式使用）
-  Widget _buildCheckboxIcon({required BuildContext context, required bool isSelected, required VoidCallback onTap}) {
+  Widget _buildCheckboxIcon({
+    required BuildContext context,
+    required bool isSelected,
+    required VoidCallback onTap,
+  }) {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Padding(
@@ -751,6 +807,34 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
           ),
         ),
       ),
+    );
+  }
+
+  /// 构建批量模式下可拖拽选择的复选框
+  ///
+  /// 点击复选框切换该项选中状态；
+  /// 触摸端在复选框区域直接纵向拖拽即可进入连续选择，
+  /// 拖拽起点所在项的状态决定本次拖拽的目标状态（选中或取消选中），
+  /// 指针途经的项由列表容器按坐标命中后统一应用。
+  /// 桌面端以鼠标拖拽选择，无需该手势入口。
+  Widget _buildSelectableCheckbox({
+    required BuildContext context,
+    required String id,
+    required bool isSelected,
+  }) {
+    final checkbox = _buildCheckboxIcon(
+      context: context,
+      isSelected: isSelected,
+      onTap: () => _selectionController.onItemTap(id),
+    );
+
+    if (PlatformCapabilities.supportsHover) return checkbox;
+
+    return GestureDetector(
+      onVerticalDragStart: (_) => _selectionController.onCheckboxDragStart(id),
+      onVerticalDragEnd: (_) => _selectionController.onPointerUp(),
+      onVerticalDragCancel: _selectionController.onPointerUp,
+      child: checkbox,
     );
   }
 
@@ -1029,10 +1113,12 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
       ),
       ContextMenuItem(labelText: '移动至', enabled: hasGroups, children: hasGroups ? moveToChildren : null),
       const ContextMenuItem.divider(),
-      ContextMenuItem(
-        labelText: '在文件资源管理器中显示',
-        onTap: () => FileExplorer.revealAll([provider.getSettingItemFilePath(item)]),
-      ),
+      // "在文件资源管理器中显示"依赖桌面端文件管理器能力，移动端不提供
+      if (PlatformCapabilities.supportsFileManagerReveal)
+        ContextMenuItem(
+          labelText: '在文件资源管理器中显示',
+          onTap: () => FileExplorer.revealAll([provider.getSettingItemFilePath(item)]),
+        ),
       ContextMenuItem(
         labelText: '导出设定',
         onTap: () {
@@ -1111,6 +1197,11 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
         EditorTab(id: item.uuid, title: item.title, type: EditorTabType.settings, isPreview: true),
         isPreview: true,
       );
+    }
+
+    // 移动端打开设定项后关闭左侧抽屉，避免抽屉遮挡编辑区
+    if (PlatformCapabilities.isMobile) {
+      Scaffold.maybeOf(context)?.closeDrawer();
     }
   }
 

@@ -96,11 +96,19 @@ class SyncStatusSection extends StatelessWidget {
 
   /// 底部操作按钮行：手动触发一次同步
   Widget _buildSyncActionRow(BuildContext context, CloudSyncProvider provider) {
+    /// 同步进行中显示的加载指示器
+    const loadingIndicator = SizedBox(
+      width: 16,
+      height: 16,
+      child: CircularProgressIndicator(strokeWidth: 2),
+    );
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 14),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
+          if (provider.isBusy) ...[loadingIndicator, const SizedBox(width: 12)],
           FilledButton.icon(
             onPressed: provider.isConnected && !provider.isBusy
                 ? () => _syncNow(context)

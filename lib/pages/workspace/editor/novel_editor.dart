@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/constants/constants.dart';
+import 'package:quick_write/core/constants/punctuation_symbols.dart';
 import 'package:quick_write/core/providers/window_provider.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/services/settings_service.dart';
@@ -16,6 +17,7 @@ import 'package:quick_write/core/utils/color_utils.dart';
 import 'package:quick_write/core/utils/editor_scroll_helper.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/persistent_selection.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/re_editor_span_builder.dart';
 import 'package:quick_write/pages/workspace/editor/utils/re_editor_indent_policy.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/re_editor_ime_reporter.dart';
@@ -114,6 +116,14 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 纸张模式下纸张容器的左右间距补偿（像素）
   static const double _paperHorizontalCompensation = 16.0;
 
+  /// 正文标点的成对符号表
+  ///
+  /// 由标点符号表推导，与快捷输入栏的按键共用同一数据源。
+  static final List<CodeSymbolPair> _punctuationPairs = [
+    for (final symbol in PunctuationSymbols.quickInputKeys)
+      if (symbol.isPairStart) CodeSymbolPair(symbol.symbol, symbol.closing!),
+  ];
+
   /// 程序化文本改写的抑制深度
   ///
   /// 备份恢复、段落整理等场景在改写全文期间递增该计数，
@@ -156,8 +166,10 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 标题区域测量是否已排队，避免同一帧内重复排队
   bool _titleAreaMeasureScheduled = false;
 
-  /// 上下文菜单控制器
-  late final _EditorToolbarController _toolbarController;
+  /// 选择工具栏控制器
+  ///
+  /// 桌面端右键弹出应用自定义的菜单，移动端长按弹出系统风格的选择工具栏。
+  late final SelectionToolbarController _toolbarController;
 
   /// 自定义高亮服务引用（用于监听配置变化触发重绘）
   CustomHighlightService? _customHighlightService;
@@ -195,6 +207,21 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 缓存窗口最小化状态，用于检测从最小化恢复的情况
   bool _wasMinimized = false;
 
+  /// 缓存软键盘高度，用于识别键盘新升起导致的视口压缩
+  double _keyboardHeight = 0;
+
+  /// 视口尺寸变化后合并重绘的延迟
+  static const Duration _viewportRepaintDelay = Duration(milliseconds: 120);
+
+  /// 待执行的视口重绘任务
+  Timer? _viewportRepaintTimer;
+
+  /// 快捷键覆盖动作缓存
+  Map<Type, Action<Intent>>? _shortcutOverrides;
+
+  /// 缓存快捷键覆盖动作时所用的工作台 Provider
+  WorkspaceProvider? _shortcutOverridesProvider;
+
   @override
   void initState() {
     super.initState();
@@ -204,7 +231,9 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     _scrollGuard = EditorScrollGuard(_scrollController);
     _scrollController.addListener(_onScrollChanged);
     _indentPolicy = ReEditorIndentPolicy(controller: widget.controller);
-    _toolbarController = _EditorToolbarController(onShowMenu: _showContextMenuAt);
+    _toolbarController = PlatformCapabilities.isMobile
+        ? MobileSelectionToolbarController(builder: _buildMobileSelectionToolbar)
+        : _EditorToolbarController(onShowMenu: _showContextMenuAt);
     widget.controller.addListener(_onControllerChanged);
     _focusNode.addListener(_onFocusChanged);
     _lastCodeLines = widget.controller.value.codeLines;
@@ -221,7 +250,7 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     // 如果初始化时处于激活状态，请求焦点
     if (widget.isActive) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _focusNode.requestFocus();
+        if (mounted) _focusEditor();
       });
     }
   }
@@ -242,6 +271,7 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _viewportRepaintTimer?.cancel();
     _scrollGuard.dispose();
     _scrollController.removeListener(_onScrollChanged);
     widget.controller.removeListener(_onControllerChanged);
@@ -264,7 +294,7 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
       _scrollGuard.protect(const Duration(milliseconds: 150));
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && !_focusNode.hasFocus) {
-          _focusNode.requestFocus();
+          _focusEditor();
         }
       });
     }
@@ -287,6 +317,43 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     }
   }
 
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    // 移动端软键盘升降会改变视口高度，度量变化当帧尚未完成布局，
+    // 视口尺寸需等布局结束后才能取得，因此统一在帧末处理
+    if (PlatformCapabilities.isMobile) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _revealSelectionWhenKeyboardShown());
+    }
+  }
+
+  /// 软键盘新升起时把选区所在行滚入视口
+  ///
+  /// 仅在键盘高度增加且编辑器持有焦点时滚动，使被选中文字落到键盘上方的可见区域内；
+  /// 选区行本就可见时不产生任何滚动。
+  /// 键盘高度取自窗口视图的原始内边距：Scaffold 按键盘高度收缩本子树时，
+  /// 会一并剔除子树 MediaQuery 中的底部内边距，从 MediaQuery 读取无法识别键盘升降。
+  void _revealSelectionWhenKeyboardShown() {
+    if (!mounted) return;
+    final double keyboardHeight = View.of(context).viewInsets.bottom;
+    final double previousHeight = _keyboardHeight;
+    _keyboardHeight = keyboardHeight;
+    if (keyboardHeight <= previousHeight || keyboardHeight <= 0 || !_focusNode.hasFocus) return;
+    // 滚动前解除滚动保护，避免保护逻辑把位置拉回旧的滚动值导致定位无效
+    _scrollGuard.unprotect();
+    widget.controller.makeCursorCenterIfInvisible();
+  }
+
+  /// 合并同一轮视口尺寸变化，仅在尺寸稳定后重绘一次
+  ///
+  /// 连续重绘会让可见行逐次重新排版，代价远高于单次重绘，故把中间过程合并掉。
+  void _scheduleViewportRepaint() {
+    _viewportRepaintTimer?.cancel();
+    _viewportRepaintTimer = Timer(_viewportRepaintDelay, () {
+      if (mounted) widget.controller.forceRepaint();
+    });
+  }
+
   /// 滚动到当前光标/选区位置
   ///
   /// 供外部调用（如查找替换导航时），使编辑器滚动到当前选区所在位置
@@ -299,13 +366,26 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     });
   }
 
+  /// 请求编辑器获取焦点（统一入口）
+  ///
+  /// 移动端不主动唤起输入法，需由用户点击编辑区自行聚焦，因此移动端直接忽略
+  void _focusEditor() {
+    if (PlatformCapabilities.isMobile) return;
+    _focusNode.requestFocus();
+  }
+
   /// 请求编辑器获取焦点
   ///
   /// 供外部调用（如关闭查找替换栏后），将焦点归还给编辑器
   void requestEditorFocus() {
     _scrollGuard.unprotect();
-    _focusNode.requestFocus();
+    _focusEditor();
   }
+
+  /// 编辑器当前是否持有焦点
+  ///
+  /// 供外部（如移动端快捷输入栏）判断输入法是否由本编辑器唤起。
+  bool get hasEditorFocus => _focusNode.hasFocus;
 
   /// 设置变化时刷新样式并重绘
   void _onSettingsChanged() {
@@ -427,15 +507,21 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     _pendingEditType = null;
   }
 
+  /// 是否可撤销（只读模式下不可撤销）
+  bool get canUndo => !widget.readOnly && widget.controller.canUndo;
+
+  /// 是否可重做（只读模式下不可重做）
+  bool get canRedo => !widget.readOnly && widget.controller.canRedo;
+
   /// 撤销
-  void _undo() {
+  void undo() {
     if (widget.readOnly || !widget.controller.canUndo) return;
     _runEdit(NovelEditType.undo, widget.controller.undo);
     widget.controller.makeCursorCenterIfInvisible();
   }
 
   /// 重做
-  void _redo() {
+  void redo() {
     if (widget.readOnly || !widget.controller.canRedo) return;
     _runEdit(NovelEditType.redo, widget.controller.redo);
     widget.controller.makeCursorCenterIfInvisible();
@@ -459,6 +545,27 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   void _delete() {
     if (widget.readOnly) return;
     _runEdit(NovelEditType.delete, widget.controller.deleteSelection);
+  }
+
+  /// 在光标处插入文本片段
+  ///
+  /// 插入会替换当前选区，插入后光标定位到片段内的 [caretOffsetInText] 处
+  /// （为空时落在片段末尾），用于插入成对符号并把光标置于两条符号之间；
+  /// 该替换按键盘输入计入编辑事件。
+  void insertText(String text, {int? caretOffsetInText}) {
+    if (widget.readOnly || text.isEmpty) return;
+    final String currentText = widget.controller.text;
+    final TextSelection flatSelection = CodeLineSelectionUtils.flatSelectionOf(currentText, widget.controller.selection);
+    final int insertOffset = flatSelection.start;
+    _runEdit(NovelEditType.keyboard, () {
+      widget.controller.replaceSelection(text);
+    });
+    final String updatedText = widget.controller.text;
+    widget.controller.selection = CodeLineSelectionUtils.collapsedSelection(
+      updatedText,
+      (insertOffset + (caretOffsetInText ?? text.length)).clamp(0, updatedText.length),
+    );
+    widget.controller.makeCursorCenterIfInvisible();
   }
 
   /// 自定义粘贴处理
@@ -493,7 +600,7 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
         itemPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         menuPadding: const EdgeInsets.symmetric(vertical: 6),
         onDismissed: () {
-          if (mounted && !_focusNode.hasFocus) _focusNode.requestFocus();
+          if (mounted && !_focusNode.hasFocus) _focusEditor();
         },
       );
     });
@@ -502,7 +609,7 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 编辑器右键菜单项列表
   ///
   /// 根据当前编辑器状态（是否有选区、撤销栈等）动态生成菜单项。
-  /// 撤销/恢复与快捷键 Ctrl+Z / Ctrl+Y 调用的是同一套实现（[_undo] / [_redo]），
+  /// 撤销/恢复与快捷键 Ctrl+Z / Ctrl+Y 调用的是同一套实现（[undo] / [redo]），
   /// 只读模式下仅保留复制和全选，禁用所有编辑操作。
   List<ContextMenuItem> _buildContextMenuItems() {
     final bool hasSelection = !widget.controller.selection.isCollapsed;
@@ -514,13 +621,13 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
         labelText: '撤销',
         icon: Icons.undo,
         enabled: !isReadOnly && widget.controller.canUndo,
-        onTap: _undo,
+        onTap: undo,
       ),
       ContextMenuItem(
         labelText: '恢复',
         icon: Icons.redo,
         enabled: !isReadOnly && widget.controller.canRedo,
-        onTap: _redo,
+        onTap: redo,
       ),
 
       // ----- 分隔线 -----
@@ -551,23 +658,88 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     ];
   }
 
+  /// 构建移动端选择工具栏
+  ///
+  /// 移动端长按选中文本后回调此方法，返回 Flutter 自适应工具栏，
+  /// 外观与按钮文案交由平台渲染；按钮动作复用编辑器既有实现，
+  /// 使剪切、粘贴等操作与码字统计、剪贴板处理保持一致。
+  Widget _buildMobileSelectionToolbar({
+    required BuildContext context,
+    required TextSelectionToolbarAnchors anchors,
+    required CodeLineEditingController controller,
+    required VoidCallback onDismiss,
+    required VoidCallback onRefresh,
+  }) {
+    final bool hasSelection = !controller.selection.isCollapsed;
+    final List<ContextMenuButtonItem> buttonItems = [
+      if (!widget.readOnly && hasSelection)
+        ContextMenuButtonItem(
+          type: ContextMenuButtonType.cut,
+          onPressed: () {
+            onDismiss();
+            _cut();
+          },
+        ),
+      if (hasSelection)
+        ContextMenuButtonItem(
+          type: ContextMenuButtonType.copy,
+          onPressed: () {
+            onDismiss();
+            _copy();
+          },
+        ),
+      if (!widget.readOnly)
+        ContextMenuButtonItem(
+          type: ContextMenuButtonType.paste,
+          onPressed: () {
+            onDismiss();
+            _handleCustomPaste();
+          },
+        ),
+      ContextMenuButtonItem(
+        type: ContextMenuButtonType.selectAll,
+        onPressed: () {
+          onDismiss();
+          controller.selectAll();
+        },
+      ),
+    ];
+
+    return AdaptiveTextSelectionToolbar.buttonItems(
+      anchors: anchors,
+      buttonItems: buttonItems,
+    );
+  }
+
+  /// 获取编辑器快捷键覆盖动作
+  ///
+  /// 动作只随工作台 Provider 变化，Provider 未变化时复用已构建的一份，
+  /// 避免编辑区每次重建都新建一批动作对象。
+  Map<Type, Action<Intent>> _resolveShortcutOverrides(WorkspaceProvider provider) {
+    if (!identical(provider, _shortcutOverridesProvider)) {
+      _shortcutOverridesProvider = provider;
+      _shortcutOverrides = _buildShortcutOverrides(provider);
+    }
+    return _shortcutOverrides!;
+  }
+
   /// 构建编辑器快捷键覆盖动作
   ///
   /// re_editor 自带代码编辑器语义的快捷键，这里替换为小说写作语义：
   /// 撤销/重做/剪切/粘贴标注事件来源，Tab 与回车走段落缩进策略，
+  /// 退格删除行首缩进、Delete 键执行前向删除，
   /// 查找替换与保存改用工作台的既有实现，注释、字符转换两类快捷键直接屏蔽。
-  Map<Type, Action<Intent>> _buildShortcutOverrides() {
-    final WorkspaceProvider provider = context.read<WorkspaceProvider>();
+  Map<Type, Action<Intent>> _buildShortcutOverrides(WorkspaceProvider provider) {
     return {
       CodeShortcutUndoIntent: CallbackAction<CodeShortcutUndoIntent>(
         onInvoke: (intent) {
-          _undo();
+          undo();
           return null;
         },
       ),
       CodeShortcutRedoIntent: CallbackAction<CodeShortcutRedoIntent>(
         onInvoke: (intent) {
-          _redo();
+          redo();
           return null;
         },
       ),
@@ -597,7 +769,12 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
       ),
       CodeShortcutDeleteIntent: CallbackAction<CodeShortcutDeleteIntent>(
         onInvoke: (intent) {
-          if (!widget.readOnly) _indentPolicy.handleBackspace();
+          if (widget.readOnly) return null;
+          if (intent.forward) {
+            widget.controller.deleteForward();
+          } else {
+            _indentPolicy.handleBackspace();
+          }
           return null;
         },
       ),
@@ -636,7 +813,7 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   ///
   /// 正文拥有焦点时由 re_editor 自己的快捷键处理 Tab，此处的绑定不会被触发。
   void _handleGlobalTab() {
-    if (!_focusNode.hasFocus) _focusNode.requestFocus();
+    if (!_focusNode.hasFocus) _focusEditor();
   }
 
   /// 处理保存快捷键（Ctrl+S / Cmd+S）
@@ -661,7 +838,7 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && !_focusNode.hasFocus) {
           _scrollGuard.protect(const Duration(milliseconds: 150));
-          _focusNode.requestFocus();
+          _focusEditor();
         }
       });
     }
@@ -743,14 +920,19 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     return NotificationListener<ScrollMetricsNotification>(
       // 视口尺寸变化时（如窗口最大化/恢复、拖动调整窗口大小），按新的视口高度重算可见行区间并重新排版
       onNotification: (notification) {
-        widget.controller.forceRepaint();
+        if (PlatformCapabilities.isMobile) {
+          // 移动端键盘升降会在动画期间连续产生多次尺寸通知，逐次重绘会反复重排可见行
+          _scheduleViewportRepaint();
+        } else {
+          widget.controller.forceRepaint();
+        }
         return false;
       },
       child: Scrollbar(
         controller: _scrollController,
         thumbVisibility: settings.scrollbarAlwaysVisible ? true : null,
-        thickness: 8.0,
-        radius: const Radius.circular(4),
+        thickness: editorScrollbarThickness,
+        radius: Radius.circular(editorScrollbarThickness / 2),
         child: ScrollConfiguration(
           // 屏蔽滚动视图自带滚动条与边界光效，滚动条统一由外层绘制
           behavior: CleanEditorScrollBehavior(),
@@ -884,6 +1066,8 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
             hoverColor: Colors.transparent,
           ),
           style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+            // 章节标题与正文保持一致，使用编辑器正文字体，不受界面字体影响
+            fontFamily: settings.fontFamily,
             fontSize: settings.chapterTitleFontSize,
             color: ColorUtils.getChapterTitleColorForTheme(context),
           ),
@@ -979,16 +1163,27 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
             // 小说正文需要自动换行，且不显示行号与代码折叠标记
             wordWrap: true,
             readOnly: widget.readOnly,
+            // 关闭编辑器自身的自动聚焦：是否聚焦由外部按平台决定，
+            // 移动端打开作品或切换标签页时不主动唤起输入法
+            autofocus: false,
             // 只读预览（如历史版本备份）不显示输入光标
             showCursorWhenReadOnly: false,
-            // 关闭成对符号自动补全，避免把 ASCII 引号/括号写入正文
-            autocompleteSymbols: false,
+            // 成对符号自动补全仅移动端启用，符号表取自标点符号表；
+            // 表中未列出的 ASCII 引号与括号不会被写入正文
+            autocompleteSymbols: PlatformCapabilities.isMobile &&
+                SettingsService.instance.punctuationAutoCompleteEnabled,
+            autocompletePairs: _punctuationPairs,
+            // 移动端软键盘换行交由段落缩进策略处理，与桌面端回车共用补空行与首行缩进规则；
+            // 只读编辑器与桌面端不接管，沿用编辑器默认换行
+            onNewLine: PlatformCapabilities.isMobile && !widget.readOnly
+                ? _indentPolicy.handleNewLine
+                : null,
             chunkAnalyzer: const NonCodeChunkAnalyzer(),
             padding: padding,
             margin: EdgeInsets.zero,
             // hint: '开始输入内容……',
             toolbarController: _toolbarController,
-            shortcutOverrideActions: _buildShortcutOverrides(),
+            shortcutOverrideActions: _resolveShortcutOverrides(context.read<WorkspaceProvider>()),
             // 滚动条由外层统一绘制，这里屏蔽编辑器自带的滚动条
             scrollbarBuilder: (context, child, details) => child,
           );

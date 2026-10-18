@@ -1,18 +1,23 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:flutter_reorderable_grid_view/widgets/widgets.dart';
 import 'package:quick_write/core/models/book.dart';
 import 'package:quick_write/core/providers/bookshelf_provider.dart';
 import 'package:quick_write/core/services/cache_services/misc_cache_service.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/shared/dialogs/export_dialog.dart';
 import 'package:quick_write/shared/dialogs/import_book_dialog.dart';
 import 'package:quick_write/shared/dialogs/new_book_dialog.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 import 'workspace_opener.dart';
 import 'batch_toolbar.dart';
+import 'floating_action_group.dart';
 import 'group_selector.dart';
 import 'hover_book_item.dart';
+import 'mobile_batch_bar.dart';
 import 'normal_toolbar.dart';
 
 /// 右侧书籍网格组件
@@ -35,6 +40,23 @@ class _AllBooksGridState extends State<AllBooksGrid> {
   final GlobalKey _gridViewKey = GlobalKey();
   // 空白区域右键点击的位置
   Offset? _emptyAreaTapPosition;
+
+  // ================= 移动端长按交互相关状态 =================
+  // 移动端长按抬起所需的按住时长，超过该时长才进入拖动/抬起状态
+  static const Duration _mobileLongPressDelay = Duration(milliseconds: 500);
+  // 长按抬起后仍视为"原地松手"（弹出菜单）的最大位移（逻辑像素）
+  // 成功抬起时手指漂移不会超过触摸滑动阈值，这里取略大于该阈值的值；
+  // 位移超过它说明用户确实在拖动排序，此时不再弹出菜单
+  static const double _mobileLongPressMaxMove = 24;
+
+  // 触摸/左键按下的起点，用于判断长按抬起后是否发生了拖动
+  Offset? _primaryPointerDownPosition;
+  // 触摸/左键按下后移动的最大距离
+  double _primaryPointerMaxMove = 0;
+  // 长按抬起时对应的书籍索引，用于确定要弹出哪本书的菜单
+  int? _mobileLiftIndex;
+  // 长按抬起的位置，作为菜单弹出的锚点
+  Offset? _mobileLiftPosition;
 
   // ================= 批量操作相关状态 =================
   // 是否处于批量操作模式
@@ -130,6 +152,22 @@ class _AllBooksGridState extends State<AllBooksGrid> {
     setState(() {
       _selectedBookUuids.clear();
     });
+  }
+
+  /// 当前分组内的书籍是否已全部选中
+  bool get _isAllSelected {
+    final booksToSelect = _getFilteredBooks();
+    return booksToSelect.isNotEmpty &&
+        _selectedBookUuids.length == booksToSelect.length;
+  }
+
+  /// 切换全选状态：已全选则取消全选，否则全选
+  void _toggleSelectAll() {
+    if (_isAllSelected) {
+      _deselectAll();
+    } else {
+      _selectAll();
+    }
   }
 
   /// 批量删除
@@ -294,7 +332,18 @@ class _AllBooksGridState extends State<AllBooksGrid> {
   }
 
   /// 构建批量操作工具栏
+  ///
+  /// 桌面端使用完整工具栏，移动端宽度有限，改用只保留选中数量与全选切换的精简工具栏
   Widget _buildBatchToolbar() {
+    if (PlatformCapabilities.isMobile) {
+      return MobileBatchToolbar(
+        selectedCount: _selectedBookUuids.length,
+        isAllSelected: _isAllSelected,
+        onToggleSelectAll: _toggleSelectAll,
+        onComplete: _exitBatchMode,
+      );
+    }
+
     return BatchToolbar(
       selectedCount: _selectedBookUuids.length,
       hasSelection: _selectedBookUuids.isNotEmpty,
@@ -304,6 +353,17 @@ class _AllBooksGridState extends State<AllBooksGrid> {
       onExport: _batchExport,
       onDelete: _batchDelete,
       onComplete: _exitBatchMode,
+    );
+  }
+
+  /// 构建移动端批量操作栏（位于网格下方）
+  Widget _buildBatchActionBar() {
+    return BatchActionBar(
+      selectedCount: _selectedBookUuids.length,
+      hasSelection: _selectedBookUuids.isNotEmpty,
+      onMoveToGroup: _batchMoveToGroup,
+      onExport: _batchExport,
+      onDelete: _batchDelete,
     );
   }
 
@@ -324,46 +384,250 @@ class _AllBooksGridState extends State<AllBooksGrid> {
     );
   }
 
+  /// 移动端长按抬起（拖动开始）处理
+  ///
+  /// 记录抬起的位置与对应书籍索引，并给出轻震动反馈；
+  /// 松手时若几乎未移动，[_handleMobileLiftEnd] 会据此弹出右键菜单
+  void _handleMobileLiftStart(int index) {
+    if (!PlatformCapabilities.isMobile) return;
+    // 抬起时的轻震动反馈
+    HapticFeedback.mediumImpact();
+    _mobileLiftIndex = index;
+    _mobileLiftPosition = _primaryPointerDownPosition;
+  }
+
+  /// 移动端长按拖动结束处理
+  ///
+  /// 抬起后原地松手（位移不超过阈值）视为长按弹出菜单；
+  /// 若发生了位移则说明用户在拖动排序，不弹出菜单
+  void _handleMobileLiftEnd(List<BookModel> books) {
+    final liftIndex = _mobileLiftIndex;
+    final liftPosition = _mobileLiftPosition;
+    _mobileLiftIndex = null;
+    _mobileLiftPosition = null;
+
+    if (!PlatformCapabilities.isMobile) return;
+    if (liftIndex == null || liftPosition == null) return;
+    // 位移超过阈值：说明在拖动排序，不弹菜单
+    if (_primaryPointerMaxMove > _mobileLongPressMaxMove) return;
+    // 已有菜单显示时不重复弹出
+    if (ContextMenu.isMenuShowing()) return;
+    if (liftIndex >= books.length) return;
+
+    ContextMenu.showMenuAt(
+      context: context,
+      position: liftPosition,
+      menuItems: buildSingleBookMenuItems(context, books[liftIndex]),
+    );
+  }
+
+  /// 构建网格区域
+  ///
+  /// 根据可用宽度解析网格尺寸，生成书籍卡片，并在移动端普通模式叠加悬浮操作按钮组
+  Widget _buildGridArea(BuildContext context, List<BookModel> filteredBooks) {
+    // 套上 LayoutBuilder 动态算列数
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 根据可用宽度解析出列数与卡片尺寸
+        // 批量模式下悬浮按钮组已隐藏，无需再为它预留底部空间
+        final metrics = _BookGridMetrics.resolve(
+          constraints.maxWidth,
+          reserveFloatingActions: !_isBatchMode,
+        );
+
+        // 根据过滤后的书籍动态生成子组件
+        final generatedChildren = filteredBooks.map((book) {
+          return HoverBookItem(
+            key: ValueKey(book.uuid),
+            book: book,
+            // 卡片尺寸由网格尺寸解析结果决定
+            width: metrics.itemWidth,
+            height: metrics.itemHeight,
+            // 批量模式下：点击切换选中状态；普通模式下：跳转到工作台
+            onTap: _isBatchMode
+                ? () => _toggleBookSelection(book.uuid)
+                : () => openWorkspace(
+                    context: context,
+                    bookId: book.uuid,
+                    bookTitle: book.title,
+                  ),
+            // 选中状态
+            isSelected: _isBatchMode && _selectedBookUuids.contains(book.uuid),
+            // 是否处于批量模式
+            isBatchMode: _isBatchMode,
+            // 当前分组 ID（用于移动到分组时禁用当前分组）
+            currentGroupId: _currentGroupId,
+            // 选中状态切换回调（右键菜单使用）
+            onToggleSelection: () => _toggleBookSelection(book.uuid),
+            // 批量删除回调（右键菜单使用）
+            onBatchDelete: _batchDelete,
+            // 批量导出回调（右键菜单使用）
+            onBatchExport: _batchExport,
+            // 移动到分组回调（右键菜单使用）
+            onMoveToGroup: (groupUuid) {
+              // 保存数量，因为 _exitBatchMode 会清空选中列表
+              final count = _selectedBookUuids.length;
+              context.read<BookshelfProvider>().moveBooksToGroup(
+                _selectedBookUuids.toList(),
+                groupUuid,
+              );
+              _exitBatchMode();
+              // 显示移动成功提示
+              SnackBarService.show(context, '已将 $count 本作品移动到分组');
+            },
+          );
+        }).toList();
+
+        return Stack(
+          fit: StackFit.expand,
+          // 不裁剪子级：悬浮按钮组位于网格右边缘，其阴影需要绘制到网格区域之外
+          clipBehavior: Clip.none,
+          children: [
+            // 空白区域的右键菜单
+            // 使用 Listener 监听右键点击，通过位置判断是否在书籍卡片上
+            // Listener 只处理右键（buttons == 2），左键事件正常传递给 ReorderableBuilder
+            // 同时记录触摸/左键的位移，供移动端判断长按抬起后是否发生拖动
+            Listener(
+              behavior: HitTestBehavior.translucent,
+              onPointerDown: (event) {
+                // 记录右键点击位置
+                if (event.buttons == 2) {
+                  _emptyAreaTapPosition = event.position;
+                  return;
+                }
+                // 记录触摸/左键按下的起点并清零位移
+                _primaryPointerDownPosition = event.position;
+                _primaryPointerMaxMove = 0;
+              },
+              onPointerMove: (event) {
+                // 累计相对按下位置的最大位移
+                final downPosition = _primaryPointerDownPosition;
+                if (downPosition == null) return;
+                final distance = (event.position - downPosition).distance;
+                if (distance > _primaryPointerMaxMove) {
+                  _primaryPointerMaxMove = distance;
+                }
+              },
+              onPointerUp: (event) {
+                // 右键抬起时，如果没有菜单显示，说明点击的是空白区域
+                if (_emptyAreaTapPosition != null &&
+                    !ContextMenu.isMenuShowing()) {
+                  // 显示空白区域菜单
+                  ContextMenu.showMenuAt(
+                    context: context,
+                    position: _emptyAreaTapPosition!,
+                    menuItems: _buildEmptyAreaMenuItems(),
+                  );
+                }
+                _emptyAreaTapPosition = null;
+              },
+              child: _isBatchMode
+                  // 批量模式下：禁用拖拽，使用普通 GridView
+                  ? _buildGrid(children: generatedChildren, metrics: metrics)
+                  // 普通模式：支持拖拽排序
+                  : ReorderableBuilder(
+                      scrollController: _gridScrollController,
+                      // 移动端长按抬起需按住一段时间，避免手指刚落就拖起影响滑动屏幕；
+                      // 桌面端保持原有立即拖动行为
+                      longPressDelay: PlatformCapabilities.isMobile
+                          ? _mobileLongPressDelay
+                          : Duration.zero,
+                      // 接管被拖起时的反馈样式
+                      dragChildBoxDecoration: BoxDecoration(
+                        // 保持和卡片一样的圆角
+                        borderRadius: BorderRadius.circular(8),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.15),
+                            blurRadius: 50,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                      // 移动端长按抬起时记录位置，用于松手后判断是拖动还是弹菜单
+                      onDragStarted: _handleMobileLiftStart,
+                      // 拖动结束时：原地松手弹菜单，发生拖动则完成排序
+                      onDragEnd: (_) => _handleMobileLiftEnd(filteredBooks),
+                      onReorder: (ReorderedListFunction reorderedListFunction) {
+                        // 使用 context.read 获取 Provider 并调用其方法，不会引起额外重绘
+                        // 传入当前分组 ID，用于分组内排序
+                        context.read<BookshelfProvider>().reorderBooks(
+                          reorderedListFunction,
+                          groupId: _currentGroupId == '__all__'
+                              ? null
+                              : _currentGroupId,
+                        );
+                      },
+                      builder: (children) {
+                        return _buildGrid(children: children, metrics: metrics);
+                      },
+                      children: generatedChildren,
+                    ),
+            ),
+
+            // 悬浮操作按钮组：移动端普通模式下提供新建、导入、批量操作入口
+            if (PlatformCapabilities.isMobile && !_isBatchMode)
+              Positioned(right: 0, bottom: 16, child: _buildFloatingActions()),
+          ],
+        );
+      },
+    );
+  }
+
+  /// 构建书籍网格
+  ///
+  /// 批量模式与普通模式共用同一套网格参数，保证两种模式下布局保持一致
+  Widget _buildGrid({
+    required List<Widget> children,
+    required _BookGridMetrics metrics,
+  }) {
+    return GridView(
+      key: _gridViewKey,
+      controller: _gridScrollController,
+      // 右侧内边距由平台策略决定；底部额外预留空间，避免最后一行被悬浮按钮组遮挡
+      padding: EdgeInsets.only(
+        right: metrics.rightPadding,
+        bottom: metrics.bottomPadding,
+      ),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: metrics.crossAxisCount,
+        mainAxisExtent: metrics.mainAxisExtent, // 锁定高度
+        crossAxisSpacing: metrics.crossAxisSpacing,
+        mainAxisSpacing: 12,
+      ),
+      children: children,
+    );
+  }
+
+  /// 构建移动端悬浮操作按钮组
+  ///
+  /// 移动端书架的悬浮操作入口，操作项从下往上依次为新建、导入、批量操作
+  Widget _buildFloatingActions() {
+    return FloatingActionGroup(
+      actions: [
+        FloatingActionItem(
+          icon: Icons.add,
+          tooltip: '新建作品',
+          onPressed: _handleAddBook,
+        ),
+        FloatingActionItem(
+          icon: Icons.download,
+          tooltip: '导入书籍',
+          onPressed: _handleImportBook,
+        ),
+        FloatingActionItem(
+          icon: Icons.checklist,
+          tooltip: '批量操作',
+          onPressed: _enterBatchMode,
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // 根据当前分组过滤书籍
     final filteredBooks = _getFilteredBooks();
-
-    // 根据过滤后的书籍动态生成子组件
-    final generatedChildren = filteredBooks.map((book) {
-      return HoverBookItem(
-        key: ValueKey(book.uuid),
-        book: book,
-        // 批量模式下：点击切换选中状态；普通模式下：跳转到工作台
-        onTap: _isBatchMode
-            ? () => _toggleBookSelection(book.uuid)
-            : () => openWorkspace(context: context, bookId: book.uuid, bookTitle: book.title),
-        // 选中状态
-        isSelected: _isBatchMode && _selectedBookUuids.contains(book.uuid),
-        // 是否处于批量模式
-        isBatchMode: _isBatchMode,
-        // 当前分组 ID（用于移动到分组时禁用当前分组）
-        currentGroupId: _currentGroupId,
-        // 选中状态切换回调（右键菜单使用）
-        onToggleSelection: () => _toggleBookSelection(book.uuid),
-        // 批量删除回调（右键菜单使用）
-        onBatchDelete: _batchDelete,
-        // 批量导出回调（右键菜单使用）
-        onBatchExport: _batchExport,
-        // 移动到分组回调（右键菜单使用）
-        onMoveToGroup: (groupUuid) {
-          // 保存数量，因为 _exitBatchMode 会清空选中列表
-          final count = _selectedBookUuids.length;
-          context.read<BookshelfProvider>().moveBooksToGroup(
-            _selectedBookUuids.toList(),
-            groupUuid,
-          );
-          _exitBatchMode();
-          // 显示移动成功提示
-          SnackBarService.show(context, '已将 $count 本作品移动到分组');
-        },
-      );
-    }).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -378,108 +642,120 @@ class _AllBooksGridState extends State<AllBooksGrid> {
           // 只有等窗口尺寸完全稳定（isReady == true），才初始化插件
           child: !widget.isReady
               ? const SizedBox.shrink()
-              // 套上 LayoutBuilder 动态算列数
-              : LayoutBuilder(
-                  builder: (context, constraints) {
-                    // 算法：可用总宽度 / (书本固定宽度 160 + 列间距 24)
-                    int crossAxisCount = (constraints.maxWidth / (160 + 24))
-                        .floor();
-                    if (crossAxisCount < 1) crossAxisCount = 1;
-
-                    // 空白区域的右键菜单
-                    // 使用 Listener 监听右键点击，通过位置判断是否在书籍卡片上
-                    // Listener 只处理右键（buttons == 2），左键事件正常传递给 ReorderableBuilder
-                    return Listener(
-                      behavior: HitTestBehavior.translucent,
-                      onPointerDown: (event) {
-                        // 记录右键点击位置
-                        if (event.buttons == 2) {
-                          _emptyAreaTapPosition = event.position;
-                        }
-                      },
-                      onPointerUp: (event) {
-                        // 右键抬起时，如果没有菜单显示，说明点击的是空白区域
-                        if (_emptyAreaTapPosition != null &&
-                            !ContextMenu.isMenuShowing()) {
-                          // 显示空白区域菜单
-                          ContextMenu.showMenuAt(
-                            context: context,
-                            position: _emptyAreaTapPosition!,
-                            menuItems: _buildEmptyAreaMenuItems(),
-                          );
-                        }
-                        _emptyAreaTapPosition = null;
-                      },
-                      child: _isBatchMode
-                          // 批量模式下：禁用拖拽，使用普通 GridView
-                          ? GridView(
-                              key: _gridViewKey,
-                              controller: _gridScrollController,
-                              // 右侧内边距，让封面距离滚动条远一点
-                              padding: const EdgeInsets.only(right: 16),
-                              gridDelegate:
-                                  SliverGridDelegateWithFixedCrossAxisCount(
-                                    crossAxisCount: crossAxisCount,
-                                    mainAxisExtent: 280, // 锁定高度
-                                    crossAxisSpacing: 0,
-                                    mainAxisSpacing: 12,
-                                  ),
-                              children: generatedChildren,
-                            )
-                          // 普通模式：支持拖拽排序
-                          : ReorderableBuilder(
-                              scrollController: _gridScrollController,
-                              longPressDelay: Duration.zero,
-                              // 接管被拖起时的反馈样式
-                              dragChildBoxDecoration: BoxDecoration(
-                                // 保持和卡片一样的圆角
-                                borderRadius: BorderRadius.circular(8),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.15),
-                                    blurRadius: 50,
-                                    offset: const Offset(0, 8),
-                                  ),
-                                ],
-                              ),
-                              onReorder:
-                                  (
-                                    ReorderedListFunction reorderedListFunction,
-                                  ) {
-                                    // 使用 context.read 获取 Provider 并调用其方法，不会引起额外重绘
-                                    // 传入当前分组 ID，用于分组内排序
-                                    context
-                                        .read<BookshelfProvider>()
-                                        .reorderBooks(
-                                          reorderedListFunction,
-                                          groupId: _currentGroupId == '__all__' 
-                                              ? null 
-                                              : _currentGroupId,
-                                        );
-                                  },
-                              builder: (children) {
-                                return GridView(
-                                  key: _gridViewKey,
-                                  controller: _gridScrollController,
-                                  // 右侧内边距，让封面距离滚动条远一点
-                                  padding: const EdgeInsets.only(right: 16),
-                                  gridDelegate:
-                                      SliverGridDelegateWithFixedCrossAxisCount(
-                                        crossAxisCount: crossAxisCount,
-                                        mainAxisExtent: 280, // 锁定高度
-                                        crossAxisSpacing: 0,
-                                        mainAxisSpacing: 12,
-                                      ),
-                                  children: children,
-                                );
-                              },
-                              children: generatedChildren,
-                            ),
-                    );
-                  },
-                ),
+              : _buildGridArea(context, filteredBooks),
         ),
+
+        // 移动端批量模式：网格下方提供批量操作入口
+        if (_isBatchMode && PlatformCapabilities.isMobile)
+          _buildBatchActionBar(),
       ],
+    );
+  }
+}
+
+/// 书籍网格的尺寸参数
+///
+/// 根据可用宽度解析出列数、卡片尺寸与间距，移动端与桌面端采用不同的排布策略
+class _BookGridMetrics {
+  /// 列数
+  final int crossAxisCount;
+
+  /// 单本书卡片宽度
+  final double itemWidth;
+
+  /// 单本书卡片高度
+  final double itemHeight;
+
+  /// 网格单行高度
+  final double mainAxisExtent;
+
+  /// 列间距
+  final double crossAxisSpacing;
+
+  /// 网格右侧内边距
+  final double rightPadding;
+
+  /// 网格底部预留高度
+  final double bottomPadding;
+
+  const _BookGridMetrics({
+    required this.crossAxisCount,
+    required this.itemWidth,
+    required this.itemHeight,
+    required this.mainAxisExtent,
+    required this.crossAxisSpacing,
+    required this.rightPadding,
+    required this.bottomPadding,
+  });
+
+  // 移动端单本书的理想占位宽度（含列间距）
+  static const double _mobileIdealItemWidth = 132;
+  // 移动端卡片书名区域高度，可容纳两行书名
+  static const double _mobileTitleAreaHeight = 46;
+  // 移动端网格底部预留高度，避免最后一行被悬浮按钮组遮挡
+  static const double _mobileGridBottomPadding = 88;
+  // 移动端列间距
+  static const double _mobileCrossAxisSpacing = 12;
+
+  // 桌面端卡片宽度
+  static const double _desktopItemWidth = 160;
+  // 桌面端卡片高度
+  static const double _desktopItemHeight = 260;
+  // 桌面端列间距
+  static const double _desktopItemGap = 24;
+  // 桌面端网格单行高度
+  static const double _desktopMainAxisExtent = 280;
+  // 桌面端网格右侧内边距，让封面距离滚动条远一点
+  static const double _desktopGridRightPadding = 16;
+
+  /// 根据可用宽度解析网格尺寸
+  ///
+  /// [reserveFloatingActions] 为 true 时移动端会在网格底部预留空间，
+  /// 避免最后一行被悬浮按钮组遮挡
+  factory _BookGridMetrics.resolve(
+    double availableWidth, {
+    bool reserveFloatingActions = true,
+  }) {
+    // 移动端：一行至少放下三本书，并按实际列数均分可用宽度
+    if (PlatformCapabilities.isMobile) {
+      final crossAxisCount = math.max(
+        3,
+        (availableWidth / _mobileIdealItemWidth).floor(),
+      );
+      // 减去列间距后均分，得到单本书卡片宽度
+      final itemWidth =
+          (availableWidth - _mobileCrossAxisSpacing * (crossAxisCount - 1)) /
+          crossAxisCount;
+      // 封面按 3:4 比例，再叠加信息区间距与书名区域高度
+      final itemHeight = itemWidth * 4 / 3 + 12 + _mobileTitleAreaHeight;
+
+      return _BookGridMetrics(
+        crossAxisCount: crossAxisCount,
+        itemWidth: itemWidth,
+        itemHeight: itemHeight,
+        mainAxisExtent: itemHeight,
+        crossAxisSpacing: _mobileCrossAxisSpacing,
+        // 移动端铺满可用宽度，让三列卡片均分整个区域
+        rightPadding: 0,
+        bottomPadding:
+            reserveFloatingActions ? _mobileGridBottomPadding : 0,
+      );
+    }
+
+    // 桌面端：按固定卡片宽度与列间距计算列数
+    final crossAxisCount = math.max(
+      1,
+      (availableWidth / (_desktopItemWidth + _desktopItemGap)).floor(),
+    );
+
+    return _BookGridMetrics(
+      crossAxisCount: crossAxisCount,
+      itemWidth: _desktopItemWidth,
+      itemHeight: _desktopItemHeight,
+      mainAxisExtent: _desktopMainAxisExtent,
+      crossAxisSpacing: 0,
+      rightPadding: _desktopGridRightPadding,
+      bottomPadding: 0,
     );
   }
 }

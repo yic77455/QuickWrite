@@ -9,6 +9,7 @@ import 'package:quick_write/core/models/setting_group.dart';
 import 'package:quick_write/core/models/setting_item.dart';
 import 'package:quick_write/core/models/recycle_item.dart';
 import 'package:quick_write/core/services/app_paths.dart';
+import 'package:quick_write/core/utils/relative_path_utils.dart';
 
 /// 章节回收站服务
 ///
@@ -185,7 +186,8 @@ class RecycleItemService {
 
         // 移动章节文件到回收站
         final sourceFilePath =
-            '$bookFolderPath${Platform.pathSeparator}chapters${Platform.pathSeparator}${chapter.filePath}';
+            '$bookFolderPath${Platform.pathSeparator}chapters'
+            '${Platform.pathSeparator}${relativePathToPlatform(chapter.filePath)}';
         final sourceFile = File(sourceFilePath);
         if (sourceFile.existsSync()) {
           await sourceFile.rename(recycleFileFullPath);
@@ -248,7 +250,8 @@ class RecycleItemService {
 
         // 移动设定项文件到回收站
         final sourceFilePath =
-            '$bookFolderPath${Platform.pathSeparator}settings${Platform.pathSeparator}${item.filePath}';
+            '$bookFolderPath${Platform.pathSeparator}settings'
+            '${Platform.pathSeparator}${relativePathToPlatform(item.filePath)}';
         final sourceFile = File(sourceFilePath);
         if (sourceFile.existsSync()) {
           await sourceFile.rename(recycleFileFullPath);
@@ -352,7 +355,7 @@ class RecycleItemService {
       final String sanitizedTitle = _sanitizeFileName(finalTitle);
       final String sanitizedVolume = _sanitizeFileName(volumeName);
       final String newRelativePath = volumeName.isNotEmpty
-          ? '$sanitizedVolume${Platform.pathSeparator}$sanitizedTitle.txt'
+          ? joinRelativePath([sanitizedVolume, '$sanitizedTitle.txt'])
           : '$sanitizedTitle.txt';
 
       // 确保目标目录存在
@@ -365,7 +368,8 @@ class RecycleItemService {
       }
 
       // 移动文件到原位置
-      final targetFilePath = '$bookFolderPath${Platform.pathSeparator}chapters${Platform.pathSeparator}$newRelativePath';
+      final targetFilePath = '$bookFolderPath${Platform.pathSeparator}chapters'
+          '${Platform.pathSeparator}${relativePathToPlatform(newRelativePath)}';
       await recycleFile.rename(targetFilePath);
 
       // 创建恢复后的 ChapterModel
@@ -447,7 +451,10 @@ class RecycleItemService {
       final String sanitizedTitle = _sanitizeFileName(finalTitle);
       final String sanitizedGroup = _sanitizeFileName(groupName);
       final String newRelativePath = groupName.isNotEmpty
-          ? '$sanitizedGroup${Platform.pathSeparator}$sanitizedTitle${GlobalConstants.settingFileExtension}'
+          ? joinRelativePath([
+              sanitizedGroup,
+              '$sanitizedTitle${GlobalConstants.settingFileExtension}',
+            ])
           : '$sanitizedTitle${GlobalConstants.settingFileExtension}';
 
       // 确保目标目录存在
@@ -460,7 +467,8 @@ class RecycleItemService {
       }
 
       // 移动文件到原位置
-      final targetFilePath = '$bookFolderPath${Platform.pathSeparator}settings${Platform.pathSeparator}$newRelativePath';
+      final targetFilePath = '$bookFolderPath${Platform.pathSeparator}settings'
+          '${Platform.pathSeparator}${relativePathToPlatform(newRelativePath)}';
       await recycleFile.rename(targetFilePath);
 
       // 创建恢复后的 SettingItemModel
@@ -562,7 +570,7 @@ class RecycleItemService {
           final String sanitizedTitle = _sanitizeFileName(finalTitle);
           final String sanitizedVolume = _sanitizeFileName(volumeName);
           final String newRelativePath = volumeName.isNotEmpty
-              ? '$sanitizedVolume${Platform.pathSeparator}$sanitizedTitle.txt'
+              ? joinRelativePath([sanitizedVolume, '$sanitizedTitle.txt'])
               : '$sanitizedTitle.txt';
 
           // 确保目标目录存在
@@ -576,7 +584,8 @@ class RecycleItemService {
 
           // 移动文件
           final targetFilePath =
-              '$bookFolderPath${Platform.pathSeparator}chapters${Platform.pathSeparator}$newRelativePath';
+              '$bookFolderPath${Platform.pathSeparator}chapters'
+              '${Platform.pathSeparator}${relativePathToPlatform(newRelativePath)}';
           await recycleFile.rename(targetFilePath);
 
           // 创建恢复后的 ChapterModel
@@ -692,7 +701,10 @@ class RecycleItemService {
           final String sanitizedTitle = _sanitizeFileName(finalTitle);
           final String sanitizedGroup = _sanitizeFileName(groupName);
           final String newRelativePath = groupName.isNotEmpty
-              ? '$sanitizedGroup${Platform.pathSeparator}$sanitizedTitle${GlobalConstants.settingFileExtension}'
+              ? joinRelativePath([
+                  sanitizedGroup,
+                  '$sanitizedTitle${GlobalConstants.settingFileExtension}',
+                ])
               : '$sanitizedTitle${GlobalConstants.settingFileExtension}';
 
           // 确保目标目录存在
@@ -706,7 +718,8 @@ class RecycleItemService {
 
           // 移动文件
           final targetFilePath =
-              '$bookFolderPath${Platform.pathSeparator}settings${Platform.pathSeparator}$newRelativePath';
+              '$bookFolderPath${Platform.pathSeparator}settings'
+              '${Platform.pathSeparator}${relativePathToPlatform(newRelativePath)}';
           await recycleFile.rename(targetFilePath);
 
           // 创建恢复后的 SettingItemModel

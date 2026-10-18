@@ -2,15 +2,35 @@ import 'package:flutter/material.dart';
 import 'package:quick_write/core/constants/material_icons.dart';
 import 'package:quick_write/core/services/backup_service.dart';
 import 'package:quick_write/core/services/settings_service.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/shared/widgets/qw_dropdown.dart';
 import '../widgets/right_sidebar_widgets.dart';
 import '../widgets/shortcut_dialog.dart';
 
+/// 其他设置面板的区块范围
+///
+/// 移动端「备份设置」与「其他」两个入口共用同一面板，各自只展示对应区块：
+/// 「备份设置」仅展示备份设置，「其他」仅展示编辑器设置；桌面端展示全部区块
+enum OtherPanelScope {
+  /// 展示全部区块（桌面端）
+  all,
+
+  /// 仅展示备份设置区块
+  backup,
+
+  /// 仅展示编辑器设置区块
+  editor,
+}
+
 /// 其他设置面板
 /// 
 /// 包含其他相关的设置项：自动保存、自动备份、查看快捷键等
+/// [scope] 决定展示的区块范围，供移动端按入口拆分区块
 class OtherPanel extends StatefulWidget {
-  const OtherPanel({super.key});
+  /// 区块展示范围
+  final OtherPanelScope scope;
+
+  const OtherPanel({super.key, this.scope = OtherPanelScope.all});
 
   @override
   State<OtherPanel> createState() => _OtherPanelState();
@@ -52,6 +72,11 @@ class _OtherPanelState extends State<OtherPanel> {
     final historyRetentionDays = settingsService.historyRetentionDays;
     final openChapterCursorMode = settingsService.openChapterCursorMode;
     final previewModeEnabled = settingsService.previewModeEnabled;
+    final quickInputBarEnabled = settingsService.quickInputBarEnabled;
+    final punctuationAutoCompleteEnabled = settingsService.punctuationAutoCompleteEnabled;
+    final wordCountFloatingEnabled = settingsService.wordCountFloatingEnabled;
+    final wordCountFloatingPosition = settingsService.wordCountFloatingPosition;
+    final wordCountFloatingSpeedEnabled = settingsService.wordCountFloatingSpeedEnabled;
     
     // 使用 Column 布局，确保内容区域自适应填充剩余空间
     return Container(
@@ -65,23 +90,42 @@ class _OtherPanelState extends State<OtherPanel> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // 保存设置区块
-                  _buildSaveSettingsSection(context, autoSaveEnabled),
+                  // 保存设置区块（移动端自动保存常开，不提供该设置项）
+                  if (!PlatformCapabilities.isMobile) ...[
+                    _buildSaveSettingsSection(context, autoSaveEnabled),
+
+                    const SizedBox(height: 20),
+                  ],
                   
-                  const SizedBox(height: 20),
-                  
-                  // 备份设置区块
-                  _buildBackupSettingsSection(context, autoBackupEnabled, backupInterval, historyRetentionDays),
-                  
-                  const SizedBox(height: 20),
-                  
-                  // 编辑器行为设置区块
-                  _buildEditorBehaviorSection(context, openChapterCursorMode, previewModeEnabled),
-                  
-                  const SizedBox(height: 20),
-                  
-                  // 快捷键设置区块
-                  _buildShortcutSection(context),
+                  // 备份设置区块（「其他」入口下隐藏）
+                  if (widget.scope != OtherPanelScope.editor)
+                    _buildBackupSettingsSection(context, autoBackupEnabled, backupInterval, historyRetentionDays),
+
+                  // 两区块同时展示时的间距
+                  if (widget.scope == OtherPanelScope.all)
+                    const SizedBox(height: 20),
+
+                  // 编辑器行为设置区块（「备份设置」入口下隐藏）
+                  if (widget.scope != OtherPanelScope.backup)
+                    _buildEditorBehaviorSection(context, openChapterCursorMode, previewModeEnabled),
+
+                  // 快捷输入设置区块（移动端专属，「备份设置」入口下隐藏）
+                  if (PlatformCapabilities.isMobile && widget.scope != OtherPanelScope.backup) ...[
+                    const SizedBox(height: 20),
+                    _buildQuickInputSection(context, quickInputBarEnabled, punctuationAutoCompleteEnabled),
+                  ],
+
+                  // 字数浮窗设置区块（移动端专属，「备份设置」入口下隐藏）
+                  if (PlatformCapabilities.isMobile && widget.scope != OtherPanelScope.backup) ...[
+                    const SizedBox(height: 20),
+                    _buildWordCountFloatingSection(context, wordCountFloatingEnabled, wordCountFloatingPosition, wordCountFloatingSpeedEnabled),
+                  ],
+
+                  // 快捷键设置区块（移动端没有物理键盘，不适用）
+                  if (PlatformCapabilities.supportsKeyboardShortcuts) ...[
+                    const SizedBox(height: 20),
+                    _buildShortcutSection(context),
+                  ],
                 ],
               ),
             ),
@@ -273,16 +317,124 @@ class _OtherPanelState extends State<OtherPanel> {
             ],
           ),
         ),
-        // 预览模式开关
+        // 预览模式开关（移动端不提供预览模式，隐藏此项）
+        if (!PlatformCapabilities.isMobile)
+          SwitchSettingItem(
+            icon: Icons.visibility_outlined,
+            label: '预览模式',
+            value: previewModeEnabled,
+            onChanged: (value) {
+              SettingsService.instance.updatePreviewModeEnabled(value);
+              setState(() {});
+            },
+          ),
+      ],
+    );
+  }
+
+  /// 构建快捷输入设置区块（移动端专属）
+  ///
+  /// 管理键盘上方的快捷输入栏及其标点自动补全行为
+  Widget _buildQuickInputSection(BuildContext context, bool quickInputBarEnabled, bool punctuationAutoCompleteEnabled) {
+    return SettingsSection(
+      title: '快捷输入',
+      icon: Icons.bolt_outlined,
+      children: [
         SwitchSettingItem(
-          icon: Icons.visibility_outlined,
-          label: '预览模式',
-          value: previewModeEnabled,
+          icon: Icons.keyboard_alt_outlined,
+          label: '快捷输入栏',
+          value: quickInputBarEnabled,
           onChanged: (value) {
-            SettingsService.instance.updatePreviewModeEnabled(value);
+            SettingsService.instance.updateQuickInputBarEnabled(value);
             setState(() {});
           },
         ),
+        SwitchSettingItem(
+          icon: Icons.auto_fix_high_outlined,
+          label: '标点自动补全',
+          value: punctuationAutoCompleteEnabled,
+          onChanged: (value) {
+            SettingsService.instance.updatePunctuationAutoCompleteEnabled(value);
+            setState(() {});
+          },
+        ),
+      ],
+    );
+  }
+
+  /// 构建字数浮窗设置区块（移动端专属）
+  ///
+  /// 管理叠加在编辑器上的字数浮窗：开关、显示位置与码字速度开关
+  Widget _buildWordCountFloatingSection(BuildContext context, bool enabled, String position, bool speedEnabled) {
+    // 浮窗显示位置选项
+    const positionItems = [
+      DropdownItem(displayText: '左上', value: 'topLeft'),
+      DropdownItem(displayText: '右上', value: 'topRight'),
+      DropdownItem(displayText: '左下', value: 'bottomLeft'),
+      DropdownItem(displayText: '右下', value: 'bottomRight'),
+    ];
+
+    return SettingsSection(
+      title: '字数浮窗',
+      icon: Icons.picture_in_picture_alt_outlined,
+      children: [
+        SwitchSettingItem(
+          icon: Icons.visibility_outlined,
+          label: '开启',
+          value: enabled,
+          onChanged: (value) {
+            SettingsService.instance.updateWordCountFloatingEnabled(value);
+            setState(() {});
+          },
+        ),
+        // 显示位置与码字速度在浮窗开启后才可配置
+        if (enabled) ...[
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 标签行：图标 + 文字
+                Row(
+                  children: [
+                    Icon(
+                      Icons.pin_drop_outlined,
+                      size: 18,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      '显示位置',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                // 下拉框独占一行
+                CustomDropdown(
+                  width: double.infinity,
+                  value: position,
+                  items: positionItems,
+                  onChanged: (value) {
+                    SettingsService.instance.updateWordCountFloatingPosition(value);
+                    setState(() {});
+                  },
+                ),
+              ],
+            ),
+          ),
+          SwitchSettingItem(
+            icon: Icons.speed_outlined,
+            label: '码字速度',
+            value: speedEnabled,
+            onChanged: (value) {
+              SettingsService.instance.updateWordCountFloatingSpeedEnabled(value);
+              setState(() {});
+            },
+          ),
+        ],
       ],
     );
   }

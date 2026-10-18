@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/services/writing_stats_service.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/utils/word_count_utils.dart';
 
@@ -40,9 +41,15 @@ class WritingCalendar extends StatelessWidget {
   /// 星期表头
   static const List<String> _weekLabels = ['一', '二', '三', '四', '五', '六', '日'];
 
+  /// 日期格子的高度
+  ///
+  /// 移动端每列变窄且纵向空间紧张，适当压缩格子高度。
+  static double get _cellHeight => PlatformCapabilities.isMobile ? 48 : 56;
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final bool isMobile = PlatformCapabilities.isMobile;
     // 将统计列表转为日期 -> 字数的映射
     final statMap = <DateTime, int>{};
     for (final stat in calendarStats) {
@@ -61,7 +68,7 @@ class WritingCalendar extends StatelessWidget {
       margin: EdgeInsets.zero,
       clipBehavior: Clip.antiAlias,
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.all(isMobile ? 12 : 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -92,7 +99,7 @@ class WritingCalendar extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 24),
+            SizedBox(height: isMobile ? 16 : 24),
             // 星期表头
             Row(
               children: _weekLabels.map((label) {
@@ -123,6 +130,9 @@ class WritingCalendar extends StatelessWidget {
     DateTime today,
     ColorScheme colorScheme,
   ) {
+    // 移动端每列宽度有限，收窄格子左右的留白，避免字数被挤压换行
+    final double cellPadding = PlatformCapabilities.isMobile ? 2 : 6;
+
     final rows = <Widget>[];
     for (int i = 0; i < days.length; i += 7) {
       final weekDays = days.sublist(i, i + 7);
@@ -133,9 +143,9 @@ class WritingCalendar extends StatelessWidget {
             children: weekDays.map((date) {
               return Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  padding: EdgeInsets.symmetric(horizontal: cellPadding),
                   child: date == null
-                      ? const SizedBox(height: 56)
+                      ? SizedBox(height: _cellHeight)
                       : _buildDayCell(context, date, statMap[date] ?? 0, today, colorScheme),
                 ),
               );
@@ -185,7 +195,7 @@ class WritingCalendar extends StatelessWidget {
       onTap: isFuture ? null : () => onDateSelected(date),
       borderRadius: BorderRadius.circular(6),
       child: Container(
-        height: 56,
+        height: _cellHeight,
         decoration: BoxDecoration(
           color: isSelected
               ? colorScheme.primary.withValues(alpha: 0.18)
@@ -207,6 +217,7 @@ class WritingCalendar extends StatelessWidget {
             ),
             const SizedBox(height: 2),
             // 今天和过去都显示字数（哪怕为0），未来不显示
+            // 限制单行显示，格子被压缩时以省略号截断而非换行撑破高度
             if (!isFuture)
               Text(
                 hasData ? WordCountUtils.formatWordCountShort(wordCount, wanThreshold: 100000) : '0',
@@ -216,6 +227,9 @@ class WritingCalendar extends StatelessWidget {
                       ? colorScheme.primary.withValues(alpha: 0.8)
                       : colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
                 ),
+                maxLines: 1,
+                softWrap: false,
+                overflow: TextOverflow.ellipsis,
               ),
           ],
         ),

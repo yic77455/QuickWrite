@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/services/cache_services/misc_cache_service.dart';
 import 'package:quick_write/core/services/settings_service.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 import 'widgets/tools_display_settings.dart';
@@ -17,7 +19,12 @@ import 'panels/tools_panel.dart';
 ///
 /// 作为设置和一些功能的扩展区，使用紧凑卡片样式，通过色差形成分界
 class RightSidebar extends StatefulWidget {
-  const RightSidebar({super.key});
+  /// 是否强制展开
+  ///
+  /// 移动端以抽屉形式展示时使用，忽略 Provider 的收起状态，始终按完整宽度渲染
+  final bool forceExpanded;
+
+  const RightSidebar({super.key, this.forceExpanded = false});
 
   @override
   State<RightSidebar> createState() => _RightSidebarState();
@@ -43,6 +50,13 @@ class _RightSidebarState extends State<RightSidebar>
   // 显示设置下拉菜单控制器
   final MenuController _displaySettingsMenuController = MenuController();
 
+  // 关闭按钮的按压反馈状态（移动端使用）
+  // 用 ValueNotifier 单独驱动按钮自身重绘，避免为反馈重建整个侧边栏
+  final ValueNotifier<bool> _closeButtonPressed = ValueNotifier<bool>(false);
+
+  // 松开关闭按钮后延迟清除按压反馈的定时器
+  Timer? _closeButtonFeedbackTimer;
+
   @override
   void initState() {
     super.initState();
@@ -60,7 +74,8 @@ class _RightSidebarState extends State<RightSidebar>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final isExpanded = context.watch<WorkspaceProvider>().isRightSidebarExpanded;
+    // 强制展开时（移动端以抽屉展示）忽略 Provider 的收起状态
+    final isExpanded = widget.forceExpanded || context.watch<WorkspaceProvider>().isRightSidebarExpanded;
 
     // 首次同步：直接将动画控制器跳到目标值，不播放动画
     if (_isFirstSync) {
@@ -84,44 +99,54 @@ class _RightSidebarState extends State<RightSidebar>
   @override
   void dispose() {
     _expandController.dispose();
+    _closeButtonFeedbackTimer?.cancel();
+    _closeButtonPressed.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final workspaceProvider = context.watch<WorkspaceProvider>();
-    final isExpanded = workspaceProvider.isRightSidebarExpanded;
-    final width = workspaceProvider.rightSidebarWidth;
+    final isExpanded = widget.forceExpanded || workspaceProvider.isRightSidebarExpanded;
 
-    return AnimatedBuilder(
-      animation: _expandAnimation,
-      builder: (context, child) {
-        // 使用动画值来控制可见性和边距
-        final animationValue = _expandAnimation.value;
-        final currentWidth = isExpanded ? width : 0.0;
-        final effectiveWidth = currentWidth * animationValue;
-        
-        return Container(
-          width: effectiveWidth,
-          margin: EdgeInsets.only(
-            right: 2 * animationValue,
-            top: 2 * animationValue,
-            bottom: 2 * animationValue,
-          ),
-          // 使用 ClipRect 和 OverflowBox 避免动画过程中的宽度挤压导致溢出错误
-          child: animationValue > 0 
-              ? ClipRect(
-                  child: OverflowBox(
-                    minWidth: width,
-                    maxWidth: width,
-                    alignment: Alignment.centerRight, // 右侧边栏内容向右对齐，左侧裁剪
-                    child: child,
-                  ),
-                ) 
-              : const SizedBox.shrink(),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 抽屉形态按父级约束宽度渲染，与抽屉宽度保持一致；其他形态使用可配置的面板宽度
+        final width = widget.forceExpanded && constraints.hasBoundedWidth
+            ? constraints.maxWidth
+            : workspaceProvider.rightSidebarWidth;
+
+        return AnimatedBuilder(
+          animation: _expandAnimation,
+          builder: (context, child) {
+            // 使用动画值来控制可见性和边距
+            final animationValue = _expandAnimation.value;
+            final currentWidth = isExpanded ? width : 0.0;
+            final effectiveWidth = currentWidth * animationValue;
+
+            return Container(
+              width: effectiveWidth,
+              margin: EdgeInsets.only(
+                right: 2 * animationValue,
+                top: 2 * animationValue,
+                bottom: 2 * animationValue,
+              ),
+              // 使用 ClipRect 和 OverflowBox 避免动画过程中的宽度挤压导致溢出错误
+              child: animationValue > 0
+                  ? ClipRect(
+                      child: OverflowBox(
+                        minWidth: width,
+                        maxWidth: width,
+                        alignment: Alignment.centerRight, // 右侧边栏内容向右对齐，左侧裁剪
+                        child: child,
+                      ),
+                    )
+                  : const SizedBox.shrink(),
+            );
+          },
+          child: _buildExpandedSidebar(context),
         );
       },
-      child: _buildExpandedSidebar(context),
     );
   }
 
@@ -165,7 +190,8 @@ class _RightSidebarState extends State<RightSidebar>
 
     return Container(
       height: 40,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      // 移动端抽屉为标题留出更多左边距，桌面端保持原有留白
+      padding: EdgeInsets.only(left: PlatformCapabilities.isMobile ? 16 : 8, right: 8),
       // 直接使用 Row，自动填充父容器宽度，实现自适应
       child: Row(
         children: [
@@ -218,33 +244,80 @@ class _RightSidebarState extends State<RightSidebar>
             
 
           // 关闭按钮
-          CursorTooltipTarget(
-            tooltipContent: const Text('关闭侧边栏'),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: () {
-                  provider.closeRightSidebar();
-                },
-                borderRadius: BorderRadius.circular(6),
-                child: Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Icon(
-                    Icons.close_rounded,
-                    size: 18,
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-            ),
-          ),
+          _buildCloseButton(context, provider),
         ],
       ),
     );
+  }
+
+  /// 构建顶部标题栏的关闭按钮
+  ///
+  /// 移动端没有悬停交互，按下的整个过程中以悬停底色铺满按钮作为点击反馈；
+  /// 该反馈由原始指针事件驱动，触摸瞬间即呈现，不等待手势识别结果
+  Widget _buildCloseButton(BuildContext context, WorkspaceProvider provider) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return CursorTooltipTarget(
+      tooltipContent: const Text('关闭侧边栏'),
+      child: Material(
+        color: Colors.transparent,
+        child: Listener(
+          onPointerDown: (_) => _setCloseButtonPressed(true),
+          onPointerUp: (_) => _scheduleCloseButtonFeedbackClear(),
+          onPointerCancel: (_) => _scheduleCloseButtonFeedbackClear(),
+          child: InkWell(
+            onTap: () {
+              provider.closeRightSidebar();
+            },
+            borderRadius: BorderRadius.circular(6),
+            // 移动端的按压反馈由按钮底色呈现，屏蔽墨迹效果；桌面端保留主题默认的悬停与按压效果
+            highlightColor: PlatformCapabilities.isMobile ? Colors.transparent : null,
+            splashColor: PlatformCapabilities.isMobile ? Colors.transparent : null,
+            child: ValueListenableBuilder<bool>(
+              valueListenable: _closeButtonPressed,
+              builder: (context, pressed, child) => Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  // 按下时铺满悬停底色作为点击反馈
+                  color: pressed
+                      ? colorScheme.onSurfaceVariant.withValues(alpha: 0.12)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: child,
+              ),
+              // 图标作为静态子节点传入，反馈变化时只重建外层容器
+              child: Icon(
+                Icons.close_rounded,
+                size: 18,
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 更新关闭按钮的按压反馈状态
+  ///
+  /// 按压反馈仅用于移动端，桌面端沿用主题默认的悬停与按压效果
+  void _setCloseButtonPressed(bool pressed) {
+    if (!PlatformCapabilities.isMobile || _closeButtonPressed.value == pressed) return;
+    _closeButtonPressed.value = pressed;
+  }
+
+  /// 松开关闭按钮后延迟清除按压反馈
+  ///
+  /// 反馈保留片刻再清除，使其在抽屉收起动画开始后仍可被看到
+  void _scheduleCloseButtonFeedbackClear() {
+    if (!PlatformCapabilities.isMobile) return;
+    _closeButtonFeedbackTimer?.cancel();
+    _closeButtonFeedbackTimer = Timer(const Duration(milliseconds: 150), () {
+      if (!mounted) return;
+      _setCloseButtonPressed(false);
+    });
   }
 
   /// 构建显示设置按钮及其下拉菜单
@@ -257,6 +330,8 @@ class _RightSidebarState extends State<RightSidebar>
     return MenuAnchor(
       controller: _displaySettingsMenuController,
       alignmentOffset: const Offset(-192, 6),
+      // 移动端为触摸操作：菜单外点击仅关闭菜单，不触发下层组件的点击，避免误触
+      consumeOutsideTap: PlatformCapabilities.isMobile,
       style: MenuStyle(
         backgroundColor: WidgetStateProperty.all(colorScheme.surface),
         elevation: WidgetStateProperty.all(3),
@@ -333,11 +408,13 @@ class _RightSidebarState extends State<RightSidebar>
         return '历史版本';
       case RightSidebarType.tools:
         return '工具';
+      case RightSidebarType.backup:
+        return '备份设置';
     }
   }
 
   /// 构建内容区域
-  /// 根据右侧边栏类型显示不同的设置面板（布局设置、排版设置、其他设置、全文搜索、历史版本）
+  /// 根据右侧边栏类型显示不同的设置面板（布局设置、排版设置、其他设置、备份设置、全文搜索、历史版本）
   Widget _buildContent(BuildContext context, WorkspaceProvider provider) {
     // 根据右侧边栏类型显示不同的设置面板
     switch (provider.rightSidebarType) {
@@ -348,8 +425,13 @@ class _RightSidebarState extends State<RightSidebar>
         // 排版设置面板：字间距、行间距、首行缩进等设置
         return const TypesetPanel();
       case RightSidebarType.other:
-        // 其他设置面板：自动保存、自动备份、查看快捷键等
-        return const OtherPanel();
+        // 其他设置面板：桌面端展示全部区块；移动端由「其他」入口进入，仅展示编辑器设置区块
+        return OtherPanel(
+          scope: PlatformCapabilities.isMobile ? OtherPanelScope.editor : OtherPanelScope.all,
+        );
+      case RightSidebarType.backup:
+        // 备份设置面板：移动端「备份设置」入口进入，仅展示备份设置区块
+        return const OtherPanel(scope: OtherPanelScope.backup);
       case RightSidebarType.search:
         // 全文搜索面板：跨章节搜索关键词
         return const SearchPanel();
@@ -386,6 +468,10 @@ class _RightSidebarState extends State<RightSidebar>
         break;
       case RightSidebarType.tools:
         // 工具面板无需重置
+        break;
+      case RightSidebarType.backup:
+        // 调用 SettingsService 重置备份设置
+        SettingsService.instance.resetBackupSettings();
         break;
     }
   }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 
@@ -135,13 +136,15 @@ class _ContentsTopBarState extends State<ContentsTopBar> {
           ),
           // 弹性空间，将右侧按钮推到最右边
           const Spacer(),
-          // 收起侧边栏按钮
-          SmallToolbarButton(
-            icon: Icons.chevron_left_rounded,
-            tooltip: '收起侧边栏',
-            onPressed: widget.onToggleSidebar,
-          ),
-          const SizedBox(width: 4),
+          // 收起侧边栏按钮（移动端抽屉通过遮罩或手势关闭，无需此按钮）
+          if (!PlatformCapabilities.isMobile) ...[
+            SmallToolbarButton(
+              icon: Icons.chevron_left_rounded,
+              tooltip: '收起侧边栏',
+              onPressed: widget.onToggleSidebar,
+            ),
+            const SizedBox(width: 4),
+          ],
           // 右侧按钮：更多操作
           SmallToolbarButton(
             key: _moreButtonKey,

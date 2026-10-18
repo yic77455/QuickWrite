@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 
 /// 提示框显示方向
@@ -380,41 +381,70 @@ class _CursorTooltipTargetState extends State<CursorTooltipTarget> {
     );
   }
 
+  /// 长按开始处理
+  ///
+  /// 移动端没有鼠标悬停，改用长按来触发提示框。
+  void _handleLongPressStart(Offset position) {
+    _showTooltipTimer?.cancel();
+    _showTooltipTimer = null;
+    _showTooltip(position);
+    _isTooltipShown = true;
+  }
+
+  /// 长按结束处理
+  void _handleLongPressEnd() {
+    CursorTooltip.hide();
+    _isTooltipShown = false;
+    _isClicked = false;
+  }
+
   @override
   Widget build(BuildContext context) {
+    Widget content = MouseRegion(
+      // 鼠标进入组件
+      onEnter: (event) {
+        _isHovering = true;
+        if (widget.showTooltip && !_isTooltipShown && !_isClicked) {
+          _startShowTimer(event.position);
+        }
+      },
+      // 鼠标在组件内移动
+      // 如果提示框已显示或已点击，不做任何事
+      // 如果提示框未显示，重置计时器
+      onHover: (event) {
+        if (widget.showTooltip && !_isTooltipShown && !_isClicked) {
+          _startShowTimer(event.position);
+        }
+      },
+      // 鼠标离开组件
+      onExit: (_) {
+        _isHovering = false;
+        _isTooltipShown = false;
+        _isClicked = false;
+        _lastCursorPosition = null;
+        _showTooltipTimer?.cancel();
+        _showTooltipTimer = null;
+        if (widget.showTooltip) {
+          CursorTooltip.hide();
+        }
+      },
+      child: widget.child,
+    );
+
+    // 移动端通过长按触发提示框；不显示提示的组件不注册手势，避免抢占子组件的长按
+    if (PlatformCapabilities.isMobile && widget.showTooltip) {
+      content = GestureDetector(
+        onLongPressStart: (details) => _handleLongPressStart(details.globalPosition),
+        onLongPressEnd: (_) => _handleLongPressEnd(),
+        onLongPressCancel: _handleLongPressEnd,
+        child: content,
+      );
+    }
+
     return Listener(
       // 监听原始指针事件，不会被按钮等组件拦截
       onPointerDown: (_) => _handleTap(),
-      child: MouseRegion(
-        // 鼠标进入组件
-        onEnter: (event) {
-          _isHovering = true;
-          if (widget.showTooltip && !_isTooltipShown && !_isClicked) {
-            _startShowTimer(event.position);
-          }
-        },
-        // 鼠标在组件内移动
-        // 如果提示框已显示或已点击，不做任何事
-        // 如果提示框未显示，重置计时器
-        onHover: (event) {
-          if (widget.showTooltip && !_isTooltipShown && !_isClicked) {
-            _startShowTimer(event.position);
-          }
-        },
-        // 鼠标离开组件
-        onExit: (_) {
-          _isHovering = false;
-          _isTooltipShown = false;
-          _isClicked = false;
-          _lastCursorPosition = null;
-          _showTooltipTimer?.cancel();
-          _showTooltipTimer = null;
-          if (widget.showTooltip) {
-            CursorTooltip.hide();
-          }
-        },
-        child: widget.child,
-      ),
+      child: content,
     );
   }
 }

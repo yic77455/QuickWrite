@@ -5,6 +5,7 @@ import 'package:isar/isar.dart';
 import 'package:re_editor/re_editor.dart';
 import 'package:quick_write/core/constants/constants.dart';
 import 'package:quick_write/core/services/settings_service.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:uuid/uuid.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:quick_write/core/models/book.dart';
@@ -29,6 +30,7 @@ import 'package:quick_write/core/services/workspace/volume_migration_service.dar
 import 'package:quick_write/core/utils/code_line_selection_utils.dart';
 import 'package:quick_write/core/utils/find_replace_target.dart';
 import 'package:quick_write/core/utils/re_editor_span_builder.dart';
+import 'package:quick_write/core/utils/relative_path_utils.dart';
 import 'package:quick_write/core/utils/search_query_parser.dart';
 import 'package:quick_write/core/utils/word_count_utils.dart';
 import 'package:quick_write/pages/workspace/editor/novel_editor.dart';
@@ -139,8 +141,8 @@ class WorkspaceProvider extends WorkspaceStateBase
         .uuidEqualTo(bookId)
         .findFirst();
 
-    // 设置窗口标题（任务栏显示）
-    if (_currentBook != null) {
+    // 设置窗口标题（任务栏显示，仅支持原生窗口控制的平台）
+    if (_currentBook != null && PlatformCapabilities.supportsNativeWindowControl) {
       final windowTitle = '《${_currentBook!.title}》 - ${GlobalConstants.appTitle}';
       await windowManager.setTitle(windowTitle);
     }
@@ -588,6 +590,7 @@ enum RightSidebarType {
   search,    // 全文搜索
   history,   // 历史版本
   tools,     // 工具
+  backup,    // 备份设置（移动端独立入口，仅展示备份相关区块）
 }
 
 /// 全文搜索匹配行信息

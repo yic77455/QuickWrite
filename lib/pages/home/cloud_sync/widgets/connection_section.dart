@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/providers/cloud_sync_provider.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/pages/home/cloud_sync/widgets/setting_input_tile.dart';
 import 'package:quick_write/pages/home/settings/setting_widgets.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
@@ -83,12 +84,16 @@ class _ConnectionSectionState extends State<ConnectionSection> {
 
   /// 服务提供商：选择云同步使用的服务类型
   Widget _buildProviderTile() {
+    // 移动端窄屏：下拉框换行到标题下方并占满整行
+    final isMobile = PlatformCapabilities.isMobile;
+
     return SettingTile(
       icon: Icons.cloud_outlined,
       title: '服务提供商',
       subtitle: '目前仅支持 WebDAV 协议的网盘服务，如坚果云',
+      trailingBelow: isMobile,
       trailing: CustomDropdown(
-        width: 140,
+        width: isMobile ? double.infinity : 140,
         value: 'webdav',
         items: const [
           DropdownItem(displayText: 'WebDAV', value: 'webdav'),
@@ -114,6 +119,7 @@ class _ConnectionSectionState extends State<ConnectionSection> {
     return SettingInputTile(
       icon: Icons.person_outline,
       title: '账号',
+      subtitle: '坚果云为你的登录账号',
       controller: _usernameController,
       hintText: '请输入账号',
     );

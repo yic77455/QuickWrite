@@ -15,6 +15,7 @@ import 'package:quick_write/core/services/cloud_sync/metadata_types.dart';
 import 'package:quick_write/core/services/cloud_sync/sync_state_store.dart';
 import 'package:quick_write/core/services/cloud_sync/webdav_client.dart';
 import 'package:quick_write/core/services/recycle_item_service.dart';
+import 'package:quick_write/core/utils/relative_path_utils.dart';
 import 'package:uuid/uuid.dart';
 
 /// 按书籍存放的元数据子目录名（相对于元数据目录）
@@ -284,7 +285,7 @@ class MetadataSync {
           worksPath,
           bookTitle,
           'chapters',
-          chapter.filePath,
+          relativePathToPlatform(chapter.filePath),
         ]),
       );
     }
@@ -314,7 +315,7 @@ class MetadataSync {
           worksPath,
           bookTitle,
           'settings',
-          item.filePath,
+          relativePathToPlatform(item.filePath),
         ]),
       );
     }

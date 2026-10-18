@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/qw_tooltip.dart';
 
@@ -80,11 +81,13 @@ class _GroupHeaderState extends State<GroupHeader> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    // 判断是否应该显示菜单按钮（悬停时或菜单打开时）
+    // 无悬停能力的平台（移动端）无法通过悬停唤出按钮，改为常显
+    final alwaysShowActions = !PlatformCapabilities.supportsHover;
+    // 判断是否应该显示菜单按钮（悬停时、菜单打开时，或无悬停平台常显）
     final showMenuButton =
-        widget.onMenuPressed != null && (_isHovered || widget.isMenuOpen);
-    // 判断是否应该显示新建按钮（悬停时或菜单打开时）
-    final showAddButton = widget.onAddPressed != null && (_isHovered || widget.isMenuOpen);
+        widget.onMenuPressed != null && (alwaysShowActions || _isHovered || widget.isMenuOpen);
+    // 判断是否应该显示新建按钮（悬停时、菜单打开时，或无悬停平台常显）
+    final showAddButton = widget.onAddPressed != null && (alwaysShowActions || _isHovered || widget.isMenuOpen);
     // 是否显示悬停操作按钮区域
     final showHoverActions = showMenuButton || showAddButton;
 
@@ -166,7 +169,11 @@ class _GroupHeaderState extends State<GroupHeader> {
                                     .withValues(alpha: 0.08),
                                 highlightColor: colorScheme.onSurfaceVariant
                                     .withValues(alpha: 0.12),
-                                splashColor: Colors.transparent,
+                                // 移动端无悬停状态，点击时用与悬停一致的底色扩散反馈弥补点击反馈的缺失
+                                splashColor: PlatformCapabilities.isMobile
+                                    ? colorScheme.onSurfaceVariant
+                                        .withValues(alpha: 0.08)
+                                    : Colors.transparent,
                                 borderRadius: BorderRadius.circular(28),
                                 child: Center(
                                   child: Icon(
@@ -208,7 +215,11 @@ class _GroupHeaderState extends State<GroupHeader> {
                                         .withValues(alpha: 0.08),
                                     highlightColor: colorScheme.onSurfaceVariant
                                         .withValues(alpha: 0.12),
-                                    splashColor: Colors.transparent,
+                                    // 移动端无悬停状态，点击时用与悬停一致的底色扩散反馈弥补点击反馈的缺失
+                                    splashColor: PlatformCapabilities.isMobile
+                                        ? colorScheme.onSurfaceVariant
+                                            .withValues(alpha: 0.08)
+                                        : Colors.transparent,
                                     borderRadius: BorderRadius.circular(28),
                                     child: Center(
                                       child: Icon(

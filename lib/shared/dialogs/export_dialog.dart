@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:provider/provider.dart';
@@ -6,6 +8,8 @@ import 'package:quick_write/core/models/chapter.dart';
 import 'package:quick_write/core/models/setting_item.dart';
 import 'package:quick_write/core/providers/bookshelf_provider.dart';
 import 'package:quick_write/core/services/book_export_service.dart';
+import 'package:quick_write/core/services/export_saver_service.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 
@@ -13,12 +17,16 @@ import 'package:quick_write/shared/widgets/widgets.dart';
 enum ExportMode {
   /// 导出书籍
   book,
+
   /// 导出分卷
   volume,
+
   /// 导出章节
   chapter,
+
   /// 导出设定分组
   settingGroup,
+
   /// 导出设定项
   setting,
 }
@@ -75,20 +83,28 @@ Future<void> showExportDialog({
 class _ExportDialogContent extends StatefulWidget {
   /// 要导出的书籍列表（书籍导出模式）
   final List<BookModel>? books;
+
   /// 导出模式
   final ExportMode mode;
+
   /// 分卷名称（分卷导出模式）
   final String? volumeName;
+
   /// 分卷 UUID（分卷导出模式）
   final String? volumeUuid;
+
   /// 章节列表（分卷/章节导出模式）
   final List<ChapterModel>? chapters;
+
   /// 书籍标题（分卷/章节/设定导出模式，用于定位数据文件夹）
   final String? bookTitle;
+
   /// 分组名称（设定分组导出模式）
   final String? groupName;
+
   /// 设定项列表（设定分组/设定项导出模式）
   final List<SettingItemModel>? settingItems;
+
   /// 对话框交互状态控制器
   final ValueNotifier<bool> interactiveNotifier;
 
@@ -115,6 +131,8 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
   int _formatIndex = 0;
   // 导出目录
   String? _exportDir;
+  // 移动端导出中转目录（导出内容先落盘于此，最终经系统保存框写入公共存储）
+  Directory? _stagingDirectory;
   // 是否正在导出
   bool _isExporting = false;
   // 导出进度
@@ -125,19 +143,40 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
   String? _errorMessage;
 
   /// 当前选中的导出格式
-  ExportFormat get _exportFormat =>
-      _formatIndex == 0 ? ExportFormat.txt : ExportFormat.docx;
+  ExportFormat get _exportFormat => _formatIndex == 0 ? ExportFormat.txt : ExportFormat.docx;
 
   /// 是否为单章导出（不显示导出方式选项）
-  bool get _isSingleChapter =>
-      widget.mode == ExportMode.chapter && (widget.chapters?.length ?? 0) == 1;
+  bool get _isSingleChapter => widget.mode == ExportMode.chapter && (widget.chapters?.length ?? 0) == 1;
 
   /// 是否为单个设定项导出（不显示导出方式选项）
-  bool get _isSingleSetting =>
-      widget.mode == ExportMode.setting && (widget.settingItems?.length ?? 0) == 1;
+  bool get _isSingleSetting => widget.mode == ExportMode.setting && (widget.settingItems?.length ?? 0) == 1;
 
   /// 是否为单条导出（不显示导出方式选项）
   bool get _isSingleItem => _isSingleChapter || _isSingleSetting;
+
+  /// 是否为移动端
+  bool get _isMobile => PlatformCapabilities.isMobile;
+
+  /// 移动端保存时使用的默认文件名（不含扩展名）
+  ///
+  /// 仅在导出内容被打包为 zip 时用于命名
+  String get _mobileSaveBaseName {
+    switch (widget.mode) {
+      case ExportMode.book:
+        final books = widget.books!;
+        return books.length == 1 ? books.first.title : '书籍导出';
+      case ExportMode.volume:
+        return widget.volumeName ?? '分卷导出';
+      case ExportMode.chapter:
+        final chapters = widget.chapters!;
+        return chapters.length == 1 ? chapters.first.title : (widget.bookTitle ?? '章节导出');
+      case ExportMode.settingGroup:
+        return widget.groupName ?? '设定导出';
+      case ExportMode.setting:
+        final items = widget.settingItems!;
+        return items.length == 1 ? items.first.title : (widget.bookTitle ?? '设定导出');
+    }
+  }
 
   @override
   void dispose() {
@@ -147,9 +186,7 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
   /// 选择导出目录
   Future<void> _pickExportDir() async {
     try {
-      final result = await FilePicker.platform.getDirectoryPath(
-        dialogTitle: '选择导出目录',
-      );
+      final result = await FilePicker.platform.getDirectoryPath(dialogTitle: '选择导出目录');
       if (result != null && mounted) {
         setState(() {
           _exportDir = result;
@@ -163,7 +200,16 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
 
   /// 开始导出
   Future<void> _startExport() async {
-    if (_exportDir == null) {
+    if (_isMobile) {
+      // 移动端：导出内容先落到应用私有的中转目录，稍后由系统保存框选定公共位置
+      try {
+        _stagingDirectory = await ExportSaverService.instance.createStagingDirectory();
+      } catch (e) {
+        setState(() => _errorMessage = '导出失败: $e');
+        return;
+      }
+      _exportDir = _stagingDirectory!.path;
+    } else if (_exportDir == null) {
       setState(() => _errorMessage = '请选择导出目录');
       return;
     }
@@ -181,16 +227,42 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
     final exportService = BookExportService.instance;
 
     try {
+      final _ExportSummary summary;
       if (widget.mode == ExportMode.book) {
         // 书籍导出
-        await _exportBooks(exportService);
+        summary = await _exportBooks(exportService);
       } else if (widget.mode == ExportMode.settingGroup || widget.mode == ExportMode.setting) {
         // 设定分组/设定项导出
-        await _exportSettings(exportService);
+        summary = await _exportSettings(exportService);
       } else {
         // 分卷/章节导出
-        await _exportChapters(exportService);
+        summary = await _exportChapters(exportService);
       }
+
+      if (!mounted) return;
+
+      // 移动端：有成功导出的内容时，通过系统保存框写入公共存储
+      if (_isMobile && summary.successCount > 0) {
+        setState(() => _statusText = '正在保存...');
+        final savedPath = await ExportSaverService.instance.saveToPublicStorage(
+          stagingDirectory: _stagingDirectory!,
+          preferredName: _mobileSaveBaseName,
+        );
+
+        if (!mounted) return;
+
+        if (savedPath == null) {
+          // 用户在系统保存框取消，保持对话框打开并提示
+          setState(() {
+            _isExporting = false;
+            _errorMessage = '已取消保存';
+          });
+          widget.interactiveNotifier.value = true;
+          return;
+        }
+      }
+
+      _finishExport(summary);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -198,11 +270,21 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
         _errorMessage = '导出失败: $e';
       });
       widget.interactiveNotifier.value = true;
+    } finally {
+      // 清理移动端中转目录
+      if (_isMobile && _stagingDirectory != null) {
+        try {
+          await ExportSaverService.instance.disposeStagingDirectory(_stagingDirectory!);
+        } catch (_) {
+          // 中转目录清理失败不影响导出结果
+        }
+        _stagingDirectory = null;
+      }
     }
   }
 
   /// 导出书籍
-  Future<void> _exportBooks(BookExportService exportService) async {
+  Future<_ExportSummary> _exportBooks(BookExportService exportService) async {
     final isar = context.read<BookshelfProvider>().isar;
     int successCount = 0;
     int failCount = 0;
@@ -240,12 +322,16 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
       }
     }
 
-    if (!mounted) return;
-    _finishExport(successCount, failCount, lastError, '${widget.books!.length} 本书籍');
+    return _ExportSummary(
+      successCount: successCount,
+      failCount: failCount,
+      lastError: lastError,
+      unit: '${widget.books!.length} 本书籍',
+    );
   }
 
   /// 导出分卷/章节
-  Future<void> _exportChapters(BookExportService exportService) async {
+  Future<_ExportSummary> _exportChapters(BookExportService exportService) async {
     final chapters = widget.chapters!;
     final bookTitle = widget.bookTitle!;
 
@@ -272,17 +358,16 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
       },
     );
 
-    if (!mounted) return;
-
-    if (result.success) {
-      _finishExport(1, 0, null, _isSingleChapter ? '章节' : '分卷');
-    } else {
-      _finishExport(0, 1, result.errorMessage, _isSingleChapter ? '章节' : '分卷');
-    }
+    return _ExportSummary(
+      successCount: result.success ? 1 : 0,
+      failCount: result.success ? 0 : 1,
+      lastError: result.errorMessage,
+      unit: _isSingleChapter ? '章节' : '分卷',
+    );
   }
 
   /// 导出设定分组/设定项
-  Future<void> _exportSettings(BookExportService exportService) async {
+  Future<_ExportSummary> _exportSettings(BookExportService exportService) async {
     final settingItems = widget.settingItems!;
     final bookTitle = widget.bookTitle!;
 
@@ -309,17 +394,16 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
       },
     );
 
-    if (!mounted) return;
-
-    if (result.success) {
-      _finishExport(1, 0, null, _isSingleSetting ? '设定项' : '分组');
-    } else {
-      _finishExport(0, 1, result.errorMessage, _isSingleSetting ? '设定项' : '分组');
-    }
+    return _ExportSummary(
+      successCount: result.success ? 1 : 0,
+      failCount: result.success ? 0 : 1,
+      lastError: result.errorMessage,
+      unit: _isSingleSetting ? '设定项' : '分组',
+    );
   }
 
   /// 完成导出，更新 UI 状态
-  void _finishExport(int successCount, int failCount, String? lastError, String unit) {
+  void _finishExport(_ExportSummary summary) {
     setState(() {
       _isExporting = false;
       _progress = 1.0;
@@ -328,16 +412,19 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
     // 恢复对话框交互
     widget.interactiveNotifier.value = true;
 
-    if (failCount == 0) {
+    if (summary.failCount == 0) {
       Navigator.of(context).pop();
       SnackBarService.show(context, '导出完成');
-    } else if (successCount == 0) {
+    } else if (summary.successCount == 0) {
       setState(() {
-        _errorMessage = lastError ?? '导出失败';
+        _errorMessage = summary.lastError ?? '导出失败';
       });
     } else {
       Navigator.of(context).pop();
-      SnackBarService.show(context, '导出完成：成功 $successCount $unit，失败 $failCount $unit');
+      SnackBarService.show(
+        context,
+        '导出完成：成功 ${summary.successCount} ${summary.unit}，失败 ${summary.failCount} ${summary.unit}',
+      );
     }
   }
 
@@ -366,23 +453,16 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
                   // 导出格式选择
                   _buildFormatSelector(colorScheme),
                   // 导出方式选项（单条导出时不显示）
-                  if (!_isSingleItem) ...[
-                    const SizedBox(height: 20),
-                    _buildMergeOption(colorScheme),
-                  ],
-                  const SizedBox(height: 20),
-                  // 导出目录选择
-                  _buildDirSelector(colorScheme),
+                  if (!_isSingleItem) ...[const SizedBox(height: 20), _buildMergeOption(colorScheme)],
+                  // 导出目录选择（移动端经系统保存框选定位置，无需预先选择）
+                  if (!_isMobile) ...[const SizedBox(height: 20), _buildDirSelector(colorScheme)],
                   // 进度条
                   if (_isExporting || _progress > 0) ...[
                     const SizedBox(height: 20),
                     _buildProgressSection(colorScheme),
                   ],
                   // 错误信息
-                  if (_errorMessage != null) ...[
-                    const SizedBox(height: 12),
-                    _buildErrorBox(colorScheme),
-                  ],
+                  if (_errorMessage != null) ...[const SizedBox(height: 12), _buildErrorBox(colorScheme)],
                   const SizedBox(height: 20),
                   // 底部按钮
                   _buildButtonRow(),
@@ -410,22 +490,20 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
       child: Row(
         children: [
           Expanded(
-            child: Text(
-              title,
-              style: context.titleLarge?.copyWith(fontWeight: FontWeight.w600),
-            ),
+            child: Text(title, style: context.titleLarge?.copyWith(fontWeight: FontWeight.w600)),
           ),
           IconButton(
             icon: Icon(
               Icons.close,
               size: 20,
-              color: _isExporting
-                  ? colorScheme.onSurface.withValues(alpha: 0.3)
-                  : null,
+              color: _isExporting ? colorScheme.onSurface.withValues(alpha: 0.3) : null,
             ),
             onPressed: _isExporting ? null : () => Navigator.of(context).pop(),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
+            color: colorScheme.onSurfaceVariant,
+            hoverColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.08),
+            highlightColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.12),
           ),
         ],
       ),
@@ -445,23 +523,17 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
     String label;
     if (widget.mode == ExportMode.book) {
       final bookCount = widget.books!.length;
-      label = bookCount == 1
-          ? '「${widget.books!.first.title}」'
-          : '已选择 $bookCount 本书籍';
+      label = bookCount == 1 ? '「${widget.books!.first.title}」' : '已选择 $bookCount 本书籍';
     } else if (widget.mode == ExportMode.volume) {
       label = '「${widget.volumeName}」';
     } else if (widget.mode == ExportMode.settingGroup) {
       label = '「${widget.groupName}」';
     } else if (widget.mode == ExportMode.setting) {
       final settingCount = widget.settingItems!.length;
-      label = settingCount == 1
-          ? '「${widget.settingItems!.first.title}」'
-          : '已选择 $settingCount 个设定项';
+      label = settingCount == 1 ? '「${widget.settingItems!.first.title}」' : '已选择 $settingCount 个设定项';
     } else {
       final chapterCount = widget.chapters!.length;
-      label = chapterCount == 1
-          ? '「${widget.chapters!.first.title}」'
-          : '已选择 $chapterCount 个章节';
+      label = chapterCount == 1 ? '「${widget.chapters!.first.title}」' : '已选择 $chapterCount 个章节';
     }
 
     return Container(
@@ -492,12 +564,7 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          '导出格式',
-          style: context.titleSmall?.copyWith(
-            color: colorScheme.onSurface.withValues(alpha: 0.7),
-          ),
-        ),
+        Text('导出格式', style: context.titleSmall?.copyWith(color: colorScheme.onSurface.withValues(alpha: 0.7))),
         const SizedBox(height: 8),
         Row(
           children: [
@@ -551,9 +618,7 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
               : colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: isSelected
-                ? colorScheme.primary.withValues(alpha: 0.5)
-                : colorScheme.outline.withValues(alpha: 0.2),
+            color: isSelected ? colorScheme.primary.withValues(alpha: 0.5) : colorScheme.outline.withValues(alpha: 0.2),
           ),
         ),
         child: Row(
@@ -564,8 +629,8 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
               color: disabled
                   ? colorScheme.onSurface.withValues(alpha: 0.3)
                   : isSelected
-                      ? colorScheme.primary
-                      : colorScheme.onSurface.withValues(alpha: 0.7),
+                  ? colorScheme.primary
+                  : colorScheme.onSurface.withValues(alpha: 0.7),
             ),
             const SizedBox(width: 8),
             Column(
@@ -578,8 +643,8 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
                     color: disabled
                         ? colorScheme.onSurface.withValues(alpha: 0.3)
                         : isSelected
-                            ? colorScheme.primary
-                            : colorScheme.onSurface,
+                        ? colorScheme.primary
+                        : colorScheme.onSurface,
                   ),
                 ),
                 Text(
@@ -620,17 +685,10 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          '导出方式',
-          style: context.titleSmall?.copyWith(
-            color: colorScheme.onSurface.withValues(alpha: 0.7),
-          ),
-        ),
+        Text('导出方式', style: context.titleSmall?.copyWith(color: colorScheme.onSurface.withValues(alpha: 0.7))),
         const SizedBox(height: 8),
         InkWell(
-          onTap: _isExporting
-              ? null
-              : () => setState(() => _mergeIntoOneFile = false),
+          onTap: _isExporting ? null : () => setState(() => _mergeIntoOneFile = false),
           borderRadius: BorderRadius.circular(8),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -649,9 +707,7 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
               children: [
                 Checkbox(
                   value: !_mergeIntoOneFile,
-                  onChanged: _isExporting
-                      ? null
-                      : (v) => setState(() => _mergeIntoOneFile = !(v ?? false)),
+                  onChanged: _isExporting ? null : (v) => setState(() => _mergeIntoOneFile = !(v ?? false)),
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   visualDensity: VisualDensity.compact,
                 ),
@@ -660,18 +716,11 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        '按目录结构导出',
-                        style: context.bodyLarge?.copyWith(
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
+                      Text('按目录结构导出', style: context.bodyLarge?.copyWith(fontWeight: FontWeight.w500)),
                       const SizedBox(height: 2),
                       Text(
                         structureDesc,
-                        style: context.bodySmall?.copyWith(
-                          color: colorScheme.onSurface.withValues(alpha: 0.5),
-                        ),
+                        style: context.bodySmall?.copyWith(color: colorScheme.onSurface.withValues(alpha: 0.5)),
                       ),
                     ],
                   ),
@@ -682,9 +731,7 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
         ),
         const SizedBox(height: 8),
         InkWell(
-          onTap: _isExporting
-              ? null
-              : () => setState(() => _mergeIntoOneFile = true),
+          onTap: _isExporting ? null : () => setState(() => _mergeIntoOneFile = true),
           borderRadius: BorderRadius.circular(8),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -703,9 +750,7 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
               children: [
                 Checkbox(
                   value: _mergeIntoOneFile,
-                  onChanged: _isExporting
-                      ? null
-                      : (v) => setState(() => _mergeIntoOneFile = v ?? true),
+                  onChanged: _isExporting ? null : (v) => setState(() => _mergeIntoOneFile = v ?? true),
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   visualDensity: VisualDensity.compact,
                 ),
@@ -714,18 +759,11 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        '合并为一个文件导出',
-                        style: context.bodyLarge?.copyWith(
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
+                      Text('合并为一个文件导出', style: context.bodyLarge?.copyWith(fontWeight: FontWeight.w500)),
                       const SizedBox(height: 2),
                       Text(
                         mergeDesc,
-                        style: context.bodySmall?.copyWith(
-                          color: colorScheme.onSurface.withValues(alpha: 0.5),
-                        ),
+                        style: context.bodySmall?.copyWith(color: colorScheme.onSurface.withValues(alpha: 0.5)),
                       ),
                     ],
                   ),
@@ -743,12 +781,7 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          '导出目录',
-          style: context.titleSmall?.copyWith(
-            color: colorScheme.onSurface.withValues(alpha: 0.7),
-          ),
-        ),
+        Text('导出目录', style: context.titleSmall?.copyWith(color: colorScheme.onSurface.withValues(alpha: 0.7))),
         const SizedBox(height: 8),
         InkWell(
           onTap: _isExporting ? null : _pickExportDir,
@@ -769,18 +802,14 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
                 Icon(
                   _exportDir != null ? Icons.folder : Icons.folder_outlined,
                   size: 22,
-                  color: _exportDir != null
-                      ? colorScheme.primary
-                      : colorScheme.onSurface.withValues(alpha: 0.5),
+                  color: _exportDir != null ? colorScheme.primary : colorScheme.onSurface.withValues(alpha: 0.5),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     _exportDir ?? '点击选择导出目录',
                     style: context.bodyLarge?.copyWith(
-                      color: _exportDir != null
-                          ? colorScheme.onSurface
-                          : colorScheme.onSurface.withValues(alpha: 0.5),
+                      color: _exportDir != null ? colorScheme.onSurface : colorScheme.onSurface.withValues(alpha: 0.5),
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -811,32 +840,16 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
                 width: 16,
                 height: 16,
                 child: _progress < 1.0
-                    ? CircularProgressIndicator(
-                        strokeWidth: 2,
-                        value: _progress,
-                        color: colorScheme.primary,
-                      )
-                    : Icon(
-                        Icons.check_circle,
-                        size: 16,
-                        color: colorScheme.primary,
-                      ),
+                    ? CircularProgressIndicator(strokeWidth: 2, value: _progress, color: colorScheme.primary)
+                    : Icon(Icons.check_circle, size: 16, color: colorScheme.primary),
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  _statusText,
-                  style: context.bodyMedium?.copyWith(
-                    color: colorScheme.onSurface,
-                  ),
-                ),
+                child: Text(_statusText, style: context.bodyMedium?.copyWith(color: colorScheme.onSurface)),
               ),
               Text(
                 '${(_progress * 100).toInt()}%',
-                style: context.titleSmall?.copyWith(
-                  fontWeight: FontWeight.w500,
-                  color: colorScheme.primary,
-                ),
+                style: context.titleSmall?.copyWith(fontWeight: FontWeight.w500, color: colorScheme.primary),
               ),
             ],
           ),
@@ -869,10 +882,7 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
           Icon(Icons.error_outline, size: 16, color: colorScheme.error),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              _errorMessage!,
-              style: context.titleSmall?.copyWith(color: colorScheme.error),
-            ),
+            child: Text(_errorMessage!, style: context.titleSmall?.copyWith(color: colorScheme.error)),
           ),
         ],
       ),
@@ -897,17 +907,32 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
           width: 80,
           height: 36,
           child: FilledButton(
-            onPressed: _isExporting || _exportDir == null ? null : _startExport,
+            onPressed: _isExporting || (!_isMobile && _exportDir == null) ? null : _startExport,
             child: _isExporting
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                 : const Text('导出'),
           ),
         ),
       ],
     );
   }
+}
+
+/// 单次导出结果汇总
+///
+/// 汇总各导出分支的成功/失败数量与单位，供统一收尾处理
+class _ExportSummary {
+  /// 成功数量
+  final int successCount;
+
+  /// 失败数量
+  final int failCount;
+
+  /// 最后一次失败的错误信息
+  final String? lastError;
+
+  /// 数量单位（书籍/分卷/章节/分组/设定项）
+  final String unit;
+
+  const _ExportSummary({required this.successCount, required this.failCount, required this.unit, this.lastError});
 }

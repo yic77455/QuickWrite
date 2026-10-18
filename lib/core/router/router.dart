@@ -5,8 +5,10 @@ import 'package:quick_write/core/providers/bookshelf_provider.dart';
 import 'package:quick_write/core/providers/home_state_provider.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
 import 'package:quick_write/core/services/settings_service.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/pages/home/home_page.dart';
 import 'package:quick_write/pages/workspace/workspace_page.dart';
+import 'package:quick_write/shared/widgets/mobile_page_transition.dart';
 
 /// 应用根导航器的键
 ///
@@ -39,18 +41,42 @@ final GoRouter appRouter = GoRouter(
     GoRoute(
       // :bookId 是一个动态参数，比如 /workspace/123，那 bookId 就是 123
       path: '/workspace/:bookId',
-      builder: (context, state) {
+      pageBuilder: (context, state) {
         // 从路由状态(state)中把 bookId 提取出来
         final bookId = state.pathParameters['bookId']!;
-        
+
         // 在当前窗口中打开工作台
         // 设置保存回调：章节保存后自动刷新书架的最近编辑显示
-        return WorkspacePage(
+        final page = WorkspacePage(
           bookId: bookId,
           onBookSaved: () {
             // 通过顶层 MultiProvider 获取 BookshelfProvider 并刷新数据
             context.read<BookshelfProvider>().refresh();
           },
+        );
+
+        // 移动端：工作台从右侧滑入，返回书架时向右侧滑出
+        if (PlatformCapabilities.isMobile) {
+          return CustomTransitionPage(
+            key: state.pageKey,
+            child: page,
+            transitionDuration: mobilePageTransitionDuration,
+            reverseTransitionDuration: mobilePageTransitionDuration,
+            transitionsBuilder: (context, animation, secondaryAnimation, child) =>
+                buildMobileSlideTransition(animation, child),
+          );
+        }
+
+        // 桌面端：沿用 go_router 默认的 Material 页面，保持原有表现
+        return MaterialPage<void>(
+          key: state.pageKey,
+          name: state.name ?? state.path,
+          arguments: <String, String>{
+            ...state.pathParameters,
+            ...state.uri.queryParameters,
+          },
+          restorationId: state.pageKey.value,
+          child: page,
         );
       },
     ),

@@ -615,27 +615,12 @@ class _MobileSelectionOverlayController implements _SelectionOverlayController {
       if (endPosition.dy > editingRegion.bottom) {
         endPosition = Offset(endPosition.dx, editingRegion.bottom);
       }
-      if (startPosition.dy <= editingRegion.top + lineHeight && endPosition.dy >= editingRegion.bottom - lineHeight) {
-        anchors = TextSelectionToolbarAnchors(
-          primaryAnchor: globalPosition,
-        );
-      } else {
-        final double distanceToStart = (globalPosition - startPosition).distance;
-        final double distanceToEnd = (globalPosition - endPosition).distance;
-        if (distanceToStart < distanceToEnd) {
-          anchors = TextSelectionToolbarAnchors(
-            primaryAnchor: startPosition,
-            secondaryAnchor: endPosition
-          );
-        } else {
-          anchors = TextSelectionToolbarAnchors(
-            // This is trick, make secondary anchor takes effect
-            primaryAnchor: const Offset(-10000, -10000),
-            secondaryAnchor: endPosition
-          );
-        }
-      }
-
+      // 上方锚点取选区起始行、下方锚点取选区结束行，
+      // 工具栏按自身高度判断上方能否容纳：容纳得下固定显示在选区上方，放不下才回退到选区下方
+      anchors = TextSelectionToolbarAnchors(
+        primaryAnchor: startPosition,
+        secondaryAnchor: endPosition
+      );
     }
     onShowToolbar(context, anchors, editingRegion);
   }

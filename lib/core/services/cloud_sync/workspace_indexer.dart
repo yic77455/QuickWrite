@@ -10,12 +10,17 @@ import 'package:quick_write/core/services/app_paths.dart';
 import 'package:quick_write/core/services/cloud_sync/chapter_archive.dart';
 import 'package:quick_write/core/services/cloud_sync/sync_models.dart';
 import 'package:quick_write/core/services/workspace/custom_highlight_service.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
+import 'package:quick_write/core/utils/relative_path_utils.dart';
 
 /// 书籍相关文件的逻辑键前缀
 const String _booksKeyPrefix = 'books/';
 
-/// 应用配置文件的逻辑键
-const String _appSettingsKey = 'app/settings.json';
+/// 桌面端应用配置文件的逻辑键（沿用历史键名，保证既有云端数据可继续复用）
+const String _desktopAppSettingsKey = 'app/settings.json';
+
+/// 移动端应用配置文件的逻辑键
+const String _mobileAppSettingsKey = 'app/settings.mobile.json';
 
 /// 书籍的章节正文目录名
 const String _chaptersDirName = 'chapters';
@@ -214,14 +219,16 @@ class WorkspaceIndexer {
       dirMappings: dirMappings,
     );
 
-    // 应用配置文件
-    final configFilePath = AppPaths.instance.configFilePath;
+    // 应用配置文件：桌面端与移动端的配置互不通用，这里只登记当前平台的那一份。
+    // 另一平台的配置键不会登记到本地路径映射中，同步引擎据此把它从远端清单中过滤掉，
+    // 因此不会被下载到本机；云端同时保存两份，由两端各自上传维护
+    final bool isMobile = PlatformCapabilities.isMobile;
     await _collectPlainFile(
       baselines: baselines,
       files: files,
       plainPaths: plainPaths,
-      key: _appSettingsKey,
-      localPath: configFilePath,
+      key: isMobile ? _mobileAppSettingsKey : _desktopAppSettingsKey,
+      localPath: isMobile ? AppPaths.instance.mobileConfigFilePath : AppPaths.instance.desktopConfigFilePath,
     );
 
     return WorkspaceIndex(
@@ -285,19 +292,23 @@ class WorkspaceIndexer {
           key:
               '$_booksKeyPrefix${book.uuid}/settings/'
               '${item.uuid}${GlobalConstants.settingFileExtension}',
-          localPath: _joinPath([bookFolder, _settingsDirName, item.filePath]),
+          localPath: _joinPath([
+            bookFolder,
+            _settingsDirName,
+            relativePathToPlatform(item.filePath),
+          ]),
         );
       }
 
       // 封面（远端保留原扩展名，避免不同格式互相覆盖）
-      if (book.coverPath.isNotEmpty) {
+      if (book.coverFileName.isNotEmpty) {
         await _collectPlainFile(
           baselines: baselines,
           files: files,
           plainPaths: plainPaths,
           key:
-              '$_booksKeyPrefix${book.uuid}/cover${_extensionOf(book.coverPath)}',
-          localPath: book.coverPath,
+              '$_booksKeyPrefix${book.uuid}/cover${_extensionOf(book.coverFileName)}',
+          localPath: _joinPath([bookFolder, book.coverFileName]),
         );
       }
 
@@ -356,7 +367,10 @@ class WorkspaceIndexer {
           continue;
         }
 
-        final localPath = _joinPath([chaptersDirPath, chapter.filePath]);
+        final localPath = _joinPath([
+          chaptersDirPath,
+          relativePathToPlatform(chapter.filePath),
+        ]);
         final cacheKey = chapterCacheKeyOf(bookUuid, chapter.uuid);
         final resolved = await _resolveFileContent(
           cacheKey,

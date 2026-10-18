@@ -5,6 +5,7 @@ library;
 
 export 'all_books_grid.dart';
 export 'empty_bookshelf.dart';
+export 'floating_action_group.dart';
 export 'hero_cover_item.dart';
 export 'hover_book_item.dart';
 export 'info_row.dart';

@@ -199,6 +199,38 @@ class CodeEditorStyle {
 
 }
 
+/// 成对符号
+///
+/// 描述自动补全使用的一对符号：[left] 为起始符号，输入它时自动补出 [right]；
+/// 两者相同时（如引号）按引号规则判断是否需要补出另一半。
+class CodeSymbolPair {
+
+  const CodeSymbolPair(this.left, this.right);
+
+  /// 起始符号
+  final String left;
+
+  /// 结束符号
+  final String right;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) {
+      return true;
+    }
+    return other is CodeSymbolPair && other.left == left && other.right == right;
+  }
+
+  @override
+  int get hashCode => Object.hash(left, right);
+
+  @override
+  String toString() {
+    return left + right;
+  }
+
+}
+
 /// Creates a code editor.
 ///
 /// You can freely define the styles of the editor, such as text style,
@@ -255,6 +287,8 @@ class CodeEditor extends StatefulWidget {
     this.showCursorWhenReadOnly,
     this.wordWrap,
     this.autocompleteSymbols,
+    this.autocompletePairs,
+    this.onNewLine,
     this.autofocus,
     this.focusNode,
     this.maxLengthSingleLineRendering,
@@ -374,6 +408,18 @@ class CodeEditor extends StatefulWidget {
   /// Defaults to true.
   final bool? autocompleteSymbols;
 
+  /// 自动补全使用的成对符号
+  ///
+  /// 非空时替换内置的符号表：只有表中的符号会被成对补出，
+  /// 未列出的符号（如 ASCII 引号）按普通字符输入；为空时沿用内置符号表。
+  final List<CodeSymbolPair>? autocompletePairs;
+
+  /// 换行处理回调
+  ///
+  /// 移动端软键盘的换行不经过快捷键机制，非空时换行由此回调接管，
+  /// 使移动端与桌面端共用同一套换行规则；为空时使用编辑器默认换行。
+  final VoidCallback? onNewLine;
+
   /// Whether this editor field should focus itself if nothing else is already
   /// focused.
   ///
@@ -444,6 +490,8 @@ class _CodeEditorState extends State<CodeEditor> {
       focusNode: _focusNode,
       readOnly: widget.readOnly ?? false,
       autocompleteSymbols: widget.autocompleteSymbols ?? true,
+      autocompletePairs: widget.autocompletePairs,
+      newLineHandler: widget.onNewLine,
     );
     _inputController.bindEditor(_editorKey);
 
@@ -556,6 +604,12 @@ class _CodeEditorState extends State<CodeEditor> {
     if (oldWidget.autocompleteSymbols != widget.autocompleteSymbols) {
       _inputController.autocompleteSymbols = widget.autocompleteSymbols ?? true;
     }
+    if (!listEquals(oldWidget.autocompletePairs, widget.autocompletePairs)) {
+      _inputController.autocompletePairs = widget.autocompletePairs;
+    }
+    if (oldWidget.onNewLine != widget.onNewLine) {
+      _inputController.newLineHandler = widget.onNewLine;
+    }
     super.didUpdateWidget(oldWidget);
   }
 
@@ -632,45 +686,26 @@ class _CodeEditorState extends State<CodeEditor> {
       editorKey: _editorKey,
       child: editable
     );
-    final Widget child;
-    if (kIsAndroid || kIsIOS) {
-      child = Focus(
-        autofocus: autofocus,
-        focusNode: _focusNode,
-        onKey: (node, event) {
-          if (event.isKeyPressed(LogicalKeyboardKey.backspace)) {
-            _editingController.deleteBackward();
-            return KeyEventResult.handled;
-          } else if (event.isKeyPressed(LogicalKeyboardKey.enter)) {
-            _editingController.applyNewLine();
-            return KeyEventResult.handled;
-          }
-          return KeyEventResult.ignored;
-        },
-        includeSemantics: false,
-        debugLabel: 'CodeEditor',
-        child: detector
-      );
-    } else {
-      child = _CodeShortcuts(
-        builder: widget.shortcutsActivatorsBuilder ?? const DefaultCodeShortcutsActivatorsBuilder(),
-        child: _CodeShortcutActions(
-          editingController: _editingController,
-          inputController: _inputController,
-          findController: find != null ? _findController : null,
-          commentFormatter: widget.commentFormatter,
-          overrideActions: widget.shortcutOverrideActions,
-          readOnly: readOnly,
-          child: Focus(
-            autofocus: autofocus,
-            focusNode: _focusNode,
-            includeSemantics: false,
-            debugLabel: 'CodeEditor',
-            child: detector
-          )
-        ),
-      );
-    }
+    // 移动端与桌面端共用快捷键机制，移动端额外由 [Focus.onKeyEvent] 处理退格
+    final Widget child = _CodeShortcuts(
+      builder: widget.shortcutsActivatorsBuilder ?? const DefaultCodeShortcutsActivatorsBuilder(),
+      child: _CodeShortcutActions(
+        editingController: _editingController,
+        inputController: _inputController,
+        findController: find != null ? _findController : null,
+        commentFormatter: widget.commentFormatter,
+        overrideActions: widget.shortcutOverrideActions,
+        readOnly: readOnly,
+        child: Focus(
+          autofocus: autofocus,
+          focusNode: _focusNode,
+          onKeyEvent: kIsAndroid || kIsIOS ? _handleMobileKeyEvent : null,
+          includeSemantics: false,
+          debugLabel: 'CodeEditor',
+          child: detector
+        )
+      ),
+    );
     return Stack(
       children: [
         child,
@@ -678,6 +713,27 @@ class _CodeEditorState extends State<CodeEditor> {
           find,
       ],
     );
+  }
+
+  /// 处理移动端的键盘按键
+  ///
+  /// 移动端不注册退格快捷键，输入法未组词时退格直接作用于编辑控制器，
+  /// 回车交由输入控制器的换行处理；
+  /// 组词过程中的按键交由输入法处理，其余按键交由编辑器的快捷键机制响应。
+  KeyEventResult _handleMobileKeyEvent(FocusNode node, KeyEvent event) {
+    if ((event is! KeyDownEvent && event is! KeyRepeatEvent) || _editingController.isComposing) {
+      return KeyEventResult.ignored;
+    }
+    final LogicalKeyboardKey key = event.logicalKey;
+    if (key == LogicalKeyboardKey.backspace) {
+      _editingController.deleteBackward();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter) {
+      _inputController.applyNewLine();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   void _updateWidget() {

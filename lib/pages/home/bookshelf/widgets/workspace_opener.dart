@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
 import 'package:quick_write/core/services/settings_service.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/shared/widgets/qw_dialogs.dart';
 import 'package:quick_write/shared/widgets/qw_snackbar.dart';
 
@@ -20,7 +21,12 @@ Future<void> openWorkspace({
 }) async {
   // 单窗口模式：直接在当前窗口内导航到工作台
   if (!SettingsService.instance.openWorkspaceInNewWindow) {
-    context.go('/workspace/$bookId');
+    // 移动端以 push 方式打开，使系统返回键能沿原路返回书架
+    if (PlatformCapabilities.isMobile) {
+      context.push('/workspace/$bookId');
+    } else {
+      context.go('/workspace/$bookId');
+    }
     return;
   }
 

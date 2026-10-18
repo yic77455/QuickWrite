@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/shared/widgets/qw_tooltip.dart';
 
 /// 折线图数据点
@@ -94,7 +95,7 @@ class _StatsLineChartState extends State<StatsLineChart> {
     // 索引变化：更新索引、tooltip、触发重绘虚线
     _hoveredIndex = index;
     if (index >= 0) {
-      _showOrUpdateTooltip(event, region);
+      _showOrUpdateTooltip(event.position, region);
     } else {
       FollowTooltip.hide();
     }
@@ -102,7 +103,10 @@ class _StatsLineChartState extends State<StatsLineChart> {
   }
 
   /// 鼠标离开图表处理
-  void _onExit() {
+  void _onExit() => _clearHover();
+
+  /// 清除悬停高亮并隐藏提示框
+  void _clearHover() {
     FollowTooltip.hide();
     if (_hoveredIndex != -1) {
       _hoveredIndex = -1;
@@ -110,11 +114,45 @@ class _StatsLineChartState extends State<StatsLineChart> {
     }
   }
 
+  /// 触摸时更新悬停的数据点及提示框
+  ///
+  /// 移动端没有鼠标悬停，长按并拖动时按手指位置命中最近的数据点。
+  void _updateTouchHover(Offset localPosition, Offset globalPosition, double chartWidth, double chartHeight) {
+    final index = _findNearestPoint(localPosition.dx, chartWidth);
+    final region = _getChartRegion(chartWidth, chartHeight);
+
+    // 未命中数据点：清除高亮并隐藏提示框
+    if (index < 0) {
+      _clearHover();
+      return;
+    }
+
+    _hoveredIndex = index;
+    _showOrUpdateTooltip(globalPosition, region);
+    setState(() {});
+  }
+
+  /// 为图表包装长按与拖动手势
+  ///
+  /// 仅移动端需要：手指长按后拖动即可查看各数据点的数值，抬起手指时隐藏提示框。
+  Widget _buildTouchGestures(Widget chart, double chartWidth, double chartHeight) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onLongPressStart: (details) =>
+          _updateTouchHover(details.localPosition, details.globalPosition, chartWidth, chartHeight),
+      onLongPressMoveUpdate: (details) =>
+          _updateTouchHover(details.localPosition, details.globalPosition, chartWidth, chartHeight),
+      onLongPressEnd: (_) => _clearHover(),
+      onLongPressCancel: _clearHover,
+      child: chart,
+    );
+  }
+
   /// 显示或更新 tooltip
   ///
   /// 首次调用时创建 [OverlayEntry] 并传入初始内容，
   /// 后续直接通过 [FollowTooltip.update] 更新位置和内容。
-  void _showOrUpdateTooltip(PointerHoverEvent event, Rect region) {
+  void _showOrUpdateTooltip(Offset globalPosition, Rect region) {
     final point = widget.points[_hoveredIndex];
     final formatter = widget.tooltipValueFormatter ?? widget.valueFormatter;
     final content = _ChartTooltipContent(
@@ -126,12 +164,12 @@ class _StatsLineChartState extends State<StatsLineChart> {
     if (!FollowTooltip.isShowing) {
       FollowTooltip.show(
         context: context,
-        cursorPosition: event.position,
+        cursorPosition: globalPosition,
         region: region,
         child: content,
       );
     } else {
-      FollowTooltip.update(event.position, region, content);
+      FollowTooltip.update(globalPosition, region, content);
     }
   }
 
@@ -155,28 +193,33 @@ class _StatsLineChartState extends State<StatsLineChart> {
 
   @override
   Widget build(BuildContext context) {
+    // 移动端横向空间有限，图表高度适当收窄以适配单列布局
+    final double chartHeight = PlatformCapabilities.isMobile ? 180.0 : 220.0;
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        const height = 220.0;
-        return MouseRegion(
-          key: _chartKey,
-          onHover: (event) => _onHover(event, width, height),
-          onExit: (_) => _onExit(),
-          child: SizedBox(
-            width: width,
-            height: height,
-            child: CustomPaint(
-              painter: _LineChartPainter(
-                points: widget.points,
-                lineColor: widget.lineColor,
-                valueFormatter: widget.valueFormatter,
-                textColor: Theme.of(context).colorScheme.onSurfaceVariant,
-                gridColor: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.4),
-                hoveredIndex: _hoveredIndex,
-              ),
+        final chart = SizedBox(
+          width: width,
+          height: chartHeight,
+          child: CustomPaint(
+            painter: _LineChartPainter(
+              points: widget.points,
+              lineColor: widget.lineColor,
+              valueFormatter: widget.valueFormatter,
+              textColor: Theme.of(context).colorScheme.onSurfaceVariant,
+              gridColor: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.4),
+              hoveredIndex: _hoveredIndex,
             ),
           ),
+        );
+
+        return MouseRegion(
+          key: _chartKey,
+          onHover: (event) => _onHover(event, width, chartHeight),
+          onExit: (_) => _onExit(),
+          // 桌面端沿用鼠标悬停；移动端改用长按拖动手势
+          child: PlatformCapabilities.isMobile ? _buildTouchGestures(chart, width, chartHeight) : chart,
         );
       },
     );

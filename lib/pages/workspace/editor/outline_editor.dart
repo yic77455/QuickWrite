@@ -6,9 +6,11 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/constants/constants.dart';
 import 'package:quick_write/core/constants/material_icons.dart';
+import 'package:quick_write/core/constants/punctuation_symbols.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/providers/window_provider.dart';
+import 'package:quick_write/core/utils/batch_selection_controller.dart';
 import 'package:quick_write/core/utils/clean_scroll.dart';
 import 'package:quick_write/core/utils/clipboard_state_cache.dart';
 import 'package:quick_write/core/utils/color_utils.dart';
@@ -16,6 +18,7 @@ import 'package:quick_write/core/utils/editor_scroll_helper.dart';
 import 'package:quick_write/core/utils/find_replace_target.dart';
 import 'package:quick_write/core/utils/outline_markdown_codec.dart';
 import 'package:quick_write/core/utils/outline_undo_manager.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/rich_text_controller.dart';
 import 'package:quick_write/core/utils/text_style_range.dart';
 import 'package:quick_write/core/utils/word_count_utils.dart';
@@ -25,6 +28,7 @@ import 'utils/outline_shortcut_keys.dart';
 import 'widgets/outline_color_palette.dart';
 import 'widgets/outline_node_widgets.dart';
 import 'widgets/outline_editor_widgets.dart';
+import 'widgets/outline_settings_card.dart';
 import 'widgets/outline_shortcut_panel.dart';
 
 /// 大纲编辑器
@@ -89,9 +93,6 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 圆点与文本间距缩减量
   static const double _dotTextGapReduction = 5.0;
 
-  /// 滚动条可视宽度（即 thumb 的厚度），用于命中检测
-  static const double _scrollbarThickness = 8.0;
-
   // ================= 树结构数据 =================
 
   /// 根节点列表
@@ -145,6 +146,16 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 当前选中的节点ID集合（多节点选区）
   final Set<String> _selectedNodeIds = {};
 
+  /// 是否处于批量选择模式
+  ///
+  /// 批量选择模式下节点只能整体选中与操作，不能编辑节点文字
+  bool _isBatchSelectionMode = false;
+
+  /// 批量选择模式与节点选区的变更通知
+  ///
+  /// 供编辑器之外的移动端键盘工具栏监听，同步工具栏的显隐、形态与按钮可用状态
+  final ValueNotifier<int> _batchRevision = ValueNotifier(0);
+
   /// Ctrl+A 全选状态：0=未全选，1=已全选主题，2=已全选文档
   int _selectAllLevel = 0;
 
@@ -153,6 +164,11 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
   /// 最近获得焦点的节点ID（用于取消选区后恢复焦点）
   String? _lastFocusedNodeId;
+
+  /// 批量选择模式下的滑选交互控制器
+  ///
+  /// 复用列表批量多选的统一逻辑，按住行尾竖条滑动时按区间连续选中或取消途经节点
+  late final BatchSelectionController _batchSelectionController;
 
   /// 右键菜单当前操作的节点ID（右键点击时确定，菜单项据此操作对应节点）
   String? _contextMenuNodeId;
@@ -197,6 +213,12 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 快捷键列表面板是否可见
   bool _isShortcutPanelVisible = false;
 
+  /// 布局设置入口按钮的键，用于定位设置卡片的弹出位置
+  final GlobalKey _settingsButtonKey = GlobalKey();
+
+  /// 布局设置卡片是否已展开
+  bool _isSettingsCardVisible = false;
+
   // ================= 生命周期 =================
 
   @override
@@ -205,6 +227,19 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     WidgetsBinding.instance.addObserver(this);
     _scrollController = SyncScrollController(onApplyContentDimensions: _onApplyContentDimensions);
     _scrollGuard = EditorScrollGuard(_scrollController);
+
+    // 初始化批量选择滑选交互控制器，按住行尾竖条滑动时按区间连续选中或取消途经节点
+    _batchSelectionController = BatchSelectionController(
+      getSelectedIds: () => _selectedNodeIds,
+      getFlatDisplayIds: () => _flatten().map((flat) => flat.node.id).toList(),
+      onChanged: () {
+        if (!mounted) return;
+        _selectAllLevel = 0;
+        setState(() {});
+        _notifyBatchChanged();
+      },
+      hitTestId: _hitTestNodeIdAt,
+    );
 
     // 监听设置变化，以便布局设置变更时重新构建
     SettingsService.instance.addListener(_onSettingsChanged);
@@ -232,6 +267,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     }
     _editorFocusNode.dispose();
     _scrollController.dispose();
+    _batchRevision.dispose();
     super.dispose();
   }
 
@@ -825,10 +861,12 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 同步执行焦点请求和选区设置，确保撤销/重做后光标位置正确。
   /// 同时注册一个 post-frame 回调作为兜底，防止 TextField 内部行为覆盖选区。
   void _restoreFocusFromSnapshot(OutlineTreeSnapshot snapshot) {
+    // 移动端不主动唤起输入法，仅在桌面端恢复焦点，移动端只恢复选区
+    final bool canRequestFocus = !PlatformCapabilities.isMobile;
     final focusedId = snapshot.focusedNodeId;
     if (focusedId == null) {
       // 无焦点记录时，若有节点选区则激活编辑器焦点
-      if (_selectedNodeIds.isNotEmpty) {
+      if (_selectedNodeIds.isNotEmpty && canRequestFocus) {
         _editorFocusNode.requestFocus();
       }
       return;
@@ -838,14 +876,16 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     final controller = _controllers[focusedId];
     if (focusNode == null || controller == null) {
       // 节点资源不存在（可能已被移除），降级为编辑器焦点
-      if (_selectedNodeIds.isNotEmpty) {
+      if (_selectedNodeIds.isNotEmpty && canRequestFocus) {
         _editorFocusNode.requestFocus();
       }
       return;
     }
 
     // 同步请求焦点
-    focusNode.requestFocus();
+    if (canRequestFocus) {
+      focusNode.requestFocus();
+    }
 
     // 同步设置选区（清除 composing 状态防止输入法残留）
     final selection = snapshot.focusedSelection;
@@ -865,17 +905,25 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     });
   }
 
+  /// 是否可撤销（只读模式下不可撤销）
+  bool get canUndo => !widget.readOnly && _undoManager.canUndo;
+
+  /// 是否可重做（只读模式下不可重做）
+  bool get canRedo => !widget.readOnly && _undoManager.canRedo;
+
   /// 执行撤销操作
   ///
   /// 返回 true 表示成功执行；false 表示撤销栈为空，未执行任何操作。
   /// 设置 [_isUndoRedoing] 标志，防止焦点变化监听器清除恢复的选区。
   /// 标志在下一帧重置（兜底 post-frame 选区恢复执行后）。
-  bool _handleUndo() {
+  bool undo() {
     _isUndoRedoing = true;
     final result = _undoManager.undo();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _isUndoRedoing = false;
     });
+    // 撤销改变了文档内容，需通知外部标记修改并触发自动保存
+    if (result) _notifyContentChanged();
     return result;
   }
 
@@ -884,12 +932,14 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 返回 true 表示成功执行；false 表示重做栈为空，未执行任何操作。
   /// 设置 [_isUndoRedoing] 标志，防止焦点变化监听器清除恢复的选区。
   /// 标志在下一帧重置（兜底 post-frame 选区恢复执行后）。
-  bool _handleRedo() {
+  bool redo() {
     _isUndoRedoing = true;
     final result = _undoManager.redo();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _isUndoRedoing = false;
     });
+    // 恢复改变了文档内容，需通知外部标记修改并触发自动保存
+    if (result) _notifyContentChanged();
     return result;
   }
 
@@ -1140,32 +1190,35 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     });
   }
 
-  /// 缩进节点（变成前一兄弟节点的子节点）
-  void _indentNode(String nodeId) {
+  /// 判断节点是否可以缩进
+  ///
+  /// 存在前一兄弟节点，且整棵子树下移一级后不超过最大深度限制时返回 true。
+  bool _canIndentNode(String nodeId) {
     final location = _findLocation(nodeId);
-    if (location == null) return;
+    if (location == null) return false;
 
     final siblings = location.parent?.children ?? _roots;
     // 第一个节点无法缩进（没有前一个兄弟节点）
-    if (location.index == 0) return;
+    if (location.index == 0) return false;
 
     // 检查缩进后是否超过最大节点深度限制
     final flatList = _flatten();
     final nodeFlatIndex = flatList.indexWhere((f) => f.node.id == nodeId);
-    if (nodeFlatIndex != -1) {
-      final nodeDepth = flatList[nodeFlatIndex].depth;
-      // 缩进后子树最大深度 = 节点新深度 + 子树高度
-      if (nodeDepth + 1 + _subtreeHeight(siblings[location.index]) > _maxDepth) return;
-    }
+    if (nodeFlatIndex == -1) return true;
+
+    final nodeDepth = flatList[nodeFlatIndex].depth;
+    // 缩进后子树最大深度 = 节点新深度 + 子树高度
+    return nodeDepth + 1 + _subtreeHeight(siblings[location.index]) <= _maxDepth;
+  }
+
+  /// 缩进节点（变成前一兄弟节点的子节点）
+  void _indentNode(String nodeId) {
+    if (!_canIndentNode(nodeId)) return;
 
     // 开启批量操作，在操作完成后记录撤销项
     _undoManager.beginBatch();
 
-    final prevSibling = siblings[location.index - 1];
-    final node = siblings.removeAt(location.index);
-    prevSibling.children.add(node);
-    // 缩进后自动展开父节点，使新子节点可见
-    prevSibling.isExpanded = true;
+    _applyIndentNode(nodeId);
 
     setState(() {});
 
@@ -1175,21 +1228,60 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     });
   }
 
+  /// 将节点移动到前一兄弟节点之下（不处理撤销记录与焦点）
+  ///
+  /// 调用前需确保该节点存在前一兄弟节点。
+  void _applyIndentNode(String nodeId) {
+    final location = _findLocation(nodeId)!;
+    final siblings = location.parent?.children ?? _roots;
+    _moveNodeUnderParent(nodeId, siblings[location.index - 1]);
+  }
+
+  /// 将节点移动到指定父节点的子节点列表末尾（不处理撤销记录与焦点）
+  ///
+  /// 目标父节点需与原父节点同处一级，保证移动后的层级关系正确。
+  void _moveNodeUnderParent(String nodeId, OutlineNode parent) {
+    final location = _findLocation(nodeId);
+    if (location == null) return;
+
+    final siblings = location.parent?.children ?? _roots;
+    final node = siblings.removeAt(location.index);
+    parent.children.add(node);
+    // 缩进后自动展开父节点，使新子节点可见
+    parent.isExpanded = true;
+  }
+
+  /// 查找节点批量缩进时的目标父节点
+  ///
+  /// 自该节点向前查找第一个未被选中的兄弟节点；批量缩进时被选中的兄弟节点会一起上移，
+  /// 不能作为父节点，否则会在被缩进的节点之间层层嵌套。
+  /// 找不到未被选中的前兄弟节点时返回 null，表示该节点无法缩进。
+  OutlineNode? _indentTargetParent(String nodeId) {
+    final location = _findLocation(nodeId);
+    if (location == null) return null;
+
+    final siblings = location.parent?.children ?? _roots;
+    for (int i = location.index - 1; i >= 0; i--) {
+      if (!_selectedNodeIds.contains(siblings[i].id)) return siblings[i];
+    }
+    return null;
+  }
+
+  /// 批量缩进时判断节点是否可以缩进
+  ///
+  /// 除单个节点的缩进条件外，还要求存在未被选中的前兄弟节点作为移动目标
+  bool _canBatchIndentNode(String nodeId) =>
+      _canIndentNode(nodeId) && _indentTargetParent(nodeId) != null;
+
   /// 反缩进节点（提升一级，变成父节点的兄弟节点）
   void _outdentNode(String nodeId) {
     final location = _findLocation(nodeId);
     if (location == null || location.parent == null) return;
 
-    final parent = location.parent!;
-    final grandparentLocation = _findLocation(parent.id);
-    if (grandparentLocation == null) return;
-
     // 开启批量操作，在操作完成后记录撤销项
     _undoManager.beginBatch();
 
-    final grandparentSiblings = grandparentLocation.parent?.children ?? _roots;
-    final node = parent.children.removeAt(location.index);
-    grandparentSiblings.insert(grandparentLocation.index + 1, node);
+    _applyOutdentNode(nodeId);
 
     setState(() {});
 
@@ -1197,6 +1289,22 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       _focusNodeWithSelection(nodeId, moveCursorToEnd: true);
       _endBatchAndNotify(description: '反缩进节点', focusNodeId: nodeId, focusSelection: _selectionAtEnd(nodeId));
     });
+  }
+
+  /// 将节点提升一级，变为父节点的兄弟节点（不处理撤销记录与焦点）
+  ///
+  /// 节点已位于根级时不产生任何变化。
+  void _applyOutdentNode(String nodeId) {
+    final location = _findLocation(nodeId);
+    if (location == null || location.parent == null) return;
+
+    final parent = location.parent!;
+    final grandparentLocation = _findLocation(parent.id);
+    if (grandparentLocation == null) return;
+
+    final grandparentSiblings = grandparentLocation.parent?.children ?? _roots;
+    final node = parent.children.removeAt(location.index);
+    grandparentSiblings.insert(grandparentLocation.index + 1, node);
   }
 
   /// 删除节点
@@ -1437,18 +1545,82 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     }
     _selectAllLevel = 0;
     setState(() {});
+    _notifyBatchChanged();
   }
 
-  /// 激活节点选区时切换焦点到编辑器级焦点节点，隐藏输入光标
-  void _activateNodeSelectionFocus() {
-    // 清除所有输入框的文本选区，避免文本选区与节点选区同时显示
+  /// 收集节点及其全部子节点（含各级子孙）的 ID
+  ///
+  /// 依据扁平列表中的深度判断子树范围，折叠状态下不可见的子孙节点不在其中
+  List<String> _collectSubtreeIds(String nodeId) {
+    final flatList = _flatten();
+    final index = flatList.indexWhere((f) => f.node.id == nodeId);
+    if (index == -1) return const [];
+
+    final ids = <String>[flatList[index].node.id];
+    final depth = flatList[index].depth;
+    for (int i = index + 1; i < flatList.length; i++) {
+      if (flatList[i].depth <= depth) break;
+      ids.add(flatList[i].node.id);
+    }
+    return ids;
+  }
+
+  /// 清除所有输入框的文本选区，避免文本选区与节点选区同时显示
+  void _collapseTextSelections() {
     for (final controller in _controllers.values) {
       if (!controller.selection.isCollapsed) {
         controller.selection = TextSelection.collapsed(offset: controller.selection.extentOffset);
       }
     }
+  }
+
+  /// 激活节点选区时切换焦点到编辑器级焦点节点，隐藏输入光标
+  void _activateNodeSelectionFocus() {
+    _collapseTextSelections();
     // 将焦点从输入框转移到编辑器，隐藏光标
     _editorFocusNode.requestFocus();
+  }
+
+  /// 行尾竖条长按：选中长按所在的节点及其全部子节点，并进入批量选择模式
+  ///
+  /// 移动端专用。长按不松手继续上下拖动可按指针位置扩展或收缩节点选区
+  void _onTrailingBarLongPress(Offset globalPosition) {
+    final flatList = _flatten();
+    if (flatList.isEmpty) return;
+
+    final index = _findNodeIndexAtPosition(globalPosition);
+    if (index == null || index >= flatList.length) return;
+
+    // 仅在首次进入批量选择模式时给出震动反馈，模式内继续拖动选择不再震动
+    final bool wasBatchMode = _isBatchSelectionMode;
+
+    // 进入批量选择模式：收起输入法，节点转为整体选中操作
+    _setBatchSelectionMode(true);
+    if (!wasBatchMode) HapticFeedback.mediumImpact();
+
+    _selectionAnchorIndex = index;
+    _selectAllLevel = 0;
+    _selectedNodeIds
+      ..clear()
+      ..addAll(_collectSubtreeIds(flatList[index].node.id));
+    _collapseTextSelections();
+    setState(() {});
+    _notifyBatchChanged();
+  }
+
+  /// 行尾竖条长按拖动：以长按节点为锚点，按指针位置扩展或收缩节点选区
+  ///
+  /// 向区间外拖动持续选中途经的节点，往回拖动则收缩区间并取消已越过的节点选中
+  void _onTrailingBarLongPressMove(Offset globalPosition) {
+    final anchor = _selectionAnchorIndex;
+    if (anchor == null) return;
+
+    final flatList = _flatten();
+    if (flatList.isEmpty) return;
+
+    // 指针位于首个节点上方时按首个节点处理，保证区间能延伸到列表顶端
+    final index = _findNodeIndexAtPosition(globalPosition) ?? 0;
+    _selectNodeRange(anchor, index);
   }
 
   /// 获取按扁平列表顺序排列的选中节点
@@ -1557,6 +1729,174 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     }
   }
 
+  // ================= 批量选择模式 =================
+
+  /// 是否处于批量选择模式
+  bool get isBatchSelectionMode => _isBatchSelectionMode;
+
+  /// 批量选择模式与节点选区的变更通知
+  Listenable get batchRevision => _batchRevision;
+
+  /// 选中节点的数量
+  int get selectedNodeCount => _selectedNodeIds.length;
+
+  /// 是否已选中全部可见节点
+  bool get isAllNodesSelected {
+    final flatList = _flatten();
+    return flatList.isNotEmpty && _selectedNodeIds.length >= flatList.length;
+  }
+
+  /// 是否仅选中了部分可见节点（有选中项但未全选）
+  bool get isPartialNodesSelected {
+    final flatList = _flatten();
+    return _selectedNodeIds.isNotEmpty && _selectedNodeIds.length < flatList.length;
+  }
+
+  /// 通知批量选择状态发生变化
+  void _notifyBatchChanged() => _batchRevision.value++;
+
+  /// 设置批量选择模式状态
+  ///
+  /// 开启时收起输入法与文本选区，使节点转为整体选中与操作；
+  /// 关闭时清空节点选区，恢复到可编辑状态
+  void _setBatchSelectionMode(bool enabled) {
+    if (_isBatchSelectionMode == enabled) return;
+    _isBatchSelectionMode = enabled;
+    // 重置滑选交互状态，避免进入或退出批量模式时残留拖拽选区状态
+    _batchSelectionController.reset();
+    if (enabled) {
+      // 收起输入法，避免批量操作期间误触输入
+      FocusManager.instance.primaryFocus?.unfocus();
+      _collapseTextSelections();
+      _editorFocusNode.requestFocus();
+    } else {
+      _selectedNodeIds.clear();
+      _selectAllLevel = 0;
+      _selectionAnchorIndex = null;
+    }
+    setState(() {});
+    _notifyBatchChanged();
+  }
+
+  /// 进入批量选择模式（顶部操作栏的批量选择入口）
+  void enterBatchSelectionMode() => _setBatchSelectionMode(true);
+
+  /// 退出批量选择模式
+  void exitBatchSelectionMode() => _setBatchSelectionMode(false);
+
+  /// 批量模式下点击节点：切换该节点及其子树的选中状态
+  ///
+  /// 节点已选中时连同其子节点一起取消选中，未选中时连同其子节点一起选中
+  void toggleNodeSubtreeSelection(String nodeId) {
+    final ids = _collectSubtreeIds(nodeId);
+    if (ids.isEmpty) return;
+
+    setState(() {
+      if (_selectedNodeIds.contains(nodeId)) {
+        _selectedNodeIds.removeAll(ids);
+      } else {
+        _selectedNodeIds.addAll(ids);
+      }
+      _selectAllLevel = 0;
+      _selectionAnchorIndex = null;
+    });
+    _notifyBatchChanged();
+  }
+
+  /// 全选或取消全选所有可见节点
+  void toggleSelectAllNodes() {
+    setState(() {
+      if (isAllNodesSelected) {
+        _selectedNodeIds.clear();
+        _selectAllLevel = 0;
+        _selectionAnchorIndex = null;
+      } else {
+        for (final flat in _flatten()) {
+          _selectedNodeIds.add(flat.node.id);
+        }
+        _selectAllLevel = 2;
+        _selectionAnchorIndex = 0;
+      }
+    });
+    _notifyBatchChanged();
+  }
+
+  /// 复制批量选中的节点到剪贴板
+  void copySelectedNodes() => _copySelectedNodes();
+
+  /// 删除批量选中的节点
+  void deleteSelectedNodes() => _deleteSelectedNodes();
+
+  /// 选中节点中的顶层节点（父节点未被选中的节点）
+  ///
+  /// 父节点被选中时子节点会跟随父节点一起移动，无需单独处理
+  List<String> _selectedTopLevelNodeIds() {
+    return _selectedNodeIds.where((id) {
+      final parent = _findLocation(id)?.parent;
+      return parent == null || !_selectedNodeIds.contains(parent.id);
+    }).toList();
+  }
+
+  /// 按文档顺序返回批量选中的顶层节点ID
+  ///
+  /// 顺序取自扁平列表而非选中集合的插入顺序，避免批量操作结果随选择顺序变化
+  List<String> _selectedTopLevelNodeIdsInOrder() {
+    final topLevelIds = _selectedTopLevelNodeIds().toSet();
+    return _flatten()
+        .where((flat) => topLevelIds.contains(flat.node.id))
+        .map((flat) => flat.node.id)
+        .toList();
+  }
+
+  /// 批量选中的节点是否可以缩进为子节点
+  bool get canIndentSelectedNodes => _selectedTopLevelNodeIds().any(_canBatchIndentNode);
+
+  /// 批量选中的节点是否可以提升层级
+  bool get canOutdentSelectedNodes =>
+      _selectedTopLevelNodeIds().any((id) => _findLocation(id)?.parent != null);
+
+  /// 批量缩进选中的节点
+  ///
+  /// 仅处理选中的顶层节点，无可缩进节点时不产生撤销记录
+  void indentSelectedNodes() {
+    // 按文档顺序处理，保证缩进后各节点在目标父节点下仍保持原有先后顺序
+    final targets = _selectedTopLevelNodeIdsInOrder();
+    if (targets.isEmpty) return;
+
+    // 先依据原始树结构为各节点确定目标父节点，再统一执行移动，
+    // 避免先移动的节点改变后续节点的兄弟结构而导致错误嵌套
+    final targetParents = <String, OutlineNode>{};
+    for (final nodeId in targets) {
+      if (!_canBatchIndentNode(nodeId)) continue;
+      targetParents[nodeId] = _indentTargetParent(nodeId)!;
+    }
+    if (targetParents.isEmpty) return;
+
+    _undoManager.beginBatch();
+    for (final nodeId in targets) {
+      final parent = targetParents[nodeId];
+      if (parent != null) _moveNodeUnderParent(nodeId, parent);
+    }
+    setState(() {});
+    _endBatchAndNotify(description: '批量缩进节点');
+  }
+
+  /// 批量提升选中节点的层级
+  ///
+  /// 仅处理选中的顶层节点，无可提升节点时不产生撤销记录
+  void outdentSelectedNodes() {
+    // 按文档逆序处理，使同级节点依次插入到父节点之后时仍保持原有先后顺序
+    final targets = _selectedTopLevelNodeIdsInOrder().reversed.toList();
+    if (!targets.any((id) => _findLocation(id)?.parent != null)) return;
+
+    _undoManager.beginBatch();
+    for (final nodeId in targets) {
+      _applyOutdentNode(nodeId);
+    }
+    setState(() {});
+    _endBatchAndNotify(description: '批量提升层级');
+  }
+
   // ================= 命中检测 =================
 
   /// 查找节点对应的 RenderEditable（文本渲染对象）
@@ -1627,6 +1967,16 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     return result;
   }
 
+  /// 按全局坐标命中节点ID
+  ///
+  /// 批量选择模式下滑选时，触摸端没有悬停事件，以此定位指针下方的节点
+  String? _hitTestNodeIdAt(Offset globalPosition) {
+    final index = _findNodeIndexAtPosition(globalPosition);
+    if (index == null) return null;
+    final flatList = _flatten();
+    return index < flatList.length ? flatList[index].node.id : null;
+  }
+
   /// 判断全局坐标是否在指定节点的文本渲染区域内
   bool _isPositionWithinNodeText(String nodeId, Offset globalPosition) {
     final renderEditable = _findRenderEditable(nodeId);
@@ -1637,7 +1987,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
   /// 判断全局坐标是否落在滚动条所在的右侧条带上
   ///
-  /// 滚动条 thumb 位于可滚动区域的右边缘，宽度等于 [_scrollbarThickness]。
+  /// 滚动条 thumb 位于可滚动区域的右边缘，宽度等于 [editorScrollbarThickness]。
   /// 指针落在该条带时，编辑器的拖拽选区手势应让位于滚动条自身的拖拽与点击交互。
   bool _isPositionOnScrollbar(Offset globalPosition) {
     final renderObject = _scrollbarKey.currentContext?.findRenderObject();
@@ -1646,7 +1996,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       renderObject.getTransformTo(null),
       Offset.zero & renderObject.size,
     );
-    return globalPosition.dx >= rect.right - _scrollbarThickness &&
+    return globalPosition.dx >= rect.right - editorScrollbarThickness &&
         globalPosition.dx <= rect.right &&
         globalPosition.dy >= rect.top &&
         globalPosition.dy <= rect.bottom;
@@ -1700,7 +2050,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     }
 
     if (_dragMode == _DragMode.none && _dragStartPosition != null) {
-      if (!_isPositionOnTextField(event.position)) {
+      // 批量选择模式下节点选中由节点行自身处理，不在此处清除节点选区
+      if (!_isBatchSelectionMode && !_isPositionOnTextField(event.position)) {
         _clearSelection();
         // 点击空白区域时，若无输入框持有焦点，则请求编辑器级焦点
         // 确保撤销/恢复等快捷键在空白区域也能正常响应
@@ -1714,6 +2065,9 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
   /// 拖拽开始：记录起始位置和起始节点
   void _onPanStart(DragStartDetails details) {
+    // 批量选择模式下禁用拖拽选区与文本选区，节点选中由节点行自身处理
+    if (_isBatchSelectionMode) return;
+
     _dragStartPosition = details.globalPosition;
     _dragMode = _DragMode.none;
     _dragTextAnchor = null;
@@ -1732,6 +2086,9 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// - 起始位置在文本内时先做文本选区，离开文本后切换到节点选区
   /// - 起始位置不在文本内时直接做节点选区
   void _onPanUpdate(DragUpdateDetails details) {
+    // 批量选择模式下禁用拖拽选区与文本选区，节点选中由节点行自身处理
+    if (_isBatchSelectionMode) return;
+
     final globalPosition = details.globalPosition;
 
     // 起始索引尚未确定时，用当前位置确定
@@ -2164,6 +2521,183 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
         description: '设置标题级别', focusNodeId: nodeIds.first, focusSelection: selection);
   }
 
+  // ================= 移动端键盘工具栏接口 =================
+
+  /// 编辑器是否持有输入焦点
+  ///
+  /// 供移动端键盘工具栏判断显隐：仅当某个节点输入框正在输入时显示。
+  bool get hasEditorFocus {
+    for (final focusNode in _focusNodes.values) {
+      if (focusNode.hasFocus) return true;
+    }
+    return false;
+  }
+
+  /// 当前活动节点 ID
+  ///
+  /// 优先取正在输入的节点，无焦点时回退到最近一次获得焦点的节点。
+  String? get _activeNodeId {
+    for (final entry in _focusNodes.entries) {
+      if (entry.value.hasFocus) return entry.key;
+    }
+    final lastId = _lastFocusedNodeId;
+    return lastId != null && _findNode(lastId) != null ? lastId : null;
+  }
+
+  /// 当前活动节点的文本控制器
+  ///
+  /// 工具栏据此监听文字选区与样式变化，同步按钮的点亮状态。
+  TextEditingController? get activeController {
+    final nodeId = _activeNodeId;
+    return nodeId == null ? null : _controllers[nodeId];
+  }
+
+  /// 工具栏样式操作的目标节点 ID 列表
+  ///
+  /// 存在节点选区时返回全部选中节点，否则返回当前活动节点。
+  List<String> get _toolbarTargetNodeIds {
+    if (_selectedNodeIds.isNotEmpty) return _selectedNodeIds.toList();
+    final nodeId = _activeNodeId;
+    return nodeId == null ? const [] : [nodeId];
+  }
+
+  /// 工具栏目标节点对应的节点数据
+  List<OutlineNode> get _toolbarTargetNodes =>
+      _toolbarTargetNodeIds.map((id) => _findNode(id)).whereType<OutlineNode>().toList();
+
+  /// 工具栏目标节点的文字选区
+  ///
+  /// 仅单节点且无节点选区时使用文字选区，其余情况作用于整个节点文本。
+  TextSelection? get _toolbarTargetSelection {
+    if (_selectedNodeIds.isNotEmpty) return null;
+    final nodeId = _activeNodeId;
+    return nodeId == null ? null : _controllers[nodeId]?.selection;
+  }
+
+  /// 当前标题级别
+  ///
+  /// 各目标节点级别一致时返回该级别（0=正文, 1=H1, 2=H2, 3=H3），
+  /// 级别不一致或无目标节点时返回 -1。
+  int get currentHeadingLevel {
+    final nodes = _toolbarTargetNodes;
+    if (nodes.isEmpty) return -1;
+    final level = nodes.first.headingLevel;
+    return nodes.every((node) => node.headingLevel == level) ? level : -1;
+  }
+
+  /// 当前文字样式标记（加粗、斜体、下划线、删除线）
+  TextStyleFlags get currentTextStyleFlags =>
+      _getSelectionFlags(_toolbarTargetNodes, _toolbarTargetSelection);
+
+  /// 当前字体颜色或字底颜色
+  ///
+  /// [isForeground] 为 true 时查询字体颜色，false 时查询字底颜色。
+  ({bool isUniform, Color? color}) currentColor({required bool isForeground}) =>
+      _getCurrentColor(_toolbarTargetNodes, _toolbarTargetSelection, isForeground);
+
+  /// 活动节点是否可以缩进为子节点
+  bool get canIndentActiveNode {
+    final nodeId = _activeNodeId;
+    return nodeId != null && _canIndentNode(nodeId);
+  }
+
+  /// 活动节点是否可以提升层级
+  bool get canOutdentActiveNode {
+    final nodeId = _activeNodeId;
+    return nodeId != null && _findLocation(nodeId)?.parent != null;
+  }
+
+  /// 切换目标节点的文字样式
+  void toggleTextStyle(TextStyleFlags Function(TextStyleFlags) toggleFn) =>
+      _toggleTextStyle(_toolbarTargetNodeIds, toggleFn);
+
+  /// 设置目标节点的标题级别
+  void setHeadingLevel(int level) => _setHeadingLevel(_toolbarTargetNodeIds, level);
+
+  /// 设置或清除目标节点的字体颜色与字底颜色
+  void applyColor({
+    Color? foregroundColor,
+    Color? backgroundColor,
+    bool clearForeground = false,
+    bool clearBackground = false,
+  }) =>
+      _applyColor(
+        _toolbarTargetNodeIds,
+        foregroundColor: foregroundColor,
+        backgroundColor: backgroundColor,
+        clearForeground: clearForeground,
+        clearBackground: clearBackground,
+      );
+
+  /// 将活动节点缩进为前一兄弟节点的子节点
+  void indentActiveNode() {
+    final nodeId = _activeNodeId;
+    if (nodeId != null) _indentNode(nodeId);
+  }
+
+  /// 将活动节点提升一级
+  void outdentActiveNode() {
+    final nodeId = _activeNodeId;
+    if (nodeId != null) _outdentNode(nodeId);
+  }
+
+  /// 在活动节点的光标处插入标点符号
+  ///
+  /// 启用标点自动补全时：未选中文字则插入成对符号并将光标置于两条符号之间，
+  /// 选中文字则用成对符号包裹选中内容；
+  /// 光标右侧已是该符号的结束符号时直接跳过，仅移动光标；
+  /// 其余情况按普通符号插入。
+  void insertQuickSymbol(PunctuationSymbol symbol) {
+    final nodeId = _activeNodeId;
+    final controller = nodeId == null ? null : _controllers[nodeId];
+    final node = nodeId == null ? null : _findNode(nodeId);
+    if (controller == null || node == null) return;
+
+    final text = controller.text;
+    final selection = controller.selection;
+    final hasSelection = selection.isValid && !selection.isCollapsed;
+    final start = selection.isValid ? selection.start : text.length;
+    final end = selection.isValid ? selection.end : text.length;
+
+    // 光标右侧已是该符号的结束符号：跳过插入，避免出现重复的结束符号
+    if (!hasSelection && symbol.closing != null && start < text.length && text[start] == symbol.closing) {
+      controller.selection = TextSelection.collapsed(offset: start + 1);
+      return;
+    }
+
+    final bool autoComplete =
+        symbol.isPairStart && SettingsService.instance.punctuationAutoCompleteEnabled;
+
+    final String inserted;
+    final int caretOffset;
+    if (autoComplete && hasSelection) {
+      // 用成对符号包裹选中文字，光标落在结束符号之后
+      inserted = symbol.symbol + text.substring(start, end) + symbol.closing!;
+      caretOffset = start + inserted.length;
+    } else if (autoComplete) {
+      // 插入一对符号，光标落在两条符号之间
+      inserted = symbol.symbol + symbol.closing!;
+      caretOffset = start + symbol.symbol.length;
+    } else {
+      inserted = symbol.symbol;
+      caretOffset = start + inserted.length;
+    }
+
+    final String newText = text.substring(0, start) + inserted + text.substring(end);
+
+    _undoManager.beginBatch();
+    controller.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: caretOffset),
+    );
+    // 程序化改写不会触发输入框的 onChanged，需同步节点文本与样式区间
+    node.styleRanges = TextStyleRangeUtils.adjustForTextChange(node.styleRanges, text, newText);
+    (controller as RichTextEditingController).styleRanges = node.styleRanges;
+    node.text = newText;
+    _endBatchAndNotify(
+        description: '插入标点符号', focusNodeId: nodeId, focusSelection: controller.selection);
+  }
+
   // ================= 剪贴板操作 =================
 
   /// 剪切选中文本
@@ -2330,6 +2864,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     _selectAllLevel = 0;
     _selectionAnchorIndex = null;
     setState(() {});
+    _notifyBatchChanged();
 
     // 恢复焦点：优先聚焦到删除前的上一节点（就近原则），否则聚焦到删除后列表的第一个节点
     String? targetId;
@@ -2346,8 +2881,15 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
     if (targetId != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _focusNodeWithSelection(targetId!, moveCursorToEnd: true);
-        _endBatchAndNotify(description: '删除选中节点', focusNodeId: targetId, focusSelection: _selectionAtEnd(targetId));
+        // 批量选择模式下不聚焦输入框，避免误唤起输入法
+        if (!_isBatchSelectionMode) {
+          _focusNodeWithSelection(targetId!, moveCursorToEnd: true);
+        }
+        _endBatchAndNotify(
+          description: '删除选中节点',
+          focusNodeId: targetId,
+          focusSelection: _selectionAtEnd(targetId!),
+        );
       });
     } else {
       // 无可聚焦节点时仍需结束批量操作
@@ -2629,7 +3171,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 记录目标节点ID供菜单项操作使用。
   ///
   /// 异步刷新剪贴板状态缓存，确保菜单中"粘贴"项的启用状态与实际剪贴板内容一致。
-  Future<void> _handleSecondaryTapDown(PointerDownEvent event) async {
+  Future<void> _handleSecondaryTapDown(Offset position) async {
     // 标记正在唤起右键菜单，阻止 focusNode 获得焦点时清除选区
     _isContextMenuOpening = true;
 
@@ -2639,7 +3181,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       return;
     }
 
-    final nodeIndex = _findNodeIndexAtPosition(event.position);
+    final nodeIndex = _findNodeIndexAtPosition(position);
     if (nodeIndex == null) {
       _contextMenuNodeId = null;
       return;
@@ -2682,7 +3224,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     if (selection.isCollapsed || !selection.isValid) {
       final renderEditable = _findRenderEditable(nodeId);
       if (renderEditable != null && renderEditable.attached) {
-        final offset = renderEditable.getPositionForPoint(event.position).offset;
+        final offset = renderEditable.getPositionForPoint(position).offset;
         controller.selection = TextSelection.collapsed(offset: offset);
       }
     }
@@ -3042,14 +3584,14 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     if (event is KeyRepeatEvent && HardwareKeyboard.instance.isControlPressed) {
       if (event.logicalKey == LogicalKeyboardKey.keyZ) {
         if (HardwareKeyboard.instance.isShiftPressed) {
-          _handleRedo();
+          redo();
         } else {
-          _handleUndo();
+          undo();
         }
         return KeyEventResult.handled;
       }
       if (event.logicalKey == LogicalKeyboardKey.keyY) {
-        _handleRedo();
+        redo();
         return KeyEventResult.handled;
       }
     }
@@ -3103,14 +3645,14 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     // Ctrl+Z：撤销；Ctrl+Shift+Z 或 Ctrl+Y：重做
     if (isControl && event.logicalKey == LogicalKeyboardKey.keyZ) {
       if (isShift) {
-        _handleRedo();
+        redo();
       } else {
-        _handleUndo();
+        undo();
       }
       return KeyEventResult.handled;
     }
     if (isControl && event.logicalKey == LogicalKeyboardKey.keyY) {
-      _handleRedo();
+      redo();
       return KeyEventResult.handled;
     }
 
@@ -3256,14 +3798,14 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     if (event is KeyRepeatEvent && HardwareKeyboard.instance.isControlPressed) {
       if (event.logicalKey == LogicalKeyboardKey.keyZ) {
         if (HardwareKeyboard.instance.isShiftPressed) {
-          _handleRedo();
+          redo();
         } else {
-          _handleUndo();
+          undo();
         }
         return KeyEventResult.handled;
       }
       if (event.logicalKey == LogicalKeyboardKey.keyY) {
-        _handleRedo();
+        redo();
         return KeyEventResult.handled;
       }
     }
@@ -3316,14 +3858,14 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     // Ctrl+Z：撤销；Ctrl+Shift+Z 或 Ctrl+Y：重做
     if (isControl && event.logicalKey == LogicalKeyboardKey.keyZ) {
       if (isShift) {
-        _handleRedo();
+        redo();
       } else {
-        _handleUndo();
+        undo();
       }
       return KeyEventResult.handled;
     }
     if (isControl && event.logicalKey == LogicalKeyboardKey.keyY) {
-      _handleRedo();
+      redo();
       return KeyEventResult.handled;
     }
 
@@ -3909,6 +4451,29 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     });
   }
 
+  /// 在大纲编辑器顶部工具栏的齿轮按钮下方弹出布局设置卡片
+  ///
+  /// 卡片打开期间齿轮入口保持高亮，关闭后恢复
+  Future<void> _showSettingsCard() async {
+    final buttonBox = _settingsButtonKey.currentContext?.findRenderObject() as RenderBox?;
+    if (buttonBox == null) return;
+
+    // 齿轮按钮矩形，用于确定卡片的上边缘
+    final Rect anchorRect = buttonBox.localToGlobal(Offset.zero) & buttonBox.size;
+    // 编辑器区域左边缘的屏幕横坐标，卡片与其保持固定间距
+    final editorBox = context.findRenderObject() as RenderBox?;
+    final double editorLeft = editorBox?.localToGlobal(Offset.zero).dx ?? anchorRect.left;
+
+    setState(() => _isSettingsCardVisible = true);
+    await OutlineEditorSettingsCard.show(
+      context: context,
+      anchorRect: anchorRect,
+      editorLeft: editorLeft,
+    );
+    if (!mounted) return;
+    setState(() => _isSettingsCardVisible = false);
+  }
+
   @override
   Widget build(BuildContext context) {
     // 编辑器内容不随应用界面字号缩放，保留编辑器自身的字体大小设置
@@ -3965,6 +4530,12 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
         ? ColorUtils.getPaperOutsideBackgroundColor(context)
         : editorBackgroundColor;
 
+    // 是否启用编辑器级选区和拖拽手势
+    // 桌面端支持从文本内拖拽选择文字、从空白或连接线区域拖拽框选多个节点；
+    // 移动端禁用，避免手指滑动屏幕滚动时误触发节点选区，
+    // 选区仅交由各节点输入框自身的原生选区逻辑处理
+    final bool enableEditorSelection = !PlatformCapabilities.isMobile;
+
     return Container(
       color: editorAreaColor,
       child: Column(
@@ -3979,6 +4550,15 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
             onAddRoot: _addRootNode,
             isShortcutPanelVisible: _isShortcutPanelVisible,
             onToggleShortcutPanel: _toggleShortcutPanel,
+            isBatchMode: _isBatchSelectionMode,
+            isAllNodesSelected: isAllNodesSelected,
+            isPartialNodesSelected: isPartialNodesSelected,
+            onEnterBatchMode: enterBatchSelectionMode,
+            onExitBatchMode: exitBatchSelectionMode,
+            onToggleSelectAll: toggleSelectAllNodes,
+            settingsButtonKey: _settingsButtonKey,
+            isSettingsCardVisible: _isSettingsCardVisible,
+            onOpenSettings: _showSettingsCard,
           ),
           // 大纲列表
           Expanded(
@@ -3991,30 +4571,48 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
                         onKeyEvent: _onEditorKeyEvent,
                         child: Listener(
                           behavior: HitTestBehavior.translucent,
-                          onPointerDown: _onPointerDown,
-                          onPointerUp: _onPointerUp,
+                          // 移动端不安装编辑器级指针处理，避免清除选区、抢占焦点等干扰输入框自身选区
+                          onPointerDown: enableEditorSelection ? _onPointerDown : null,
+                          onPointerUp: enableEditorSelection
+                              ? _onPointerUp
+                              // 批量选择模式下抬起指针结束竖条滑选
+                              : (_isBatchSelectionMode
+                                    ? (_) => _batchSelectionController.onPointerUp()
+                                    : null),
+                          // 批量选择模式下按住竖条滑动时按指针位置更新选区
+                          onPointerMove: _isBatchSelectionMode
+                              ? _batchSelectionController.onPointerMove
+                              : null,
+                          onPointerCancel: _isBatchSelectionMode
+                              ? (_) => _batchSelectionController.onPointerUp()
+                              : null,
                           child: RawGestureDetector(
                             behavior: HitTestBehavior.translucent,
-                            gestures: {
-                              _EagerPanGestureRecognizer:
-                                  GestureRecognizerFactoryWithHandlers<_EagerPanGestureRecognizer>(
-                                    () => _EagerPanGestureRecognizer(),
-                                    (instance) {
-                                      instance.onStart = _onPanStart;
-                                      instance.onUpdate = _onPanUpdate;
-                                      instance.onEnd = _onPanEnd;
-                                      instance.onCancel = _onPanCancel;
-                                      instance.shouldDeferToScrollbar = _isPositionOnScrollbar;
-                                    },
-                                  ),
-                            },
+                            // 移动端不注册自定义拖拽识别器，让垂直拖动交由滚动容器处理，
+                            // 保证手指滑动屏幕可正常滚动而非触发节点选区
+                            gestures: enableEditorSelection
+                                ? {
+                                    _EagerPanGestureRecognizer:
+                                        GestureRecognizerFactoryWithHandlers<_EagerPanGestureRecognizer>(
+                                          () => _EagerPanGestureRecognizer(),
+                                          (instance) {
+                                            instance.onStart = _onPanStart;
+                                            instance.onUpdate = _onPanUpdate;
+                                            instance.onEnd = _onPanEnd;
+                                            instance.onCancel = _onPanCancel;
+                                            instance.shouldDeferToScrollbar = _isPositionOnScrollbar;
+                                          },
+                                        ),
+                                  }
+                                : const <Type, GestureRecognizerFactory>{},
                             child: LayoutBuilder(
                               builder: (context, constraints) {
                                 final settings = SettingsService.instance;
                                 final pageViewMode = settings.outlinePageViewMode;
                                 final bool isPaperMode = pageViewMode == 'paper';
                                 // 左右边距：纸张模式下相对于 A4 宽度计算（作为纸张内边距），
-                                // 其他模式相对于编辑器宽度计算（作为滚动容器内边距）
+                                // 其他模式相对于编辑器宽度计算；桌面端作为滚动容器内边距，
+                                // 移动端则作用于节点行内容（行尾竖条始终贴边，不随该设置移动）
                                 final double horizontalBase = isPaperMode
                                     ? GlobalConstants.a4Width
                                     : constraints.maxWidth;
@@ -4024,14 +4622,16 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
                                 final topPadding = constraints.maxHeight * (settings.outlineTopMargin / 100);
                                 final bottomPadding = constraints.maxHeight * (settings.outlineBottomMargin / 100);
 
-                                // 构建节点列表，每个节点都用右键菜单包装
+                                // 构建节点列表，每个节点都用右键菜单包装；
+                                // 移动端长按交还系统原生选择行为，不注册长按识别器
                                 final List<Widget> tiles = [
                                   for (int i = 0; i < flatList.length; i++)
                                     ContextMenu(
                                       getMenuItems: _buildContextMenuItems,
                                       onSecondaryTapDown: _handleSecondaryTapDown,
                                       onDismissed: _handleContextMenuDismissed,
-                                      child: _buildNodeTile(flatList[i]),
+                                      enableMobileLongPress: !PlatformCapabilities.isMobile,
+                                      child: _buildNodeTile(flatList[i], horizontalMargin: horizontalPadding),
                                     ),
                                 ];
 
@@ -4048,10 +4648,17 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
                                 // 纸张模式下，水平/上下边距作为纸张内边距，
                                 // 滚动容器只保留查找替换浮窗的顶边距、纸张顶边距（防止顶部阴影被遮挡）与底部快捷键提示高度
+                                // 移动端不在滚动容器上施加左右内边距，左右边距改由节点行内容承担，
+                                // 使行尾竖条始终贴到编辑区右边缘
                                 final EdgeInsets scrollPadding = isPaperMode
                                     ? EdgeInsets.only(
                                         top: widget.extraTopPadding + 10.0,
                                         bottom: _bottomHintHeight,
+                                      )
+                                    : PlatformCapabilities.isMobile
+                                    ? EdgeInsets.only(
+                                        top: topPadding + widget.extraTopPadding,
+                                        bottom: bottomPadding + _bottomHintHeight,
                                       )
                                     : EdgeInsets.only(
                                         left: horizontalPadding,
@@ -4060,40 +4667,49 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
                                         bottom: bottomPadding + _bottomHintHeight,
                                       );
 
+                                final scrollContent = ScrollConfiguration(
+                                  behavior: CleanEditorScrollBehavior(),
+                                  child: SingleChildScrollView(
+                                    controller: _scrollController,
+                                    padding: scrollPadding,
+                                    child: content,
+                                  ),
+                                );
+
+                                // 移动端隐藏滚动条，避免遮挡窄屏下的编辑内容；桌面端保持原有滚动条表现
+                                if (PlatformCapabilities.isMobile) {
+                                  return scrollContent;
+                                }
+
                                 return Scrollbar(
                                   key: _scrollbarKey,
                                   controller: _scrollController,
                                   thumbVisibility: settings.scrollbarAlwaysVisible ? true : null,
-                                  thickness: _scrollbarThickness,
-                                  radius: const Radius.circular(4),
-                                  child: ScrollConfiguration(
-                                    behavior: CleanEditorScrollBehavior(),
-                                    child: SingleChildScrollView(
-                                      controller: _scrollController,
-                                      padding: scrollPadding,
-                                      child: content,
-                                    ),
-                                  ),
+                                  thickness: editorScrollbarThickness,
+                                  radius: Radius.circular(editorScrollbarThickness / 2),
+                                  child: scrollContent,
                                 );
                               },
                             ),
                           ),
                         ),
                       ),
-                // 底部快捷键提示
-                Align(
-                  alignment: Alignment.bottomCenter,
-                  child: IgnorePointer(
-                    child: MeasureSize(
-                      onSizeChanged: (size) {
-                        if (mounted && size.height != _bottomHintHeight) {
-                          setState(() => _bottomHintHeight = size.height);
-                        }
-                      },
-                      child: OutlineEditorBottomHint(colorScheme: colorScheme),
+                // 底部快捷键提示：仅桌面端显示
+                // 移动端没有物理键盘，隐藏提示，底部预留高度保持为 0
+                if (!PlatformCapabilities.isMobile)
+                  Align(
+                    alignment: Alignment.bottomCenter,
+                    child: IgnorePointer(
+                      child: MeasureSize(
+                        onSizeChanged: (size) {
+                          if (mounted && size.height != _bottomHintHeight) {
+                            setState(() => _bottomHintHeight = size.height);
+                          }
+                        },
+                        child: OutlineEditorBottomHint(colorScheme: colorScheme),
+                      ),
                     ),
                   ),
-                ),
                 // 快捷键列表面板：浮动在编辑器右侧，覆盖滚动条，不受内容滚动影响
                 if (_isShortcutPanelVisible)
                   Positioned(
@@ -4188,7 +4804,10 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   }
 
   /// 构建单个节点行
-  Widget _buildNodeTile(FlatNode flatNode) {
+  ///
+  /// [horizontalMargin] 为左右边距（像素），仅移动端使用：
+  /// 桌面端由滚动容器内边距统一施加，移动端则由节点行内容承担
+  Widget _buildNodeTile(FlatNode flatNode, {required double horizontalMargin}) {
     // 获取或创建节点瓦片的全局键，用于拖拽选区的命中检测
     final key = _nodeTileKeys.putIfAbsent(flatNode.node.id, () => GlobalKey());
 
@@ -4203,9 +4822,17 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       indentWidth: _indentWidth,
       dotTextGapReduction: _dotTextGapReduction,
       nodeSpacing: SettingsService.instance.outlineNodeSpacing,
+      horizontalMargin: horizontalMargin,
       isSelected: _selectedNodeIds.contains(flatNode.node.id),
+      isBatchMode: _isBatchSelectionMode,
       readOnly: widget.readOnly,
       onToggleExpand: () => _toggleExpand(flatNode.node.id),
+      onBatchTap: () => toggleNodeSubtreeSelection(flatNode.node.id),
+      onTrailingBarLongPress: _onTrailingBarLongPress,
+      onTrailingBarLongPressMove: _onTrailingBarLongPressMove,
+      onTrailingBarDragStart: () =>
+          _batchSelectionController.onCheckboxDragStart(flatNode.node.id),
+      onTrailingBarDragEnd: _batchSelectionController.onPointerUp,
       onChanged: (newText) {
         final oldText = flatNode.node.text;
         if (oldText != newText) {

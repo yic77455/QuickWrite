@@ -5,6 +5,7 @@ import 'package:quick_write/core/models/book.dart';
 import 'package:quick_write/core/models/chapter.dart';
 import 'package:quick_write/core/models/recycle_bin.dart';
 import 'package:quick_write/core/services/app_paths.dart';
+import 'package:quick_write/core/utils/relative_path_utils.dart';
 
 /// 数据完整性校验结果
 class IntegrityCheckResult {
@@ -91,7 +92,8 @@ class DataIntegrityService {
         for (final chapter in chapters) {
           // 构建章节文件的完整路径
           final chapterFilePath =
-              '$bookFolderPath${Platform.pathSeparator}chapters${Platform.pathSeparator}${chapter.filePath}';
+              '$bookFolderPath${Platform.pathSeparator}chapters'
+              '${Platform.pathSeparator}${relativePathToPlatform(chapter.filePath)}';
           final chapterFile = File(chapterFilePath);
 
           if (!await chapterFile.exists()) {

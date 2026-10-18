@@ -61,7 +61,7 @@ class _ChapterTitleFormatPanelState extends State<ChapterTitleFormatPanel> {
   ) {
     return Row(
       children: [
-        Icon(Icons.text_fields_outlined, size: 18, color: colorScheme.onSurfaceVariant),
+        Icon(Icons.format_size_rounded, size: 18, color: colorScheme.onSurfaceVariant),
         const SizedBox(width: 10),
         Text(
           '标题字体大小',

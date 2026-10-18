@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/windows_explorer.dart';
 
 /// 文件管理器工具类
@@ -25,13 +26,13 @@ class FileExplorer {
       String command;
       List<String> args;
 
-      if (Platform.isWindows) {
+      if (PlatformCapabilities.isWindows) {
         command = 'explorer';
         args = [path];
-      } else if (Platform.isMacOS) {
+      } else if (PlatformCapabilities.isMacOS) {
         command = 'open';
         args = [path];
-      } else if (Platform.isLinux) {
+      } else if (PlatformCapabilities.isLinux) {
         command = 'xdg-open';
         args = [path];
       } else {
@@ -42,7 +43,7 @@ class FileExplorer {
       final result = await Process.run(command, args);
       // Windows 的 explorer 在已有进程运行时会把请求转发给现有进程并立即退出，
       // 退出码通常为 1，无法作为失败判据，因此只要未抛异常即视为成功
-      if (Platform.isWindows) return true;
+      if (PlatformCapabilities.isWindows) return true;
       return result.exitCode == 0;
     } catch (e) {
       debugPrint('打开目录失败: $e');
@@ -76,7 +77,7 @@ class FileExplorer {
 
     // Windows 优先通过 shell 接口一次选中同目录的全部已存在条目
     if (existing.isNotEmpty) {
-      if (Platform.isWindows && WindowsExplorer.revealAll(existing)) {
+      if (PlatformCapabilities.isWindows && WindowsExplorer.revealAll(existing)) {
         success = true;
       } else {
         for (final path in existing) {
@@ -105,7 +106,7 @@ class FileExplorer {
         return false;
       }
 
-      if (Platform.isWindows) {
+      if (PlatformCapabilities.isWindows) {
         // Windows 对目录直接打开，对文件使用 /select 选中
         final args = type == FileSystemEntityType.directory
             ? [path]
@@ -114,13 +115,13 @@ class FileExplorer {
         return true;
       }
 
-      if (Platform.isMacOS) {
+      if (PlatformCapabilities.isMacOS) {
         // -R 会定位到目标位置并选中该条目
         await Process.run('open', ['-R', path]);
         return true;
       }
 
-      if (Platform.isLinux) {
+      if (PlatformCapabilities.isLinux) {
         // 平台无统一的选中能力，退化为打开所在目录
         final dirPath = type == FileSystemEntityType.directory
             ? path

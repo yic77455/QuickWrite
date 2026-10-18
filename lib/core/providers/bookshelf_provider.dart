@@ -11,6 +11,7 @@ import 'package:quick_write/core/services/database_service.dart';
 import 'package:quick_write/core/services/book_import_service.dart';
 import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 import 'package:quick_write/core/services/data_integrity_service.dart';
+import 'package:quick_write/core/services/workspace/book_folder_service.dart';
 import 'package:isar/isar.dart';
 import 'package:uuid/uuid.dart';
 import 'package:path/path.dart' as p;
@@ -197,11 +198,12 @@ class BookshelfProvider extends ChangeNotifier {
   Future<void> refresh() async {
     // 清除所有书籍封面缓存
     for (final book in _allBooks) {
-      if (book.coverPath.isNotEmpty) {
-        final coverFile = File(book.coverPath);
-        if (coverFile.existsSync()) {
-          FileImage(coverFile).evict();
-        }
+      final coverPath = BookFolderService().coverFilePath(book);
+      if (coverPath.isEmpty) continue;
+
+      final coverFile = File(coverPath);
+      if (coverFile.existsSync()) {
+        FileImage(coverFile).evict();
       }
     }
     
@@ -288,7 +290,7 @@ class BookshelfProvider extends ChangeNotifier {
   /// - 1: 书名已存在，创建失败
   Future<int> addBook({
     required String bookTitle,
-    String coverPath = '',
+    String coverFileName = '',
     String synopsis = '',
   }) async {
     // 重名检测：书名不能重复
@@ -309,7 +311,7 @@ class BookshelfProvider extends ChangeNotifier {
     final newBook = BookModel()
       ..uuid = newUuid
       ..title = bookTitle
-      ..coverPath = coverPath
+      ..coverFileName = coverFileName
       ..synopsis = synopsis
       ..wordCount = 0
       ..latestChapter = '暂无章节'
@@ -355,7 +357,7 @@ class BookshelfProvider extends ChangeNotifier {
     final newBook = BookModel()
       ..uuid = bookUuid
       ..title = importResult.bookTitle
-      ..coverPath = ''
+      ..coverFileName = ''
       ..synopsis = ''
       ..wordCount = importResult.totalWordCount
       ..latestChapter = importResult.chapters.last.title
@@ -717,35 +719,38 @@ class BookshelfProvider extends ChangeNotifier {
   /// [bookUuid] 书籍 UUID
   /// [title] 新书名
   /// [synopsis] 新简介
-  /// [coverPath] 新封面路径
+  /// [coverFileName] 新封面文件名
   Future<void> updateBookInfo({
     required String bookUuid,
     required String title,
     required String synopsis,
-    required String coverPath,
+    required String coverFileName,
   }) async {
     final book = _allBooks.firstWhere((b) => b.uuid == bookUuid);
-    
-    // 清除旧封面缓存
-    if (book.coverPath.isNotEmpty) {
-      final oldCoverFile = File(book.coverPath);
+    final bookFolderService = BookFolderService();
+
+    // 清除旧封面缓存（书名变化时封面文件随之移动到新的作品目录）
+    final oldCoverPath = bookFolderService.coverFilePath(book);
+    if (oldCoverPath.isNotEmpty) {
+      final oldCoverFile = File(oldCoverPath);
       if (oldCoverFile.existsSync()) {
         FileImage(oldCoverFile).evict();
       }
     }
-    
-    // 清除新封面缓存（如果路径不同）
-    if (coverPath.isNotEmpty && coverPath != book.coverPath) {
-      final newCoverFile = File(coverPath);
+
+    book.title = title;
+    book.synopsis = synopsis;
+    book.coverFileName = coverFileName;
+    book.updatedAt = DateTime.now();
+
+    // 清除新封面缓存（更换了封面文件时）
+    final newCoverPath = bookFolderService.coverFilePath(book);
+    if (newCoverPath.isNotEmpty && newCoverPath != oldCoverPath) {
+      final newCoverFile = File(newCoverPath);
       if (newCoverFile.existsSync()) {
         FileImage(newCoverFile).evict();
       }
     }
-    
-    book.title = title;
-    book.synopsis = synopsis;
-    book.coverPath = coverPath;
-    book.updatedAt = DateTime.now();
 
     await _isar.writeTxn(() async {
       await _isar.bookModels.put(book);

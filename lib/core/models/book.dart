@@ -20,7 +20,7 @@ class BookModel {
   String uuid = ''; // 唯一ID（UUID，用于应对重装软件或跨设备同步）
   
   String title = ''; // 书名
-  String coverPath = ''; // 封面路径
+  String coverFileName = ''; // 封面文件名（如 cover.jpg），封面固定存放在书籍文件夹下，空表示无封面
   String synopsis = ''; // 简介/大纲 (非必填，预留字段)
   int wordCount = 0; // 总字数
   String latestChapter = '暂无章节'; // 最新章节名
@@ -70,7 +70,7 @@ class BookModel {
   BookModel copyWith({
     String? uuid,
     String? title,
-    String? coverPath,
+    String? coverFileName,
     String? synopsis,
     int? wordCount,
     String? latestChapter,
@@ -83,7 +83,7 @@ class BookModel {
       ..id = id // 极其重要：保留原底层 ID
       ..uuid = uuid ?? this.uuid
       ..title = title ?? this.title
-      ..coverPath = coverPath ?? this.coverPath
+      ..coverFileName = coverFileName ?? this.coverFileName
       ..synopsis = synopsis ?? this.synopsis
       ..wordCount = wordCount ?? this.wordCount
       ..latestChapter = latestChapter ?? this.latestChapter
@@ -100,7 +100,7 @@ class BookModel {
     return {
       'uuid': uuid,
       'title': title,
-      'coverPath': coverPath,
+      'coverFileName': coverFileName,
       'synopsis': synopsis,
       'wordCount': wordCount,
       'latestChapter': latestChapter,
@@ -115,7 +115,7 @@ class BookModel {
     return BookModel()
       ..uuid = json['uuid'] as String? ?? ''
       ..title = json['title'] as String? ?? ''
-      ..coverPath = json['coverPath'] as String? ?? ''
+      ..coverFileName = json['coverFileName'] as String? ?? ''
       ..synopsis = json['synopsis'] as String? ?? ''
       ..wordCount = json['wordCount'] as int? ?? 0
       ..latestChapter = json['latestChapter'] as String? ?? '暂无章节'

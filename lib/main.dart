@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:isar/isar.dart';
 import 'package:quick_write/app.dart';
 import 'package:quick_write/core/models/book.dart';
@@ -21,12 +22,19 @@ import 'package:quick_write/core/services/cache_services/name_gen_cache_service.
 import 'package:quick_write/core/services/window_service.dart';
 import 'package:quick_write/core/services/cache_services/window_cache_service.dart';
 import 'package:quick_write/core/router/router.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/pages/home/cloud_sync/widgets/sync_risk_dialog.dart';
 import 'package:quick_write/shared/widgets/qw_snackbar.dart';
 
 void main(List<String> args) async {
   // 必须确保 Flutter 绑定初始化完成，在 main() 函数中，如果需要在 runApp() 之前调用任何异步方法或原生插件，就必须先调用ensureInitialized()这个方法
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 移动端开启边到边显示：应用界面延伸到状态栏与系统导航栏后方，
+  // 由各页面通过安全区避开系统栏，保证系统栏与界面颜色统一
+  if (PlatformCapabilities.isMobile) {
+    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  }
 
   // 初始化设置服务（必须在其他服务初始化之前）
   // 这会创建配置目录并加载用户设置
@@ -35,18 +43,22 @@ void main(List<String> args) async {
   // 读取应用包信息，缓存版本号供关于页与更新检查使用
   await AppInfoService.instance.initialize();
 
-  // 获取当前窗口控制器
-  final windowController = await WindowController.fromCurrentEngine();
-  
-  // 解析窗口参数
-  final arguments = _parseArguments(windowController.arguments);
+  // 获取当前窗口控制器并解析窗口参数
+  // 多窗口与窗口参数仅存在于支持多窗口的桌面端，移动端没有窗口概念，视为无参数
+  WindowController? windowController;
+  Map<String, dynamic> arguments = const {};
+  if (PlatformCapabilities.supportsMultiWindow) {
+    windowController = await WindowController.fromCurrentEngine();
+    arguments = _parseArguments(windowController.arguments);
+  }
   final type = arguments['type'] as String?;
   final bookId = arguments['bookId'] as String?;
 
   // 限制同时只运行一个程序进程：若已有进程在运行，
   // 则唤出对方主窗口并退出当前进程
   // 工作台子窗口与主窗口同属一个进程，必须跳过该检查，避免误杀宿主进程
-  if (type != MultiWindowService.workspaceWindowType) {
+  if (PlatformCapabilities.supportsSingleInstanceLock &&
+      type != MultiWindowService.workspaceWindowType) {
     if (!SingleInstanceService.instance.tryAcquire()) {
       debugPrint('已检测到运行中的实例，唤出其主窗口后退出当前进程');
       SingleInstanceService.instance.activateExistingMainWindow();
@@ -73,6 +85,9 @@ void main(List<String> args) async {
   // 初始化字体服务，加载系统字体列表
   await FontService().initialize();
 
+  // 校验字体设置引用的字体在本机是否可用，避免云同步带入本机不存在的字体
+  await SettingsService.instance.validateFontAvailability();
+
   // 根据窗口类型运行不同的应用
   if (type == MultiWindowService.workspaceWindowType && bookId != null) {
     // 初始化工作台窗口
@@ -81,8 +96,10 @@ void main(List<String> args) async {
     return;
   }
 
-  // 初始化主窗口
-  await WindowService.instance.initializeMainWindow();
+  // 初始化主窗口（仅支持原生窗口控制的平台需要）
+  if (PlatformCapabilities.supportsNativeWindowControl) {
+    await WindowService.instance.initializeMainWindow();
+  }
 
   // 初始化云同步服务，读取本机保存的连接配置与同步设置
   // 仅在主窗口初始化，自动同步统一由主窗口负责，避免多个窗口重复执行
@@ -103,10 +120,14 @@ void main(List<String> args) async {
   );
 
   // 初始化多窗口通信通道（主窗口负责监听子窗口的消息）
-  await MultiWindowService.instance.initMethodChannel(windowController);
+  if (PlatformCapabilities.supportsMultiWindow && windowController != null) {
+    await MultiWindowService.instance.initMethodChannel(windowController);
+  }
 
   // 初始化系统托盘图标（仅主窗口常驻，用于最小化至托盘与快捷退出）
-  await TrayService.instance.initialize();
+  if (PlatformCapabilities.supportsSystemTray) {
+    await TrayService.instance.initialize();
+  }
 
   // 后台异步清理过期备份
   BackupService.instance.cleanupExpiredBackups();

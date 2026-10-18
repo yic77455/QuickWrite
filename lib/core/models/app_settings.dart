@@ -46,6 +46,13 @@ class AppSettings {
   /// 是否在打开作品时恢复上一次退出时打开的标签页
   final bool restoreTabsOnOpenWork;
 
+  // ================= 更新设置 =================
+
+  /// 是否在启动时自动检查更新
+  /// true: 启动后自动向更新源查询新版本，发现新版本时以红点提醒
+  /// false: 不自动检查，也不显示红点，仅在用户在关于页手动点击「检查更新」时查询
+  final bool autoCheckUpdate;
+
   // ================= 编辑器字体设置 =================
   
   /// 字体名称
@@ -207,6 +214,26 @@ class AppSettings {
   /// 关闭后，所有标签页均以固定模式打开
   final bool previewModeEnabled;
 
+  /// 是否显示移动端键盘上方的快捷输入栏
+  final bool quickInputBarEnabled;
+
+  /// 是否开启标点符号自动补全
+  /// 开启后输入成对符号的起始符号时自动补出结束符号，光标置于两者之间
+  final bool punctuationAutoCompleteEnabled;
+
+  // ================= 字数浮窗设置（移动端）=================
+
+  /// 是否启用字数浮窗
+  /// 开启后在编辑器中叠加一层半透明浮窗，实时显示当前标签页字数
+  final bool wordCountFloatingEnabled;
+
+  /// 字数浮窗显示位置
+  /// 'topLeft' - 左上 / 'topRight' - 右上 / 'bottomLeft' - 左下 / 'bottomRight' - 右下
+  final String wordCountFloatingPosition;
+
+  /// 字数浮窗是否额外显示码字速度
+  final bool wordCountFloatingSpeedEnabled;
+
   // ================= 默认配置常量 =================
 
   /// 关闭主窗口行为：每次询问
@@ -220,6 +247,12 @@ class AppSettings {
 
   /// 应用默认设置常量
   static const AppSettings defaults = AppSettings();
+
+  /// 移动端默认设置常量
+  ///
+  /// 与桌面端的差异仅在大纲编辑器左右边距：移动端大纲编辑器自带左侧留白，
+  /// 右侧为贴边显示的行尾竖条，无需额外的左右边距，故默认值为 0
+  static const AppSettings mobileDefaults = AppSettings(outlineHorizontalMargin: 0.0);
 
 
   // ================= 构造函数 =================
@@ -238,6 +271,8 @@ class AppSettings {
     // 启动与恢复设置
     this.autoOpenLastWorkOnStartup = false, // 是否在启动时自动打开上一次编辑的作品
     this.restoreTabsOnOpenWork = true, // 是否在打开作品时恢复上一次退出时的标签页
+    // 更新设置
+    this.autoCheckUpdate = true, // 是否在启动时自动检查更新
     // 工作台布局设置
     this.showChapterTitle = true, // 是否显示章节标题
     this.chapterTitleTopMargin = 16.0, // 章节标题顶边距（单位：像素）
@@ -289,6 +324,12 @@ class AppSettings {
     this.historyRetentionDays = 30, // 历史记录保存天数
     this.openChapterCursorMode = 'default', // 打开章节时光标定位模式
     this.previewModeEnabled = true, // 是否启用预览模式
+    this.quickInputBarEnabled = true, // 是否显示快捷输入栏（移动端）
+    this.punctuationAutoCompleteEnabled = true, // 是否开启标点符号自动补全（移动端）
+    // 字数浮窗设置（移动端）
+    this.wordCountFloatingEnabled = false, // 是否启用字数浮窗
+    this.wordCountFloatingPosition = 'topRight', // 字数浮窗显示位置（默认右上）
+    this.wordCountFloatingSpeedEnabled = false, // 字数浮窗是否显示码字速度
   });
 
   // ================= JSON 序列化 =================
@@ -315,6 +356,7 @@ class AppSettings {
     final typographyJson = editorJson['typography'] as Map<String, dynamic>? ?? {};
     final autoSaveJson = editorJson['autoSave'] as Map<String, dynamic>? ?? {};
     final autoBackupJson = editorJson['autoBackup'] as Map<String, dynamic>? ?? {};
+    final wordCountFloatingJson = editorJson['wordCountFloating'] as Map<String, dynamic>? ?? {};
 
     return AppSettings(
       // 主题设置（全局）
@@ -333,6 +375,9 @@ class AppSettings {
       // 启动与恢复设置（全局）
       autoOpenLastWorkOnStartup: globalJson['autoOpenLastWorkOnStartup'] as bool? ?? defaults.autoOpenLastWorkOnStartup,
       restoreTabsOnOpenWork: globalJson['restoreTabsOnOpenWork'] as bool? ?? defaults.restoreTabsOnOpenWork,
+
+      // 更新设置（全局）
+      autoCheckUpdate: globalJson['autoCheckUpdate'] as bool? ?? defaults.autoCheckUpdate,
       
       // 布局设置（编辑器）
       showChapterTitle: chapterTitleJson['show'] as bool? ?? defaults.showChapterTitle,
@@ -391,6 +436,13 @@ class AppSettings {
       historyRetentionDays: autoBackupJson['historyRetentionDays'] as int? ?? defaults.historyRetentionDays,
       openChapterCursorMode: autoBackupJson['openCursorMode'] as String? ?? defaults.openChapterCursorMode,
       previewModeEnabled: autoBackupJson['previewModeEnabled'] as bool? ?? defaults.previewModeEnabled,
+      quickInputBarEnabled: autoBackupJson['quickInputBarEnabled'] as bool? ?? defaults.quickInputBarEnabled,
+      punctuationAutoCompleteEnabled: autoBackupJson['punctuationAutoCompleteEnabled'] as bool? ?? defaults.punctuationAutoCompleteEnabled,
+
+      // 字数浮窗设置（编辑器）
+      wordCountFloatingEnabled: wordCountFloatingJson['enabled'] as bool? ?? defaults.wordCountFloatingEnabled,
+      wordCountFloatingPosition: wordCountFloatingJson['position'] as String? ?? defaults.wordCountFloatingPosition,
+      wordCountFloatingSpeedEnabled: wordCountFloatingJson['speedEnabled'] as bool? ?? defaults.wordCountFloatingSpeedEnabled,
     );
   }
 
@@ -415,6 +467,8 @@ class AppSettings {
         // 启动与恢复设置
         'autoOpenLastWorkOnStartup': autoOpenLastWorkOnStartup,
         'restoreTabsOnOpenWork': restoreTabsOnOpenWork,
+        // 更新设置
+        'autoCheckUpdate': autoCheckUpdate,
       },
       // 编辑器设置
       'editor': {
@@ -489,6 +543,14 @@ class AppSettings {
           'historyRetentionDays': historyRetentionDays,
           'openCursorMode': openChapterCursorMode,
           'previewModeEnabled': previewModeEnabled,
+          'quickInputBarEnabled': quickInputBarEnabled,
+          'punctuationAutoCompleteEnabled': punctuationAutoCompleteEnabled,
+        },
+        // 字数浮窗设置（移动端）
+        'wordCountFloating': {
+          'enabled': wordCountFloatingEnabled,
+          'position': wordCountFloatingPosition,
+          'speedEnabled': wordCountFloatingSpeedEnabled,
         },
       },
     };
@@ -518,6 +580,8 @@ class AppSettings {
     // 启动与恢复设置
     bool? autoOpenLastWorkOnStartup,
     bool? restoreTabsOnOpenWork,
+    // 更新设置
+    bool? autoCheckUpdate,
     // 布局设置（右侧边栏 - 布局设置面板）
     bool? showChapterTitle,
     double? chapterTitleTopMargin,
@@ -569,6 +633,12 @@ class AppSettings {
     int? historyRetentionDays,
     String? openChapterCursorMode,
     bool? previewModeEnabled,
+    bool? quickInputBarEnabled,
+    bool? punctuationAutoCompleteEnabled,
+    // 字数浮窗设置（移动端）
+    bool? wordCountFloatingEnabled,
+    String? wordCountFloatingPosition,
+    bool? wordCountFloatingSpeedEnabled,
   }) {
     return AppSettings(
       themeMode: themeMode ?? this.themeMode,
@@ -585,6 +655,8 @@ class AppSettings {
       // 启动与恢复设置
       autoOpenLastWorkOnStartup: autoOpenLastWorkOnStartup ?? this.autoOpenLastWorkOnStartup,
       restoreTabsOnOpenWork: restoreTabsOnOpenWork ?? this.restoreTabsOnOpenWork,
+      // 更新设置
+      autoCheckUpdate: autoCheckUpdate ?? this.autoCheckUpdate,
       // 布局设置（右侧边栏 - 布局设置面板）
       showChapterTitle: showChapterTitle ?? this.showChapterTitle,
       chapterTitleTopMargin: chapterTitleTopMargin ?? this.chapterTitleTopMargin,
@@ -636,6 +708,12 @@ class AppSettings {
       historyRetentionDays: historyRetentionDays ?? this.historyRetentionDays,
       openChapterCursorMode: openChapterCursorMode ?? this.openChapterCursorMode,
       previewModeEnabled: previewModeEnabled ?? this.previewModeEnabled,
+      quickInputBarEnabled: quickInputBarEnabled ?? this.quickInputBarEnabled,
+      punctuationAutoCompleteEnabled: punctuationAutoCompleteEnabled ?? this.punctuationAutoCompleteEnabled,
+      // 字数浮窗设置（移动端）
+      wordCountFloatingEnabled: wordCountFloatingEnabled ?? this.wordCountFloatingEnabled,
+      wordCountFloatingPosition: wordCountFloatingPosition ?? this.wordCountFloatingPosition,
+      wordCountFloatingSpeedEnabled: wordCountFloatingSpeedEnabled ?? this.wordCountFloatingSpeedEnabled,
     );
   }
 
@@ -687,6 +765,8 @@ class AppSettings {
            // 启动与恢复设置
            other.autoOpenLastWorkOnStartup == autoOpenLastWorkOnStartup &&
            other.restoreTabsOnOpenWork == restoreTabsOnOpenWork &&
+           // 更新设置
+           other.autoCheckUpdate == autoCheckUpdate &&
            // 布局设置（右侧边栏 - 布局设置面板）
            other.showChapterTitle == showChapterTitle &&
            other.chapterTitleTopMargin == chapterTitleTopMargin &&
@@ -737,7 +817,13 @@ class AppSettings {
            other.backupInterval == backupInterval &&
            other.historyRetentionDays == historyRetentionDays &&
            other.openChapterCursorMode == openChapterCursorMode &&
-           other.previewModeEnabled == previewModeEnabled;
+           other.previewModeEnabled == previewModeEnabled &&
+           other.quickInputBarEnabled == quickInputBarEnabled &&
+           other.punctuationAutoCompleteEnabled == punctuationAutoCompleteEnabled &&
+           // 字数浮窗设置（移动端）
+           other.wordCountFloatingEnabled == wordCountFloatingEnabled &&
+           other.wordCountFloatingPosition == wordCountFloatingPosition &&
+           other.wordCountFloatingSpeedEnabled == wordCountFloatingSpeedEnabled;
   }
 
   @override
@@ -757,6 +843,8 @@ class AppSettings {
         // 启动与恢复设置
         autoOpenLastWorkOnStartup,
         restoreTabsOnOpenWork,
+        // 更新设置
+        autoCheckUpdate,
       ),
       // 布局设置（右侧边栏 - 布局设置面板）
       Object.hash(
@@ -817,6 +905,12 @@ class AppSettings {
         historyRetentionDays,
         openChapterCursorMode,
         previewModeEnabled,
+        quickInputBarEnabled,
+        punctuationAutoCompleteEnabled,
+        // 字数浮窗设置（移动端）
+        wordCountFloatingEnabled,
+        wordCountFloatingPosition,
+        wordCountFloatingSpeedEnabled,
       ),
     );
   }

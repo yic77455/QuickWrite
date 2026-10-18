@@ -22,7 +22,7 @@ class RecycleBinModel {
   // ================= 原书籍信息 =================
   String bookUuid = ''; // 原书籍的 UUID
   String title = ''; // 书名
-  String coverPath = ''; // 封面路径
+  String coverFileName = ''; // 封面文件名（如 cover.jpg），封面随书籍文件夹一起移入回收站，空表示无封面
   String synopsis = ''; // 简介/大纲
   int wordCount = 0; // 总字数
   String latestChapter = '暂无章节'; // 最新章节名
@@ -81,7 +81,7 @@ class RecycleBinModel {
       ..uuid = const Uuid().v4() // 生成新的 UUID 作为回收站记录 ID
       ..bookUuid = book.uuid
       ..title = book.title
-      ..coverPath = book.coverPath
+      ..coverFileName = book.coverFileName
       ..synopsis = book.synopsis
       ..wordCount = book.wordCount
       ..latestChapter = book.latestChapter
@@ -106,7 +106,7 @@ class RecycleBinModel {
     return BookModel()
       ..uuid = bookUuid // 保留原 UUID
       ..title = newTitle ?? title
-      ..coverPath = coverPath
+      ..coverFileName = coverFileName
       ..synopsis = synopsis
       ..wordCount = wordCount
       ..latestChapter = latestChapter
@@ -125,7 +125,7 @@ class RecycleBinModel {
       'uuid': uuid,
       'bookUuid': bookUuid,
       'title': title,
-      'coverPath': coverPath,
+      'coverFileName': coverFileName,
       'synopsis': synopsis,
       'wordCount': wordCount,
       'latestChapter': latestChapter,
@@ -144,7 +144,7 @@ class RecycleBinModel {
       ..uuid = json['uuid'] as String? ?? ''
       ..bookUuid = json['bookUuid'] as String? ?? ''
       ..title = json['title'] as String? ?? ''
-      ..coverPath = json['coverPath'] as String? ?? ''
+      ..coverFileName = json['coverFileName'] as String? ?? ''
       ..synopsis = json['synopsis'] as String? ?? ''
       ..wordCount = json['wordCount'] as int? ?? 0
       ..latestChapter = json['latestChapter'] as String? ?? '暂无章节'

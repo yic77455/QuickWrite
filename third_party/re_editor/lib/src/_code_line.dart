@@ -36,6 +36,15 @@ class _CodeLineEditingControllerImpl extends ValueNotifier<CodeLineEditingValue>
   /// 上一次直接键入后的光标行内偏移
   int _preEditCaretOffset = -1;
 
+  /// 上一次单字删除的时间，为 null 表示当前没有可与本次合并的删除动作
+  DateTime? _preDeleteTime;
+
+  /// 上一次单字删除后的光标所在行
+  int _preDeleteCaretIndex = -1;
+
+  /// 上一次单字删除后的光标行内偏移
+  int _preDeleteCaretOffset = -1;
+
   CodeLineEditingValue? _preValue;
   GlobalKey? _editorKey;
 
@@ -294,22 +303,37 @@ class _CodeLineEditingControllerImpl extends ValueNotifier<CodeLineEditingValue>
       }
     }
     // 一条撤销记录对应一次输入动作：输入法一次组合（含提交）算一次，
-    // 光标连续且间隔很短的直接击键也算一次，其余情况都另起记录
+    // 光标连续且间隔很短的同类击键也算一次，其余情况都另起记录
     final bool composing = newValue.composing.isValid && !newValue.composing.isCollapsed;
     final bool textChanged = !selection.isSameLine || startLine.text != newValue.text;
+    // 折叠光标下的删除：输入法退格表现为镜像文本变短
+    final bool deleting = textChanged &&
+        !composing &&
+        selection.isCollapsed &&
+        selection.isSameLine &&
+        newValue.selection.isCollapsed &&
+        newValue.text.length < startLine.text.length;
     final DateTime now = DateTime.now();
     if (textChanged && !_preEditComposing) {
-      final bool continuousTyping = !composing &&
-          _preEditTypingTime != null &&
-          now.difference(_preEditTypingTime!) <= _kTypingRecordInterval &&
-          _preEditCaretIndex == selection.startIndex &&
-          _preEditCaretOffset == selection.startOffset;
-      if (!continuousTyping) {
-        _cache.markNewRecord(true);
+      // 连续的直接击键或连续的折叠光标删除都并入上一条记录
+      final bool continuous = deleting
+          ? _isContinuousDelete(selection, now)
+          : (!composing &&
+              _preEditTypingTime != null &&
+              now.difference(_preEditTypingTime!) <= _kTypingRecordInterval &&
+              _preEditCaretIndex == selection.startIndex &&
+              _preEditCaretOffset == selection.startOffset);
+      if (!continuous) {
+        _cache.markNewRecord(true, collapsedDeletion: deleting);
       }
     }
     // 记录本次动作状态，供下一次判断是否属于同一次输入
-    if (composing || _preEditComposing) {
+    if (deleting) {
+      // 删除结束后的光标位置，供下一次删除判断是否与本次相连
+      _recordDelete(selection.startIndex, newSelection.extentOffset, now);
+      // 删除动作结束后的直接键入另起记录
+      _preEditTypingTime = null;
+    } else if (composing || _preEditComposing) {
       // 输入法组合（含提交）不与直接击键合并
       _preEditTypingTime = null;
     } else if (textChanged && selection.isSameLine) {
@@ -904,12 +928,12 @@ class _CodeLineEditingControllerImpl extends ValueNotifier<CodeLineEditingValue>
 
   @override
   void deleteBackward() {
-    runRevocableOp(_deleteBackward);
+    _runDeleteOp(_deleteBackward);
   }
 
   @override
   void deleteForward() {
-    runRevocableOp(_deleteForward);
+    _runDeleteOp(_deleteForward);
   }
 
   @override
@@ -1144,7 +1168,15 @@ class _CodeLineEditingControllerImpl extends ValueNotifier<CodeLineEditingValue>
 
   @override
   void runRevocableOp(VoidCallback op) {
-    _cache.markNewRecord(true);
+    _runRevocableOp(op);
+  }
+
+  /// 在撤销记录中执行一次操作
+  ///
+  /// [collapsedDeletion] 表示本次操作是折叠光标下的删除（即非选区删除），
+  /// 撤销这一条记录时恢复的内容不带选区。
+  void _runRevocableOp(VoidCallback op, {bool collapsedDeletion = false}) {
+    _cache.markNewRecord(true, collapsedDeletion: collapsedDeletion);
     op();
     _cache.markNewRecord(false);
   }
@@ -1442,6 +1474,46 @@ class _CodeLineEditingControllerImpl extends ValueNotifier<CodeLineEditingValue>
       _deleteSelection();
     }
     makeCursorCenterIfInvisible();
+  }
+
+  /// 执行一次单字删除动作
+  ///
+  /// [op] 为具体的删除逻辑。光标相连且间隔不超过 [_kTypingRecordInterval]
+  /// 的连续单字删除属于同一次删除动作，合并为一条撤销记录；
+  /// 删除选区或与上一次删除不相连时另起记录。
+  void _runDeleteOp(VoidCallback op) {
+    final CodeLineSelection before = selection;
+    final DateTime now = DateTime.now();
+    if (before.isCollapsed && _isContinuousDelete(before, now)) {
+      op();
+    } else {
+      _runRevocableOp(op, collapsedDeletion: before.isCollapsed);
+    }
+    if (before.isCollapsed) {
+      // 记录删除结束后的光标，供下一次删除判断是否与本次相连
+      _recordDelete(selection.startIndex, selection.startOffset, now);
+    }
+    // 一次删除动作结束后，其后的直接键入另起记录
+    _preEditTypingTime = null;
+  }
+
+  /// 判断本次折叠光标下的删除是否与上一次删除同属一次删除动作
+  ///
+  /// 上一条撤销记录也须由折叠光标下的删除产生，避免删除选区等
+  /// 其它操作被并入单字删除的连续区间。
+  bool _isContinuousDelete(CodeLineSelection before, DateTime now) {
+    return _cache.currentRecordIsCollapsedDeletion &&
+        _preDeleteTime != null &&
+        now.difference(_preDeleteTime!) <= _kTypingRecordInterval &&
+        _preDeleteCaretIndex == before.startIndex &&
+        _preDeleteCaretOffset == before.startOffset;
+  }
+
+  /// 记录一次折叠光标下的删除结束后的光标位置
+  void _recordDelete(int caretIndex, int caretOffset, DateTime time) {
+    _preDeleteTime = time;
+    _preDeleteCaretIndex = caretIndex;
+    _preDeleteCaretOffset = caretOffset;
   }
 
   void _deleteWordBackward() {
@@ -2007,6 +2079,9 @@ class _CodeLineEditingCache {
   late _CodeLineEditingCacheNode _node;
   late bool _markNewRecord;
 
+  /// 当前待记录的操作是否是折叠光标下的删除（即非选区删除）
+  bool _markCollapsedDeletion = false;
+
   _CodeLineEditingCache(this.controller) {
     controller.addListener(_onValueChanged);
     _node = _CodeLineEditingCacheNode(controller.value);
@@ -2017,15 +2092,24 @@ class _CodeLineEditingCache {
 
   bool get canRedo => _node.next != null;
 
+  /// 当前撤销记录是否由折叠光标下的删除（即非选区删除）产生
+  bool get currentRecordIsCollapsedDeletion => _node.collapsedDeletion;
+
   void undo() {
     if (_node.pre == null) {
       return;
     }
     final CodeLines current = controller.value.codeLines;
+    // 被撤销的那条记录是否由非选区删除产生
+    final bool collapsedDeletion = _node.collapsedDeletion;
     _node = _node.pre!;
     final CodeLineEditingValue restored = _node.value;
     controller.value = restored.copyWith(
-      selection: _selectionAfterChange(current, restored.codeLines),
+      selection: _selectionAfterChange(
+        current,
+        restored.codeLines,
+        collapseRestored: collapsedDeletion,
+      ),
       composing: TextRange.empty,
     );
   }
@@ -2046,8 +2130,10 @@ class _CodeLineEditingCache {
   /// 按正文变化量计算撤销/恢复后的选区
   ///
   /// 发生变化的那段文字被选中，因此新增文字时光标位于其右边；
-  /// 正文变少时没有可选的文字，只把光标放在消失文字的左边
-  CodeLineSelection _selectionAfterChange(CodeLines before, CodeLines after) {
+  /// 正文变少时没有可选的文字，只把光标放在消失文字的左边。
+  /// [collapseRestored] 为真时不选中恢复出来的文字，只把光标放在其右边。
+  CodeLineSelection _selectionAfterChange(CodeLines before, CodeLines after,
+      {bool collapseRestored = false}) {
     final String beforeText = _flatText(before);
     final String afterText = _flatText(after);
     final int limit = min(beforeText.length, afterText.length);
@@ -2068,6 +2154,9 @@ class _CodeLineEditingCache {
       return start;
     }
     final CodeLineSelection end = _selectionAtOffset(after, endOffset);
+    if (collapseRestored) {
+      return end;
+    }
     return CodeLineSelection(
       baseIndex: start.baseIndex,
       baseOffset: start.baseOffset,
@@ -2105,14 +2194,20 @@ class _CodeLineEditingCache {
   void clear() {
     _node = _CodeLineEditingCacheNode(controller.value);
     _markNewRecord = false;
+    _markCollapsedDeletion = false;
   }
 
   void dispose() {
     controller.removeListener(_onValueChanged);
   }
 
-  void markNewRecord(bool flag) {
+  /// 标记接下来的正文变化是否另起一条撤销记录
+  ///
+  /// [collapsedDeletion] 仅在 [flag] 为真时有意义，表示本次变化由
+  /// 折叠光标下的删除（即非选区删除）产生，撤销该记录时恢复的内容不带选区。
+  void markNewRecord(bool flag, {bool collapsedDeletion = false}) {
     _markNewRecord = flag;
+    _markCollapsedDeletion = flag && collapsedDeletion;
   }
 
   void _onValueChanged() {
@@ -2143,13 +2238,17 @@ class _CodeLineEditingCache {
   }
 
   void _appendNewNode() {
-    final _CodeLineEditingCacheNode newNode = _CodeLineEditingCacheNode(controller.value);
+    final _CodeLineEditingCacheNode newNode = _CodeLineEditingCacheNode(
+      controller.value,
+      collapsedDeletion: _markCollapsedDeletion,
+    );
     if (_node.next != null) {
       _node.next!.pre = null;
     }
     _node.next = newNode;
     newNode.pre = _node;
     _node = newNode;
+    _markCollapsedDeletion = false;
   }
 
 }
@@ -2160,7 +2259,10 @@ class _CodeLineEditingCacheNode {
   _CodeLineEditingCacheNode? next;
   CodeLineEditingValue value;
 
-  _CodeLineEditingCacheNode(this.value);
+  /// 该节点由折叠光标下的删除（即非选区删除）产生，撤销它时恢复的内容不带选区
+  final bool collapsedDeletion;
+
+  _CodeLineEditingCacheNode(this.value, {this.collapsedDeletion = false});
 
   bool get isRoot => pre == null;
 

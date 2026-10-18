@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/models/recycle_item.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'hover_icon_button.dart';
 import 'recycle_empty_state.dart';
@@ -49,7 +50,13 @@ class ItemRecycleView extends StatelessWidget {
     }
 
     return ListView.builder(
-      padding: const EdgeInsets.only(top: 8, bottom: 24, left: 32, right: 32),
+      // 左右留白：移动端屏幕较窄，收窄留白以提升内容占比
+      padding: EdgeInsets.only(
+        top: 8,
+        bottom: 24,
+        left: PlatformCapabilities.isMobile ? 20 : 32,
+        right: PlatformCapabilities.isMobile ? 20 : 32,
+      ),
       itemCount: recycledItems.length,
       itemBuilder: (context, index) {
         final item = recycledItems[index];
@@ -94,6 +101,7 @@ class _ItemRecycleCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final bool isMobile = PlatformCapabilities.isMobile;
 
     return Material(
       color: Colors.transparent,
@@ -103,7 +111,8 @@ class _ItemRecycleCard extends StatelessWidget {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
           curve: Curves.easeInOut,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          // 左右内边距：移动端收窄，为标题与操作按钮留出更多空间
+          padding: EdgeInsets.symmetric(horizontal: isMobile ? 12 : 16, vertical: 14),
           decoration: BoxDecoration(
             color: isSelected
                 ? colorScheme.primary.withValues(alpha: 0.08)
@@ -125,11 +134,15 @@ class _ItemRecycleCard extends StatelessWidget {
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(4),
                 ),
+                // 移动端收窄复选框占用空间，避免挤压标题
+                visualDensity: isMobile ? VisualDensity.compact : null,
+                materialTapTargetSize:
+                    isMobile ? MaterialTapTargetSize.shrinkWrap : null,
               ),
               const SizedBox(width: 8),
               // 类型图标
               _buildTypeIcon(colorScheme),
-              const SizedBox(width: 16),
+              SizedBox(width: isMobile ? 12 : 16),
               // 项目信息
               Expanded(
                 child: Column(

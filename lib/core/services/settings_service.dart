@@ -6,7 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:quick_write/core/models/app_settings.dart';
 import 'package:quick_write/core/theme/custom_theme.dart';
 import 'package:quick_write/core/theme/theme_store.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'app_paths.dart';
+import 'font_service.dart';
 
 /// 设置服务类
 /// 
@@ -36,12 +38,18 @@ class SettingsService extends ChangeNotifier {
     
   /// SharedPreferences 中存储配置文件路径的 key
   static const String _configPathKey = 'config_file_path';
-  
+
   // ================= 状态属性 =================
   
   /// 当前设置
-  /// 使用 AppSettings.defaults 作为初始值，保持默认值单一数据源
-  AppSettings _settings = AppSettings.defaults;
+  /// 使用当前平台的默认设置作为初始值，保持默认值单一数据源
+  AppSettings _settings = _platformDefaults;
+
+  /// 当前平台的默认设置
+  ///
+  /// 移动端与桌面端存在少量默认值差异（如大纲编辑器左右边距）
+  static AppSettings get _platformDefaults =>
+      PlatformCapabilities.isMobile ? AppSettings.mobileDefaults : AppSettings.defaults;
   
   /// 获取当前设置（只读）
   AppSettings get settings => _settings;
@@ -111,7 +119,7 @@ class SettingsService extends ChangeNotifier {
       debugPrint('SettingsService 初始化失败: $e');
       debugPrint('堆栈跟踪: $stackTrace');
       // 即使初始化失败，也使用默认设置
-      _settings = AppSettings.defaults;
+      _settings = _platformDefaults;
       _isInitialized = true;
     }
   }
@@ -120,11 +128,11 @@ class SettingsService extends ChangeNotifier {
   
   /// 获取当前系统的默认字体
   String _getSystemDefaultFontFamily() {
-    if (Platform.isWindows) {
+    if (PlatformCapabilities.isWindows) {
       return 'Microsoft YaHei';
-    } else if (Platform.isMacOS) {
+    } else if (PlatformCapabilities.isMacOS) {
       return 'PingFang SC';
-    } else if (Platform.isLinux) {
+    } else if (PlatformCapabilities.isLinux) {
       return 'Noto Sans SC';
     } else {
       return 'Microsoft YaHei';
@@ -139,7 +147,7 @@ class SettingsService extends ChangeNotifier {
   Future<void> _loadSettings() async {
     if (_configFilePath == null) {
       debugPrint('配置文件路径为空，使用默认设置');
-      _settings = AppSettings.defaults;
+      _settings = _platformDefaults;
       return;
     }
     
@@ -154,7 +162,7 @@ class SettingsService extends ChangeNotifier {
         debugPrint('已加载配置文件: $_settings');
       } catch (e) {
         debugPrint('解析配置文件失败: $e，使用默认设置');
-        _settings = AppSettings.defaults;
+        _settings = _platformDefaults;
         _isFirstLaunch = false; // 配置文件存在但损坏，不是首次启动
         // 尝试修复损坏的配置文件
         await _saveSettings();
@@ -163,7 +171,7 @@ class SettingsService extends ChangeNotifier {
       debugPrint('配置文件不存在，创建默认配置');
       // 首次启动时，根据系统设置默认字体
       final defaultFont = _getSystemDefaultFontFamily();
-      _settings = AppSettings.defaults.copyWith(fontFamily: defaultFont);
+      _settings = _platformDefaults.copyWith(fontFamily: defaultFont);
       _isFirstLaunch = true; // 配置文件不存在，是首次启动
       await _saveSettings();
     }
@@ -302,6 +310,17 @@ class SettingsService extends ChangeNotifier {
     return updateSettings(newSettings);
   }
 
+  // ================= 更新设置相关 =================
+
+  /// 获取是否在启动时自动检查更新
+  bool get autoCheckUpdate => _settings.autoCheckUpdate;
+
+  /// 更新是否在启动时自动检查更新
+  Future<bool> updateAutoCheckUpdate(bool value) async {
+    final newSettings = _settings.copyWith(autoCheckUpdate: value);
+    return updateSettings(newSettings);
+  }
+
   // ================= 暗色模式封面变暗设置相关 =================
   
   /// 获取暗色模式下是否让封面变暗
@@ -362,7 +381,8 @@ class SettingsService extends ChangeNotifier {
   double get bottomMargin => _settings.bottomMargin;
   
   /// 获取是否开启纸张模式
-  bool get isPageViewEnabled => _settings.isPageViewEnabled;
+  /// 移动端不提供纸张模式，始终返回关闭
+  bool get isPageViewEnabled => PlatformCapabilities.isMobile ? false : _settings.isPageViewEnabled;
 
   /// 获取滚动条是否常驻显示
   bool get scrollbarAlwaysVisible => _settings.scrollbarAlwaysVisible;
@@ -392,7 +412,8 @@ class SettingsService extends ChangeNotifier {
   double get outlineNodeSpacing => _settings.outlineNodeSpacing;
 
   /// 获取大纲编辑器页面视图模式
-  String get outlinePageViewMode => _settings.outlinePageViewMode;
+  /// 移动端不提供页面视图设置，始终返回默认模式
+  String get outlinePageViewMode => PlatformCapabilities.isMobile ? 'default' : _settings.outlinePageViewMode;
 
   /// 更新是否显示章节标题
   Future<bool> updateShowChapterTitle(bool value) async {
@@ -572,7 +593,8 @@ class SettingsService extends ChangeNotifier {
   // ================= 其他设置 =================
 
   /// 获取是否开启自动保存
-  bool get autoSaveEnabled => _settings.autoSaveEnabled;
+  /// 移动端没有保存按钮，自动保存必须常开，始终返回开启
+  bool get autoSaveEnabled => PlatformCapabilities.isMobile ? true : _settings.autoSaveEnabled;
 
   /// 获取是否开启自动备份
   bool get autoBackupEnabled => _settings.autoBackupEnabled;
@@ -588,7 +610,25 @@ class SettingsService extends ChangeNotifier {
   String get openChapterCursorMode => _settings.openChapterCursorMode;
 
   /// 获取预览模式是否启用
-  bool get previewModeEnabled => _settings.previewModeEnabled;
+  /// 移动端不提供预览模式，始终返回关闭
+  bool get previewModeEnabled => PlatformCapabilities.isMobile ? false : _settings.previewModeEnabled;
+
+  /// 获取移动端快捷输入栏是否启用
+  bool get quickInputBarEnabled => _settings.quickInputBarEnabled;
+
+  /// 获取标点符号自动补全是否启用
+  bool get punctuationAutoCompleteEnabled => _settings.punctuationAutoCompleteEnabled;
+
+  /// 获取字数浮窗是否启用
+  /// 移动端专属功能，桌面端始终返回关闭
+  bool get wordCountFloatingEnabled =>
+      PlatformCapabilities.isMobile && _settings.wordCountFloatingEnabled;
+
+  /// 获取字数浮窗显示位置
+  String get wordCountFloatingPosition => _settings.wordCountFloatingPosition;
+
+  /// 获取字数浮窗是否显示码字速度
+  bool get wordCountFloatingSpeedEnabled => _settings.wordCountFloatingSpeedEnabled;
 
   /// 更新字间距
   /// [debounce] 是否使用防抖方式保存
@@ -658,6 +698,35 @@ class SettingsService extends ChangeNotifier {
   Future<bool> updateOutlineFontSize(double value) async {
     final newSettings = _settings.copyWith(outlineFontSize: value);
     return updateSettings(newSettings);
+  }
+
+  /// 校验字体设置引用的字体在本机是否可用
+  ///
+  /// 设置可能随云同步写入本机不存在的字体，届时将其恢复为默认字体，
+  /// 避免界面与编辑器持续引用不可用的字体。应在字体服务加载完成后调用
+  Future<void> validateFontAvailability() async {
+    final fonts = FontService();
+    final defaultFont = _getSystemDefaultFontFamily();
+    var newSettings = _settings;
+
+    // 编辑器正文字体：本机不存在时恢复为系统默认字体
+    if (!fonts.isFontFamilyAvailable(newSettings.fontFamily)) {
+      newSettings = newSettings.copyWith(fontFamily: defaultFont);
+    }
+
+    // 大纲编辑器字体：本机不存在时恢复为系统默认字体
+    if (!fonts.isFontFamilyAvailable(newSettings.outlineFontFamily)) {
+      newSettings = newSettings.copyWith(outlineFontFamily: defaultFont);
+    }
+
+    // 应用界面字体：本机不存在时清除，回退为跟随系统默认字体
+    final appFontFamily = newSettings.appFontFamily;
+    if (appFontFamily != null && !fonts.isFontFamilyAvailable(appFontFamily)) {
+      newSettings = newSettings.copyWith(appFontFamily: null);
+    }
+
+    // 设置未发生变化时 updateSettings 内部会自行跳过保存
+    await updateSettings(newSettings);
   }
 
   
@@ -760,10 +829,40 @@ class SettingsService extends ChangeNotifier {
     return updateSettings(newSettings);
   }
 
+  /// 更新移动端快捷输入栏开关
+  Future<bool> updateQuickInputBarEnabled(bool value) async {
+    final newSettings = _settings.copyWith(quickInputBarEnabled: value);
+    return updateSettings(newSettings);
+  }
+
+  /// 更新标点符号自动补全开关
+  Future<bool> updatePunctuationAutoCompleteEnabled(bool value) async {
+    final newSettings = _settings.copyWith(punctuationAutoCompleteEnabled: value);
+    return updateSettings(newSettings);
+  }
+
+  /// 更新字数浮窗开关
+  Future<bool> updateWordCountFloatingEnabled(bool value) async {
+    final newSettings = _settings.copyWith(wordCountFloatingEnabled: value);
+    return updateSettings(newSettings);
+  }
+
+  /// 更新字数浮窗显示位置
+  Future<bool> updateWordCountFloatingPosition(String value) async {
+    final newSettings = _settings.copyWith(wordCountFloatingPosition: value);
+    return updateSettings(newSettings);
+  }
+
+  /// 更新字数浮窗码字速度开关
+  Future<bool> updateWordCountFloatingSpeedEnabled(bool value) async {
+    final newSettings = _settings.copyWith(wordCountFloatingSpeedEnabled: value);
+    return updateSettings(newSettings);
+  }
+
   // ================= 重置布局和排版设置 =================
   
   /// 重置布局设置为默认值
-  /// 从 AppSettings.defaults 获取默认值，保留其他设置不变
+  /// 从当前平台的默认设置获取默认值，保留其他设置不变
   Future<bool> resetLayoutSettings() async {
     final newSettings = _settings.copyWith(
       showChapterTitle: AppSettings.defaults.showChapterTitle,
@@ -778,11 +877,11 @@ class SettingsService extends ChangeNotifier {
       editorBackgroundColorLight: AppSettings.defaults.editorBackgroundColorLight,
       editorBackgroundColorDark: AppSettings.defaults.editorBackgroundColorDark,
       dimPaperBackground: AppSettings.defaults.dimPaperBackground,
-      outlineTopMargin: AppSettings.defaults.outlineTopMargin,
-      outlineHorizontalMargin: AppSettings.defaults.outlineHorizontalMargin,
-      outlineBottomMargin: AppSettings.defaults.outlineBottomMargin,
-      outlineNodeSpacing: AppSettings.defaults.outlineNodeSpacing,
-      outlinePageViewMode: AppSettings.defaults.outlinePageViewMode,
+      outlineTopMargin: _platformDefaults.outlineTopMargin,
+      outlineHorizontalMargin: _platformDefaults.outlineHorizontalMargin,
+      outlineBottomMargin: _platformDefaults.outlineBottomMargin,
+      outlineNodeSpacing: _platformDefaults.outlineNodeSpacing,
+      outlinePageViewMode: _platformDefaults.outlinePageViewMode,
     );
     return updateSettings(newSettings);
   }
@@ -824,6 +923,22 @@ class SettingsService extends ChangeNotifier {
       backupInterval: AppSettings.defaults.backupInterval,
       historyRetentionDays: AppSettings.defaults.historyRetentionDays,
       openChapterCursorMode: AppSettings.defaults.openChapterCursorMode,
+      quickInputBarEnabled: AppSettings.defaults.quickInputBarEnabled,
+      punctuationAutoCompleteEnabled: AppSettings.defaults.punctuationAutoCompleteEnabled,
+      wordCountFloatingEnabled: AppSettings.defaults.wordCountFloatingEnabled,
+      wordCountFloatingPosition: AppSettings.defaults.wordCountFloatingPosition,
+      wordCountFloatingSpeedEnabled: AppSettings.defaults.wordCountFloatingSpeedEnabled,
+    );
+    return updateSettings(newSettings);
+  }
+
+  /// 重置备份设置为默认值
+  /// 从 AppSettings.defaults 获取默认值，保留其他设置不变
+  Future<bool> resetBackupSettings() async {
+    final newSettings = _settings.copyWith(
+      autoBackupEnabled: AppSettings.defaults.autoBackupEnabled,
+      backupInterval: AppSettings.defaults.backupInterval,
+      historyRetentionDays: AppSettings.defaults.historyRetentionDays,
     );
     return updateSettings(newSettings);
   }
@@ -882,7 +997,7 @@ class SettingsService extends ChangeNotifier {
   
   /// 重置所有设置为默认值
   Future<bool> resetToDefault() async {
-    _settings = AppSettings.defaults;
+    _settings = _platformDefaults;
     final success = await _saveSettings();
     
     if (success) {

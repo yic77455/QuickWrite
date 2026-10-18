@@ -50,6 +50,12 @@ class _NameGeneratorDialogState extends State<_NameGeneratorDialog> {
   /// 自定义后缀输入控制器
   final TextEditingController _suffixController = TextEditingController();
 
+  /// 自定义姓氏输入框焦点节点
+  final FocusNode _surnameFocusNode = FocusNode();
+
+  /// 自定义后缀输入框焦点节点
+  final FocusNode _suffixFocusNode = FocusNode();
+
   /// 当前类别
   NameCategory _category = NameCategory.person;
 
@@ -87,6 +93,8 @@ class _NameGeneratorDialogState extends State<_NameGeneratorDialog> {
   void dispose() {
     _surnameController.dispose();
     _suffixController.dispose();
+    _surnameFocusNode.dispose();
+    _suffixFocusNode.dispose();
     super.dispose();
   }
 
@@ -333,6 +341,8 @@ class _NameGeneratorDialogState extends State<_NameGeneratorDialog> {
                         options: _options,
                         surnameController: _surnameController,
                         suffixController: _suffixController,
+                        surnameFocusNode: _surnameFocusNode,
+                        suffixFocusNode: _suffixFocusNode,
                         onChanged: _onOptionsChanged,
                       ),
                     ),

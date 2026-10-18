@@ -6,6 +6,7 @@ import 'package:quick_write/core/constants/constants.dart';
 import 'package:quick_write/core/models/chapter.dart';
 import 'package:quick_write/core/models/volume.dart';
 import 'package:quick_write/core/services/app_paths.dart';
+import 'package:quick_write/core/utils/relative_path_utils.dart';
 import 'package:quick_write/core/utils/text_parser.dart';
 import 'package:quick_write/core/utils/word_count_utils.dart';
 import 'package:uuid/uuid.dart';
@@ -309,7 +310,10 @@ class BookImportService {
       // 清理分卷名中的非法文件名字符
       final safeVolumeName = _sanitizeFileName(volumeName);
       targetPath = '$chaptersPath${Platform.pathSeparator}$safeVolumeName';
-      relativePath = '$safeVolumeName${Platform.pathSeparator}${_sanitizeFileName(chapterTitle)}${GlobalConstants.chapterFileExtension}';
+      relativePath = joinRelativePath([
+        safeVolumeName,
+        '${_sanitizeFileName(chapterTitle)}${GlobalConstants.chapterFileExtension}',
+      ]);
     } else {
       targetPath = chaptersPath;
       relativePath = '${_sanitizeFileName(chapterTitle)}${GlobalConstants.chapterFileExtension}';

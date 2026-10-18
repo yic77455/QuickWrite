@@ -38,6 +38,7 @@ class PaletteDeriver {
     final surfaceContainer = _shift(base.surface, base.surfaceContainer, surface);
     final surfaceContainerHigh = _shift(base.surface, base.surfaceContainerHigh, surface);
     final surfaceContainerHighest = _shift(base.surface, base.surfaceContainerHighest, surface);
+    final secondaryContainer = _shift(base.surface, base.secondaryContainer, surface);
     final cardColor = _shift(base.surface, base.cardColor, surface);
     final cardThemeSurface = _shift(base.surface, base.cardThemeSurface, surface);
     final inputFill = _shift(base.surface, base.inputFill, surface);
@@ -90,7 +91,7 @@ class PaletteDeriver {
       // 次要颜色组
       secondary: accent,
       onSecondary: onSecondary,
-      secondaryContainer: base.secondaryContainer,
+      secondaryContainer: secondaryContainer,
       onSecondaryContainer: textSecondary,
 
       // 第三颜色组

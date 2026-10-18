@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:re_editor/re_editor.dart';
 
 /// re_editor 输入法光标上报器
@@ -91,6 +92,8 @@ class _ReEditorImeReporterState extends State<ReEditorImeReporter> with WidgetsB
 
   /// 等当前帧布局完成后再读取光标坐标
   void _scheduleReport() {
+    // 当前平台不需要修正输入法候选框时，跳过整个上报流程
+    if (!PlatformCapabilities.needsImeCursorFix) return;
     WidgetsBinding.instance.addPostFrameCallback((_) => _tryReportNow());
   }
 
@@ -98,6 +101,8 @@ class _ReEditorImeReporterState extends State<ReEditorImeReporter> with WidgetsB
   ///
   /// 目的是在用户按下第一个 IME 键触发合成开始之前，原生层已缓存正确的光标坐标。
   void _onFocusChanged() {
+    // 当前平台不需要修正输入法候选框时，跳过整个上报流程
+    if (!PlatformCapabilities.needsImeCursorFix) return;
     if (!widget.focusNode.hasFocus) return;
     if (!_tryReportNow()) {
       // 组件刚构建尚未完成布局时读取失败，等下一帧重试

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 
 /// 回收站空状态组件
@@ -23,31 +24,40 @@ class RecycleEmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final bool isMobile = PlatformCapabilities.isMobile;
+
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            icon,
-            size: 120,
-            color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.4),
-          ),
-          const SizedBox(height: 24),
-          Text(
-            title,
-            style: context.displaySmall?.copyWith(
-              fontWeight: FontWeight.bold,
-              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6),
+      // 移动端收窄左右留白，避免长文本贴边
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: isMobile ? 24 : 0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              icon,
+              size: isMobile ? 72 : 120,
+              color: colorScheme.primary.withValues(alpha: 0.4),
             ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            description,
-            style: context.titleLarge?.copyWith(
-              color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.4),
+            SizedBox(height: isMobile ? 16 : 24),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: (isMobile ? context.titleLarge : context.displaySmall)?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: colorScheme.onSurface.withValues(alpha: 0.6),
+              ),
             ),
-          ),
-        ],
+            SizedBox(height: isMobile ? 8 : 12),
+            Text(
+              description,
+              textAlign: TextAlign.center,
+              style: (isMobile ? context.bodyMedium : context.titleLarge)?.copyWith(
+                color: colorScheme.onSurface.withValues(alpha: 0.4),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

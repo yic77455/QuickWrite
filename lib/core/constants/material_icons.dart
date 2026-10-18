@@ -16,4 +16,8 @@ class MaterialIcons {
   static const IconData format_text_wrap = IconData(0xf828, fontFamily: 'MaterialIconsRounded');
   static const IconData save_clock = IconData(0xf398, fontFamily: 'MaterialIconsRounded');
   static const IconData delete = IconData(0xe872, fontFamily: 'MaterialIconsRoundedSemiBold');
+  static const IconData undo = IconData(0xe166, fontFamily: 'MaterialIconsRoundedSemiBold');
+  static const IconData redo = IconData(0xe15a, fontFamily: 'MaterialIconsRoundedSemiBold');
+  static const IconData format_ink_highlighter = IconData(0xf82b, fontFamily: 'MaterialIconsRounded');
+  static const IconData laps = IconData(0xf6b9, fontFamily: 'MaterialIconsRounded');
 }

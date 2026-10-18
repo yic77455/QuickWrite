@@ -6,6 +6,13 @@ class _CodeInputController extends ChangeNotifier implements DeltaTextInputClien
   FocusNode _focusNode;
   bool _readOnly;
   bool _autocompleteSymbols;
+
+  /// 自动补全使用的成对符号，为空时沿用内置符号表
+  List<CodeSymbolPair>? _autocompletePairs;
+
+  /// 外部换行处理，为空时使用控制器默认换行
+  VoidCallback? _newLineHandler;
+
   bool _updateCausedByFloatingCursor;
   late Offset _floatingCursorStartingOffset;
 
@@ -23,12 +30,16 @@ class _CodeInputController extends ChangeNotifier implements DeltaTextInputClien
     required FocusNode focusNode,
     required bool readOnly,
     required bool autocompleteSymbols,
+    List<CodeSymbolPair>? autocompletePairs,
+    VoidCallback? newLineHandler,
   }) : _controller = controller,
     _floatingCursorController = floatingCursorController,
     _focusNode = focusNode,
     _readOnly = readOnly,
     _updateCausedByFloatingCursor = false,
-    _autocompleteSymbols = autocompleteSymbols {
+    _autocompleteSymbols = autocompleteSymbols,
+    _autocompletePairs = autocompletePairs,
+    _newLineHandler = newLineHandler {
     _controller.addListener(_onCodeEditingChanged);
     _focusNode.addListener(_onFocusChanged);
   }
@@ -70,6 +81,33 @@ class _CodeInputController extends ChangeNotifier implements DeltaTextInputClien
     _autocompleteSymbols = value;
   }
 
+  set autocompletePairs(List<CodeSymbolPair>? value) {
+    if (listEquals(_autocompletePairs, value)) {
+      return;
+    }
+    _autocompletePairs = value;
+  }
+
+  set newLineHandler(VoidCallback? value) {
+    if (_newLineHandler == value) {
+      return;
+    }
+    _newLineHandler = value;
+  }
+
+  /// 执行换行
+  ///
+  /// 移动端软键盘的换行不经过快捷键机制，非空时交由外部换行处理接管，
+  /// 使移动端与桌面端共用同一套换行规则；为空时使用控制器默认换行。
+  void applyNewLine() {
+    final VoidCallback? handler = _newLineHandler;
+    if (handler != null) {
+      handler();
+    } else {
+      _controller.applyNewLine();
+    }
+  }
+
   set value(CodeLineEditingValue value) {
     _controller.value = value;
   }
@@ -106,7 +144,7 @@ class _CodeInputController extends ChangeNotifier implements DeltaTextInputClien
       // Fix issue #42, iOS will insert duplicate new lines.
       // We only do this on Android.
       if (kIsAndroid) {
-        _controller.applyNewLine();
+        applyNewLine();
       }
     }
   }
@@ -146,7 +184,7 @@ class _CodeInputController extends ChangeNotifier implements DeltaTextInputClien
         newValue = delta.apply(newValue);
       }
       _remoteEditingValue = newValue;
-      _controller.applyNewLine();
+      applyNewLine();
       return;
     }
 
@@ -155,7 +193,7 @@ class _CodeInputController extends ChangeNotifier implements DeltaTextInputClien
     bool smartChange = false;
     for (final TextEditingDelta delta in textEditingDeltas) {
       if (_autocompleteSymbols) {
-        TextEditingDelta newDelta = _SmartTextEditingDelta(delta).apply(selection);
+        TextEditingDelta newDelta = _SmartTextEditingDelta(delta, _autocompletePairs).apply(selection);
         if (newDelta != delta) {
           smartChange = true;
         }
@@ -167,6 +205,10 @@ class _CodeInputController extends ChangeNotifier implements DeltaTextInputClien
     if (newValue == _remoteEditingValue) {
       return;
     }
+    // 输入法若已改写镜像文本，说明本次变更携带有实际输入内容
+    final bool textChanged = smartChange || newValue.text != _remoteEditingValue!.text;
+    // 本次光标在镜像中移动的步数，用于区分方向键与输入法的行首行尾操作
+    final int caretMove = newValue.selection.start - _remoteEditingValue!.selection.start;
     if (!smartChange) {
       _remoteEditingValue = newValue;
     }
@@ -174,16 +216,62 @@ class _CodeInputController extends ChangeNotifier implements DeltaTextInputClien
     // print('update selection ${newValue.selection}');
     // print('update composing ${newValue.composing}');
     if (newValue.usePrefix) {
+      if (_handleCursorBeyondMirror(newValue, textChanged: textChanged, caretMove: caretMove)) {
+        return;
+      }
       if (newValue.selection.isCollapsed && newValue.selection.start == 0) {
         _controller.deleteBackward();
       } else {
-        _controller.edit(newValue.removePrefixIfNecessary());
+        _controller.edit(newValue.removePrefixIfNecessary().removeSuffixIfNecessary());
       }
     } else {
       _controller.edit(newValue);
     }
     notifyListeners();
     // _Trace.end('updateEditingValue all');
+  }
+
+  /// 处理光标越过镜像两端零宽哨兵的选区变更
+  ///
+  /// 光标越过哨兵时镜像文本没有变化，表示输入法把光标移出了镜像：
+  /// 单步越过哨兵对应方向键，跨多步越过对应输入法的行首行尾操作。
+  /// 返回是否已处理本次变更，未处理时仍按普通选区变更处理。
+  bool _handleCursorBeyondMirror(TextEditingValue value, {
+    required bool textChanged,
+    required int caretMove,
+  }) {
+    if (textChanged || !value.usePrefix || !value.selection.isCollapsed) {
+      return false;
+    }
+    if (value.selection.start == 0) {
+      if (caretMove == -1) {
+        // 光标在行首继续左移，移至上一行行尾
+        _controller.moveCursor(AxisDirection.left);
+      } else {
+        // 输入法把光标移至行首
+        selection = CodeLineSelection.collapsed(
+          index: selection.extentIndex,
+          offset: 0
+        );
+        _controller.makeCursorCenterIfInvisible();
+      }
+      return true;
+    }
+    if (value.selection.start == value.text.length) {
+      if (caretMove == 1) {
+        // 光标在行尾继续右移，移至下一行行首
+        _controller.moveCursor(AxisDirection.right);
+      } else {
+        // 输入法把光标移至行尾
+        selection = CodeLineSelection.collapsed(
+          index: selection.extentIndex,
+          offset: codeLines[selection.extentIndex].length
+        );
+        _controller.makeCursorCenterIfInvisible();
+      }
+      return true;
+    }
+    return false;
   }
 
   @override
@@ -469,6 +557,10 @@ class _CodeInputController extends ChangeNotifier implements DeltaTextInputClien
     _textInputConnection = null;
   }
 
+  /// 构建推送给输入法的镜像文本
+  ///
+  /// 镜像只包含光标所在行的文本，移动端额外在镜像两端追加零宽哨兵，
+  /// 使输入法方向键在行首与行尾仍有移动余量。
   TextEditingValue _buildTextEditingValue() {
     final TextSelection textSelection;
     if (selection.isSameLine) {
@@ -493,24 +585,27 @@ class _CodeInputController extends ChangeNotifier implements DeltaTextInputClien
       text: codeLines[selection.baseIndex].text,
       selection: textSelection,
       composing: composing
-    ).appendPrefixIfNecessary();
+    ).appendPrefixIfNecessary().appendSuffixIfNecessary();
   }
 
 }
 
 class _SmartTextEditingDelta {
 
-  static const List<_ClosureSymbol> _closureSymbols = [
+  /// 内置的成对符号（起始与结束不同）
+  static const List<_ClosureSymbol> _defaultClosureSymbols = [
     _ClosureSymbol('{', '}'),
     _ClosureSymbol('[', ']'),
     _ClosureSymbol('(', ')'),
   ];
 
-  static const List<String> _quoteSymbols = [
+  /// 内置的引号符号（起始与结束相同）
+  static const List<String> _defaultQuoteSymbols = [
     '\'', '"', '`'
   ];
 
-  static const List<_ClosureSymbol> _wrapSymbols = [
+  /// 内置的可包裹选区的成对符号
+  static const List<_ClosureSymbol> _defaultWrapSymbols = [
     _ClosureSymbol('{', '}'),
     _ClosureSymbol('[', ']'),
     _ClosureSymbol('(', ')'),
@@ -519,9 +614,34 @@ class _SmartTextEditingDelta {
     _ClosureSymbol('`', '`'),
   ];
 
+  /// 生效的成对符号（起始与结束不同）
+  final List<_ClosureSymbol> _closureSymbols;
+
+  /// 生效的引号符号（起始与结束相同）
+  final List<String> _quoteSymbols;
+
+  /// 生效的可包裹选区的成对符号
+  final List<_ClosureSymbol> _wrapSymbols;
+
   final TextEditingDelta _delta;
 
-  _SmartTextEditingDelta(this._delta);
+  /// [pairs] 为空时沿用内置符号表，否则按传入的符号表构造成对与引号两类符号
+  _SmartTextEditingDelta(this._delta, [List<CodeSymbolPair>? pairs])
+    : _closureSymbols = pairs == null
+        ? _defaultClosureSymbols
+        : pairs
+            .where((e) => e.left != e.right)
+            .map((e) => _ClosureSymbol(e.left, e.right))
+            .toList(),
+      _quoteSymbols = pairs == null
+        ? _defaultQuoteSymbols
+        : pairs
+            .where((e) => e.left == e.right)
+            .map((e) => e.left)
+            .toList(),
+      _wrapSymbols = pairs == null
+        ? _defaultWrapSymbols
+        : pairs.map((e) => _ClosureSymbol(e.left, e.right)).toList();
 
   TextEditingDelta apply(CodeLineSelection selection) {
     TextEditingDelta delta = _delta;
@@ -685,9 +805,17 @@ class _ClosureSymbol {
 
 const String _kPrefix = '\u200b';
 
+/// 镜像末尾追加的零宽哨兵
+///
+/// 输入法方向键只能在镜像文本内移动光标，末尾追加哨兵后光标位于行尾时
+/// 仍有一次向右移动的余量，使输入法上报的选区变更能够触发跨行光标移动。
+const String _kSuffix = '\u200b';
+
 extension _TextEditingValueExtension on TextEditingValue {
 
   bool get startWithPrefix => text.startsWith(_kPrefix);
+
+  bool get endWithSuffix => text.endsWith(_kSuffix);
 
   bool get usePrefix => kIsIOS || kIsAndroid;
 
@@ -725,6 +853,32 @@ extension _TextEditingValueExtension on TextEditingValue {
         start: max(0, composing.start - 1),
         end: max(0, composing.end - 1)
       ) : null
+    );
+  }
+
+  TextEditingValue appendSuffixIfNecessary() {
+    if (!usePrefix) {
+      return this;
+    }
+    return copyWith(
+      text: '$text$_kSuffix'
+    );
+  }
+
+  TextEditingValue removeSuffixIfNecessary() {
+    if (!usePrefix) {
+      return this;
+    }
+    if (!endWithSuffix) {
+      return this;
+    }
+    final String newText = text.substring(0, text.length - 1);
+    return copyWith(
+      text: newText,
+      selection: selection.copyWith(
+        baseOffset: min(selection.baseOffset, newText.length),
+        extentOffset: min(selection.extentOffset, newText.length),
+      )
     );
   }
 

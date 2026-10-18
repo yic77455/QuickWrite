@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../utils/platform_capabilities.dart';
 import 'theme_palette.dart';
 
 /// 主题构建器
@@ -29,6 +30,12 @@ class ThemeBuilder {
       useMaterial3: true,
       fontFamily: fontFamily,
       fontFamilyFallback: fontFallback,
+
+      // 固定组件视觉密度与点击热区，统一双端的组件度量：
+      // 使同一套布局在桌面端与移动端得到相同的组件尺寸与间距，
+      // 且该度量恒定，不随平台、设备分辨率或系统缩放而变化
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
 
       // ================= 核心颜色方案 =================
       // 参考 Material Design 3 颜色系统：https://m3.material.io/styles/color/system/overview
@@ -233,6 +240,21 @@ class ThemeBuilder {
         ),
       ),
 
+      // ================= 悬浮按钮 =================
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        // 底色取不透明色：调色板的 primaryContainer 可能带透明度，
+        // 半透明底色会让按钮下方的 elevation 阴影从按钮内部透出
+        backgroundColor: Color.alphaBlend(
+          p.primaryContainer,
+          p.scaffoldBackground,
+        ),
+        // 关闭 Material 原生 elevation 阴影，悬浮按钮组改用自定义阴影
+        elevation: 0,
+        focusElevation: 0,
+        hoverElevation: 0,
+        highlightElevation: 0,
+      ),
+
       // ================= 开关 =================
       switchTheme: SwitchThemeData(
         thumbColor: WidgetStateProperty.resolveWith((states) {
@@ -280,6 +302,27 @@ class ThemeBuilder {
         circularTrackColor: p.trackColor,
         linearTrackColor: p.trackColor,
       ),
+
+      // ================= 滚动条 =================
+      // 移动端平台默认以系统高亮色绘制滚动条手柄，与桌面端的半透明灰阶观感差异明显，
+      // 因此移动端显式指定手柄配色（取值与桌面端默认表现一致）使双端统一；
+      // 桌面端返回 null，沿用 Flutter 自带实现。
+      scrollbarTheme: PlatformCapabilities.isMobile
+          ? ScrollbarThemeData(
+              // 拖动中 / 悬停 / 静止三态分别取不同的不透明度；
+              // 暗色主题底色偏深，需要更高的不透明度才能看清手柄
+              thumbColor: WidgetStateProperty.resolveWith((states) {
+                final bool isDark = p.brightness == Brightness.dark;
+                if (states.contains(WidgetState.dragged)) {
+                  return p.onSurface.withAlpha(isDark ? 191 : 153);
+                }
+                if (states.contains(WidgetState.hovered)) {
+                  return p.onSurface.withAlpha(isDark ? 166 : 128);
+                }
+                return p.onSurface.withAlpha(isDark ? 77 : 26);
+              }),
+            )
+          : null,
 
       // === Tab 标签页 ===
       tabBarTheme: TabBarThemeData(

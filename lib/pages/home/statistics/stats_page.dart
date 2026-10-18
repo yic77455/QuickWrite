@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/providers/bookshelf_provider.dart';
 import 'package:quick_write/core/providers/writing_stats_provider.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/utils/word_count_utils.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
@@ -32,6 +33,19 @@ class _StatsPageState extends State<StatsPage> {
   Widget build(BuildContext context) {
     final statsProvider = context.watch<WritingStatsProvider>();
     final bookshelf = context.watch<BookshelfProvider>();
+
+    // 桌面端为多列并排布局，移动端窄屏改为单列纵向排布
+    return PlatformCapabilities.isMobile
+        ? _buildMobileLayout(context, statsProvider, bookshelf)
+        : _buildDesktopLayout(context, statsProvider, bookshelf);
+  }
+
+  /// 桌面端布局：顶部工具栏 + 左右并排的统计区块
+  Widget _buildDesktopLayout(
+    BuildContext context,
+    WritingStatsProvider statsProvider,
+    BookshelfProvider bookshelf,
+  ) {
     final colorScheme = Theme.of(context).colorScheme;
 
     return ListView(
@@ -41,29 +55,12 @@ class _StatsPageState extends State<StatsPage> {
         Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Text('码字统计', style: Theme.of(context).textTheme.headlineMedium),
+            Text('码字统计', style: context.headlineMedium?.copyWith(
+            fontWeight: FontWeight.bold,
+            letterSpacing: 0.2,
+          ),),
             const SizedBox(width: 8),
-            // 粘贴字数统计开关（仅影响统计界面的显示）
-            Transform.translate(
-              offset: const Offset(0, 3),
-              child: CursorTooltipTarget(
-                showTooltip: true,
-                tooltipContent: Text('是否包含粘贴字数', style: context.bodySmall),
-                child: IconButton(
-                  icon: const Icon(Icons.content_paste_rounded),
-                  iconSize: 16,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                  color: statsProvider.includePasteWords ? colorScheme.primary : colorScheme.onSurfaceVariant,
-                  style: IconButton.styleFrom(
-                    backgroundColor: statsProvider.includePasteWords
-                        ? colorScheme.primary.withValues(alpha: 0.1)
-                        : Colors.transparent,
-                  ),
-                  onPressed: () => statsProvider.toggleIncludePasteWords(),
-                ),
-              ),
-            ),
+            _buildPasteToggle(context, statsProvider),
             const Spacer(),
             // 书籍筛选下拉框
             SizedBox(
@@ -77,11 +74,7 @@ class _StatsPageState extends State<StatsPage> {
             ),
             const SizedBox(width: 8),
             // 刷新按钮
-            CursorTooltipTarget(
-              showTooltip: true,
-              tooltipContent: Text('刷新', style: context.bodySmall),
-              child: IconButton(icon: const Icon(Icons.refresh_rounded), onPressed: () => statsProvider.refresh()),
-            ),
+            _buildRefreshButton(context, statsProvider),
           ],
         ),
         const SizedBox(height: 24),
@@ -129,15 +122,7 @@ class _StatsPageState extends State<StatsPage> {
                   children: [
                     Text('创作趋势', style: context.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
                     const SizedBox(width: 16),
-                    SizedBox(
-                      width: 200,
-                      child: SegmentedControl(
-                        labels: const ['本周', '本月'],
-                        selectedIndex: statsProvider.chartRangeMode == ChartRangeMode.week ? 0 : 1,
-                        onChanged: (index) =>
-                            statsProvider.setChartRangeMode(index == 0 ? ChartRangeMode.week : ChartRangeMode.month),
-                      ),
-                    ),
+                    SizedBox(width: 200, child: _buildRangeSelector(statsProvider)),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -146,28 +131,9 @@ class _StatsPageState extends State<StatsPage> {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: StatsChartCard(
-                        title: '创作字数统计',
-                        icon: Icons.show_chart_rounded,
-                        points: _toWordCountPoints(statsProvider.wordCountChartStats),
-                        lineColor: colorScheme.primary,
-                        valueLabel: '字数',
-                        valueFormatter: _formatWordCountAxis,
-                        tooltipValueFormatter: (v) => WordCountUtils.formatWordCountShort(v, wanThreshold: 100000),
-                      ),
-                    ),
+                    Expanded(child: _buildWordCountChart(context, statsProvider, colorScheme)),
                     const SizedBox(width: 16),
-                    Expanded(
-                      child: StatsChartCard(
-                        title: '创作时长统计',
-                        icon: Icons.timeline_rounded,
-                        points: _toDurationPoints(statsProvider.durationChartStats),
-                        lineColor: colorScheme.tertiary,
-                        valueLabel: '时长',
-                        valueFormatter: _formatDurationAxis,
-                      ),
-                    ),
+                    Expanded(child: _buildDurationChart(context, statsProvider, colorScheme)),
                   ],
                 ),
                 const SizedBox(height: 16),
@@ -179,6 +145,168 @@ class _StatsPageState extends State<StatsPage> {
           ),
         ),
       ],
+    );
+  }
+
+  /// 移动端布局：单列纵向排布，各区块独占整行避免横向挤压
+  Widget _buildMobileLayout(
+    BuildContext context,
+    WritingStatsProvider statsProvider,
+    BookshelfProvider bookshelf,
+  ) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+      children: [
+        // 顶部标题栏：标题 + 粘贴字数开关
+        Row(
+          children: [
+            Text('码字统计', style: context.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(width: 8),
+            _buildPasteToggle(context, statsProvider),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        // 书籍筛选下拉框（占满剩余宽度）+ 刷新按钮
+        Row(
+          children: [
+            Expanded(
+              child: CustomDropdown(
+                width: double.infinity,
+                value: statsProvider.selectedBookUuid,
+                items: _buildBookItems(bookshelf),
+                onChanged: (value) => statsProvider.setSelectedBook(value),
+              ),
+            ),
+            const SizedBox(width: 8),
+            _buildRefreshButton(context, statsProvider),
+          ],
+        ),
+        const SizedBox(height: 16),
+
+        // 今日数据卡片
+        TodayStatsCard(
+          stat: statsProvider.selectedDateStat,
+          consecutiveDays: statsProvider.consecutiveDays,
+        ),
+        const SizedBox(height: 12),
+
+        // 码字日历
+        WritingCalendar(
+          month: statsProvider.calendarMonth,
+          calendarStats: statsProvider.calendarStats,
+          selectedDate: statsProvider.selectedDate,
+          onDateSelected: (date) => statsProvider.setSelectedDate(date),
+          onPreviousMonth: () => statsProvider.changeCalendarMonth(-1),
+          onNextMonth: () => statsProvider.changeCalendarMonth(1),
+        ),
+        const SizedBox(height: 20),
+
+        // 本周/本月切换
+        Row(
+          children: [
+            Text('创作趋势', style: context.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+            const Spacer(),
+            SizedBox(width: 160, child: _buildRangeSelector(statsProvider)),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        // 字数统计图表 / 时长统计图表（纵向堆叠，保证图表绘图区宽度）
+        _buildWordCountChart(context, statsProvider, colorScheme),
+        const SizedBox(height: 12),
+        _buildDurationChart(context, statsProvider, colorScheme),
+        const SizedBox(height: 16),
+
+        // 数据总览
+        OverviewCard(stats: statsProvider.overviewStats),
+      ],
+    );
+  }
+
+  /// 切换是否将粘贴字数计入统计
+  void _toggleIncludePasteWords(BuildContext context, WritingStatsProvider statsProvider) {
+    final bool enabled = !statsProvider.includePasteWords;
+    statsProvider.toggleIncludePasteWords();
+    SnackBarService.show(context, enabled ? '统计已包含粘贴字数' : '统计已排除粘贴字数');
+  }
+
+  /// 构建粘贴字数统计开关（仅影响统计界面的显示）
+  Widget _buildPasteToggle(BuildContext context, WritingStatsProvider statsProvider) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Transform.translate(
+      offset: const Offset(0, 1),
+      child: CursorTooltipTarget(
+        showTooltip: true,
+        tooltipContent: Text('是否包含粘贴字数', style: context.bodySmall),
+        child: IconButton(
+          icon: const Icon(Icons.content_paste_rounded),
+          iconSize: 16,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          color: statsProvider.includePasteWords ? colorScheme.primary : colorScheme.onSurfaceVariant,
+          style: IconButton.styleFrom(
+            backgroundColor: statsProvider.includePasteWords
+                ? colorScheme.primary.withValues(alpha: 0.1)
+                : Colors.transparent,
+          ),
+          onPressed: () => _toggleIncludePasteWords(context, statsProvider),
+        ),
+      ),
+    );
+  }
+
+  /// 构建刷新按钮
+  Widget _buildRefreshButton(BuildContext context, WritingStatsProvider statsProvider) {
+    return CursorTooltipTarget(
+      showTooltip: true,
+      tooltipContent: Text('刷新', style: context.bodySmall),
+      child: IconButton(icon: const Icon(Icons.refresh_rounded), onPressed: () => statsProvider.refresh()),
+    );
+  }
+
+  /// 构建本周/本月切换控件
+  Widget _buildRangeSelector(WritingStatsProvider statsProvider) {
+    return SegmentedControl(
+      labels: const ['本周', '本月'],
+      selectedIndex: statsProvider.chartRangeMode == ChartRangeMode.week ? 0 : 1,
+      onChanged: (index) =>
+          statsProvider.setChartRangeMode(index == 0 ? ChartRangeMode.week : ChartRangeMode.month),
+    );
+  }
+
+  /// 构建创作字数统计图表
+  Widget _buildWordCountChart(
+    BuildContext context,
+    WritingStatsProvider statsProvider,
+    ColorScheme colorScheme,
+  ) {
+    return StatsChartCard(
+      title: '创作字数统计',
+      icon: Icons.show_chart_rounded,
+      points: _toWordCountPoints(statsProvider.wordCountChartStats),
+      lineColor: colorScheme.primary,
+      valueLabel: '字数',
+      valueFormatter: _formatWordCountAxis,
+      tooltipValueFormatter: (v) => WordCountUtils.formatWordCountShort(v, wanThreshold: 100000),
+    );
+  }
+
+  /// 构建创作时长统计图表
+  Widget _buildDurationChart(
+    BuildContext context,
+    WritingStatsProvider statsProvider,
+    ColorScheme colorScheme,
+  ) {
+    return StatsChartCard(
+      title: '创作时长统计',
+      icon: Icons.timeline_rounded,
+      points: _toDurationPoints(statsProvider.durationChartStats),
+      lineColor: colorScheme.tertiary,
+      valueLabel: '时长',
+      valueFormatter: _formatDurationAxis,
     );
   }
 

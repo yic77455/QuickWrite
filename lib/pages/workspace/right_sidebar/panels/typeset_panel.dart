@@ -294,7 +294,7 @@ class _TypesetPanelState extends State<TypesetPanel> {
     final count = service.items.length;
 
     return InkWellSettingItem(
-      icon: Icons.highlight_rounded,
+      icon: MaterialIcons.format_ink_highlighter,
       label: '自定义高亮',
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 15),
       trailing: Row(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:quick_write/core/constants/material_icons.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/color_utils.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/dialogs/color_picker_dialog.dart';
 import 'package:quick_write/shared/widgets/segmented_control.dart';
@@ -53,12 +54,6 @@ class _LayoutPanelState extends State<LayoutPanel> {
     final bottomMargin = settingsService.bottomMargin;
     final isPageViewEnabled = settingsService.isPageViewEnabled;
     final scrollbarAlwaysVisible = settingsService.scrollbarAlwaysVisible;
-    // 大纲编辑器布局设置
-    final outlineTopMargin = settingsService.outlineTopMargin;
-    final outlineHorizontalMargin = settingsService.outlineHorizontalMargin;
-    final outlineBottomMargin = settingsService.outlineBottomMargin;
-    final outlineNodeSpacing = settingsService.outlineNodeSpacing;
-    final outlinePageViewMode = settingsService.outlinePageViewMode;
     
     // 使用 Column 布局，确保内容区域自适应填充剩余空间
     return Container(
@@ -82,25 +77,15 @@ class _LayoutPanelState extends State<LayoutPanel> {
                   
                   const SizedBox(height: 20),
                   
-                  // 视图模式设置区块
-                  _buildViewModeSection(context, isPageViewEnabled),
+                  // 视图模式设置区块（移动端不提供纸张模式，隐藏该区块）
+                  if (!PlatformCapabilities.isMobile) ...[
+                    _buildViewModeSection(context, isPageViewEnabled),
 
-                  const SizedBox(height: 20),
+                    const SizedBox(height: 20),
+                  ],
 
                   // 编辑器背景设置区块
                   _buildEditorBackgroundSection(context),
-
-                  const SizedBox(height: 20),
-
-                  // 大纲编辑器设置区块
-                  _buildOutlineEditorSection(
-                    context,
-                    outlineTopMargin,
-                    outlineHorizontalMargin,
-                    outlineBottomMargin,
-                    outlineNodeSpacing,
-                    outlinePageViewMode,
-                  ),
                 ],
               ),
             ),
@@ -279,16 +264,19 @@ class _LayoutPanelState extends State<LayoutPanel> {
             onTap: () => _showEditorBackgroundColorPicker(context),
           ),
         ],
-        const SettingDivider(),
-        SwitchSettingItem(
-          icon: MaterialIcons.ink_eraser,
-          label: '纸张模式背景淡化',
-          value: settings.dimPaperBackground,
-          onChanged: (value) {
-            settings.updateDimPaperBackground(value);
-            setState(() {});
-          },
-        ),
+        // 纸张模式背景淡化开关（移动端不提供纸张模式，隐藏此项）
+        if (!PlatformCapabilities.isMobile) ...[
+          const SettingDivider(),
+          SwitchSettingItem(
+            icon: MaterialIcons.ink_eraser,
+            label: '纸张模式背景淡化',
+            value: settings.dimPaperBackground,
+            onChanged: (value) {
+              settings.updateDimPaperBackground(value);
+              setState(() {});
+            },
+          ),
+        ],
       ],
     );
   }
@@ -303,115 +291,6 @@ class _LayoutPanelState extends State<LayoutPanel> {
         ColorUtils.updateEditorBackgroundColorForTheme(context, colorHex);
         setState(() {});
       },
-    );
-  }
-
-  /// 构建大纲编辑器布局设置区块
-  Widget _buildOutlineEditorSection(
-    BuildContext context,
-    double outlineTopMargin,
-    double outlineHorizontalMargin,
-    double outlineBottomMargin,
-    double outlineNodeSpacing,
-    String outlinePageViewMode,
-  ) {
-    final settings = SettingsService.instance;
-    final colorScheme = Theme.of(context).colorScheme;
-    // 大纲编辑器页面视图模式与分段索引的映射
-    const modeList = ['adaptive', 'default', 'paper'];
-    final selectedIndex = modeList.indexOf(outlinePageViewMode).clamp(0, modeList.length - 1);
-
-    return SettingsSection(
-      title: '大纲编辑器',
-      icon: Icons.account_tree_outlined,
-      children: [
-        SliderSettingItem(
-          icon: Icons.vertical_align_top_outlined,
-          label: '顶边距',
-          value: outlineTopMargin,
-          min: 0,
-          max: 50,
-          divisions: 100,
-          unit: '%',
-          onChanged: (value) {
-            settings.updateOutlineTopMargin(value, debounce: true);
-            setState(() {});
-          },
-        ),
-        const SettingDivider(),
-        SliderSettingItem(
-          icon: Icons.swap_horiz,
-          label: '左右边距',
-          value: outlineHorizontalMargin,
-          min: 0,
-          max: 40,
-          divisions: 80,
-          unit: '%',
-          onChanged: (value) {
-            settings.updateOutlineHorizontalMargin(value, debounce: true);
-            setState(() {});
-          },
-        ),
-        const SettingDivider(),
-        SliderSettingItem(
-          icon: Icons.vertical_align_bottom_outlined,
-          label: '底边距',
-          value: outlineBottomMargin,
-          min: 0,
-          max: 100,
-          divisions: 100,
-          unit: '%',
-          onChanged: (value) {
-            settings.updateOutlineBottomMargin(value, debounce: true);
-            setState(() {});
-          },
-        ),
-        const SettingDivider(),
-        SliderSettingItem(
-          icon: Icons.format_line_spacing_rounded,
-          label: '节点间距',
-          value: outlineNodeSpacing,
-          min: 0,
-          max: 20,
-          divisions: 20,
-          unit: 'px',
-          onChanged: (value) {
-            settings.updateOutlineNodeSpacing(value, debounce: true);
-            setState(() {});
-          },
-        ),
-        const SettingDivider(),
-        // 页面视图分段选择器
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const SizedBox(width: 2),
-                  Icon(Icons.view_agenda_outlined, size: 16, color: colorScheme.onSurfaceVariant),
-                  const SizedBox(width: 10),
-                  Text(
-                    '页面视图',
-                    style: context.titleSmall?.copyWith(color: colorScheme.onSurface),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              SegmentedControl(
-                labels: const ['自适应', '默认', '纸张'],
-                selectedIndex: selectedIndex,
-                onChanged: (index) {
-                  settings.updateOutlinePageViewMode(modeList[index]);
-                  setState(() {});
-                },
-              ),
-              const SizedBox(height: 6),
-            ],
-          ),
-        ),
-      ],
     );
   }
 }

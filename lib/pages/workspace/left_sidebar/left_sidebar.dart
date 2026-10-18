@@ -11,7 +11,12 @@ import 'panels/setting_panel.dart';
 /// 支持左右滑动切换面板
 /// 支持平滑的展开/收起动画
 class LeftSidebar extends StatefulWidget {
-  const LeftSidebar({super.key});
+  /// 是否强制展开
+  ///
+  /// 移动端以抽屉形式展示时使用，忽略 Provider 的收起状态，始终按完整宽度渲染
+  final bool forceExpanded;
+
+  const LeftSidebar({super.key, this.forceExpanded = false});
 
   @override
   State<LeftSidebar> createState() => _LeftSidebarState();
@@ -42,7 +47,10 @@ class _LeftSidebarState extends State<LeftSidebar> with TickerProviderStateMixin
   @override
   void initState() {
     super.initState();
-    // 初始化 PageController，初始页面为 0（章节页面）
+    // 初始面板取 Provider 记录的选中索引，使 PageView 直接以该面板起步
+    // （移动端以抽屉展示时本组件每次开合都会重新挂载，需按记录的面板直接呈现）
+    _currentPageIndex = context.read<WorkspaceProvider>().leftSidebarSelectedIndex;
+    // 初始化 PageController，初始页面为上述面板
     _pageController = PageController(initialPage: _currentPageIndex);
     
     // 初始化展开/收起动画控制器
@@ -90,7 +98,8 @@ class _LeftSidebarState extends State<LeftSidebar> with TickerProviderStateMixin
     }
     
     // 监听左侧边栏的展开/收起状态变化，只在状态改变时播放动画
-    final isExpanded = provider.isLeftSidebarExpanded;
+    // 强制展开时（移动端以抽屉展示）忽略 Provider 的收起状态
+    final isExpanded = widget.forceExpanded || provider.isLeftSidebarExpanded;
     if (isExpanded != _lastExpanded) {
       _lastExpanded = isExpanded;
       if (isExpanded) {
@@ -121,6 +130,16 @@ class _LeftSidebarState extends State<LeftSidebar> with TickerProviderStateMixin
   @override
   Widget build(BuildContext context) {
     final workspaceProvider = context.watch<WorkspaceProvider>();
+
+    // 强制展开时（移动端以抽屉展示）直接铺满父级约束，
+    // 抽屉宽度与侧边栏配置宽度不一致，无需参与宽度与展开动画
+    if (widget.forceExpanded) {
+      return Padding(
+        padding: const EdgeInsets.all(2),
+        child: _buildSidebarContent(context, workspaceProvider),
+      );
+    }
+
     final isExpanded = workspaceProvider.isLeftSidebarExpanded;
     final width = workspaceProvider.leftSidebarWidth;
 

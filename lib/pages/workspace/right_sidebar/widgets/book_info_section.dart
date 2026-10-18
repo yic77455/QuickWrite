@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:quick_write/core/models/book.dart';
 import 'package:quick_write/core/models/chapter.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
+import 'package:quick_write/core/services/workspace/book_folder_service.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/utils/word_count_utils.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
@@ -161,20 +162,22 @@ class BookInfoSection extends StatelessWidget {
   Widget _buildHeader(BuildContext context, BookModel book) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    // 封面：有路径时显示图片，否则使用书名生成的默认渐变封面
+    // 封面：有封面时显示图片，否则使用书名生成的默认渐变封面
+    // 封面固定存放在作品目录下，数据库只记录文件名，此处拼接出完整路径
+    final coverPath = BookFolderService().coverFilePath(book);
     final coverWidget = ClipRRect(
       borderRadius: BorderRadius.circular(4),
       child: SizedBox(
         width: 64,
         height: 90,
-        child: book.coverPath.isEmpty
+        child: coverPath.isEmpty
             ? DefaultCover.buildThemed(
                 title: book.title,
                 context: context,
                 fontSize: 12,
                 borderRadius: 0,
               )
-            : ThemedCoverImage(coverPath: book.coverPath, fit: BoxFit.cover),
+            : ThemedCoverImage(coverPath: coverPath, fit: BoxFit.cover),
       ),
     );
 

@@ -5,12 +5,14 @@ import 'package:provider/provider.dart';
 import 'package:quick_write/core/constants/constants.dart';
 import 'package:quick_write/core/providers/bookshelf_provider.dart';
 import 'package:quick_write/core/providers/theme_provider.dart';
+import 'package:quick_write/core/providers/update_provider.dart';
 import 'package:quick_write/core/providers/window_provider.dart';
 import 'package:quick_write/core/providers/writing_stats_provider.dart';
 import 'package:quick_write/core/router/router.dart';
 import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
 import 'package:quick_write/core/services/tray_service.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/pages/workspace/workspace_page.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -49,11 +51,17 @@ class MyWriterApp extends StatelessWidget {
         // 主窗口界面不直接读取该 Provider，需立即创建才能注册窗口监听并拦截关闭
         ChangeNotifierProvider(
           lazy: false,
-          create: (_) => WindowProvider()
-            // 关闭拦截：按设置决定退出程序还是最小化至托盘
-            ..onCloseIntercept = TrayService.instance.handleCloseIntercept
-            // 关闭确认后先隐藏窗口，在后台完成退出同步
-            ..onCloseConfirmed = _handleMainWindowExit,
+          create: (_) {
+            final provider = WindowProvider();
+            // 关闭拦截与退出收尾依赖原生窗口，仅在支持原生窗口控制的平台启用
+            if (PlatformCapabilities.supportsNativeWindowControl) {
+              // 关闭拦截：按设置决定退出程序还是最小化至托盘
+              provider.onCloseIntercept = TrayService.instance.handleCloseIntercept;
+              // 关闭确认后先隐藏窗口，在后台完成退出同步
+              provider.onCloseConfirmed = _handleMainWindowExit;
+            }
+            return provider;
+          },
         ),
         // 注册主题状态 Provider，管理应用的主题模式
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
@@ -61,6 +69,12 @@ class MyWriterApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => BookshelfProvider()),
         // 注册码字统计 Provider，管理统计数据与筛选状态
         ChangeNotifierProvider(create: (_) => WritingStatsProvider()),
+        // 注册更新状态 Provider，应用启动后按设置检查一次更新，
+        // 供侧边栏、底部导航与关于页展示「有更新」提示
+        ChangeNotifierProvider(
+          lazy: false,
+          create: (_) => UpdateProvider()..checkOnStartup(),
+        ),
       ],
       child: Consumer<ThemeProvider>(
         builder: (context, themeProvider, child) {
@@ -116,10 +130,13 @@ class _WorkspaceAppState extends State<WorkspaceApp> {
 
   /// 初始化窗口通信通道
   Future<void> _initWindowChannel() async {
-    final windowController = await WindowController.fromCurrentEngine();
-    await MultiWindowService.instance.initWorkspaceMethodChannel(
-      windowController,
-    );
+    // 多窗口通信仅存在于桌面端，移动端没有需要监听的窗口消息
+    if (PlatformCapabilities.supportsMultiWindow) {
+      final windowController = await WindowController.fromCurrentEngine();
+      await MultiWindowService.instance.initWorkspaceMethodChannel(
+        windowController,
+      );
+    }
 
     // 设置主题变化回调
     MultiWindowService.instance.onThemeChanged = (themeModeName) {

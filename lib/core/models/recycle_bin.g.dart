@@ -22,9 +22,9 @@ const RecycleBinModelSchema = CollectionSchema(
       name: r'bookUuid',
       type: IsarType.string,
     ),
-    r'coverPath': PropertySchema(
+    r'coverFileName': PropertySchema(
       id: 1,
-      name: r'coverPath',
+      name: r'coverFileName',
       type: IsarType.string,
     ),
     r'createdAt': PropertySchema(
@@ -123,7 +123,7 @@ int _recycleBinModelEstimateSize(
 ) {
   var bytesCount = offsets.last;
   bytesCount += 3 + object.bookUuid.length * 3;
-  bytesCount += 3 + object.coverPath.length * 3;
+  bytesCount += 3 + object.coverFileName.length * 3;
   bytesCount += 3 + object.groupId.length * 3;
   bytesCount += 3 + object.latestChapter.length * 3;
   bytesCount += 3 + object.originalFolderName.length * 3;
@@ -141,7 +141,7 @@ void _recycleBinModelSerialize(
   Map<Type, List<int>> allOffsets,
 ) {
   writer.writeString(offsets[0], object.bookUuid);
-  writer.writeString(offsets[1], object.coverPath);
+  writer.writeString(offsets[1], object.coverFileName);
   writer.writeDateTime(offsets[2], object.createdAt);
   writer.writeDateTime(offsets[3], object.deletedAt);
   writer.writeString(offsets[4], object.groupId);
@@ -164,7 +164,7 @@ RecycleBinModel _recycleBinModelDeserialize(
 ) {
   final object = RecycleBinModel();
   object.bookUuid = reader.readString(offsets[0]);
-  object.coverPath = reader.readString(offsets[1]);
+  object.coverFileName = reader.readString(offsets[1]);
   object.createdAt = reader.readDateTime(offsets[2]);
   object.deletedAt = reader.readDateTime(offsets[3]);
   object.groupId = reader.readString(offsets[4]);
@@ -553,13 +553,13 @@ extension RecycleBinModelQueryFilter
   }
 
   QueryBuilder<RecycleBinModel, RecycleBinModel, QAfterFilterCondition>
-      coverPathEqualTo(
+      coverFileNameEqualTo(
     String value, {
     bool caseSensitive = true,
   }) {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.equalTo(
-        property: r'coverPath',
+        property: r'coverFileName',
         value: value,
         caseSensitive: caseSensitive,
       ));
@@ -567,7 +567,7 @@ extension RecycleBinModelQueryFilter
   }
 
   QueryBuilder<RecycleBinModel, RecycleBinModel, QAfterFilterCondition>
-      coverPathGreaterThan(
+      coverFileNameGreaterThan(
     String value, {
     bool include = false,
     bool caseSensitive = true,
@@ -575,7 +575,7 @@ extension RecycleBinModelQueryFilter
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.greaterThan(
         include: include,
-        property: r'coverPath',
+        property: r'coverFileName',
         value: value,
         caseSensitive: caseSensitive,
       ));
@@ -583,7 +583,7 @@ extension RecycleBinModelQueryFilter
   }
 
   QueryBuilder<RecycleBinModel, RecycleBinModel, QAfterFilterCondition>
-      coverPathLessThan(
+      coverFileNameLessThan(
     String value, {
     bool include = false,
     bool caseSensitive = true,
@@ -591,7 +591,7 @@ extension RecycleBinModelQueryFilter
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.lessThan(
         include: include,
-        property: r'coverPath',
+        property: r'coverFileName',
         value: value,
         caseSensitive: caseSensitive,
       ));
@@ -599,7 +599,7 @@ extension RecycleBinModelQueryFilter
   }
 
   QueryBuilder<RecycleBinModel, RecycleBinModel, QAfterFilterCondition>
-      coverPathBetween(
+      coverFileNameBetween(
     String lower,
     String upper, {
     bool includeLower = true,
@@ -608,7 +608,7 @@ extension RecycleBinModelQueryFilter
   }) {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.between(
-        property: r'coverPath',
+        property: r'coverFileName',
         lower: lower,
         includeLower: includeLower,
         upper: upper,
@@ -619,13 +619,13 @@ extension RecycleBinModelQueryFilter
   }
 
   QueryBuilder<RecycleBinModel, RecycleBinModel, QAfterFilterCondition>
-      coverPathStartsWith(
+      coverFileNameStartsWith(
     String value, {
     bool caseSensitive = true,
   }) {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.startsWith(
-        property: r'coverPath',
+        property: r'coverFileName',
         value: value,
         caseSensitive: caseSensitive,
       ));
@@ -633,13 +633,13 @@ extension RecycleBinModelQueryFilter
   }
 
   QueryBuilder<RecycleBinModel, RecycleBinModel, QAfterFilterCondition>
-      coverPathEndsWith(
+      coverFileNameEndsWith(
     String value, {
     bool caseSensitive = true,
   }) {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.endsWith(
-        property: r'coverPath',
+        property: r'coverFileName',
         value: value,
         caseSensitive: caseSensitive,
       ));
@@ -647,10 +647,10 @@ extension RecycleBinModelQueryFilter
   }
 
   QueryBuilder<RecycleBinModel, RecycleBinModel, QAfterFilterCondition>
-      coverPathContains(String value, {bool caseSensitive = true}) {
+      coverFileNameContains(String value, {bool caseSensitive = true}) {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.contains(
-        property: r'coverPath',
+        property: r'coverFileName',
         value: value,
         caseSensitive: caseSensitive,
       ));
@@ -658,10 +658,10 @@ extension RecycleBinModelQueryFilter
   }
 
   QueryBuilder<RecycleBinModel, RecycleBinModel, QAfterFilterCondition>
-      coverPathMatches(String pattern, {bool caseSensitive = true}) {
+      coverFileNameMatches(String pattern, {bool caseSensitive = true}) {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.matches(
-        property: r'coverPath',
+        property: r'coverFileName',
         wildcard: pattern,
         caseSensitive: caseSensitive,
       ));
@@ -669,20 +669,20 @@ extension RecycleBinModelQueryFilter
   }
 
   QueryBuilder<RecycleBinModel, RecycleBinModel, QAfterFilterCondition>
-      coverPathIsEmpty() {
+      coverFileNameIsEmpty() {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.equalTo(
-        property: r'coverPath',
+        property: r'coverFileName',
         value: '',
       ));
     });
   }
 
   QueryBuilder<RecycleBinModel, RecycleBinModel, QAfterFilterCondition>
-      coverPathIsNotEmpty() {
+      coverFileNameIsNotEmpty() {
     return QueryBuilder.apply(this, (query) {
       return query.addFilterCondition(FilterCondition.greaterThan(
-        property: r'coverPath',
+        property: r'coverFileName',
         value: '',
       ));
     });
@@ -2000,16 +2000,16 @@ extension RecycleBinModelQuerySortBy
   }
 
   QueryBuilder<RecycleBinModel, RecycleBinModel, QAfterSortBy>
-      sortByCoverPath() {
+      sortByCoverFileName() {
     return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'coverPath', Sort.asc);
+      return query.addSortBy(r'coverFileName', Sort.asc);
     });
   }
 
   QueryBuilder<RecycleBinModel, RecycleBinModel, QAfterSortBy>
-      sortByCoverPathDesc() {
+      sortByCoverFileNameDesc() {
     return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'coverPath', Sort.desc);
+      return query.addSortBy(r'coverFileName', Sort.desc);
     });
   }
 
@@ -2196,16 +2196,16 @@ extension RecycleBinModelQuerySortThenBy
   }
 
   QueryBuilder<RecycleBinModel, RecycleBinModel, QAfterSortBy>
-      thenByCoverPath() {
+      thenByCoverFileName() {
     return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'coverPath', Sort.asc);
+      return query.addSortBy(r'coverFileName', Sort.asc);
     });
   }
 
   QueryBuilder<RecycleBinModel, RecycleBinModel, QAfterSortBy>
-      thenByCoverPathDesc() {
+      thenByCoverFileNameDesc() {
     return QueryBuilder.apply(this, (query) {
-      return query.addSortBy(r'coverPath', Sort.desc);
+      return query.addSortBy(r'coverFileName', Sort.desc);
     });
   }
 
@@ -2396,10 +2396,11 @@ extension RecycleBinModelQueryWhereDistinct
     });
   }
 
-  QueryBuilder<RecycleBinModel, RecycleBinModel, QDistinct> distinctByCoverPath(
-      {bool caseSensitive = true}) {
+  QueryBuilder<RecycleBinModel, RecycleBinModel, QDistinct>
+      distinctByCoverFileName({bool caseSensitive = true}) {
     return QueryBuilder.apply(this, (query) {
-      return query.addDistinctBy(r'coverPath', caseSensitive: caseSensitive);
+      return query.addDistinctBy(r'coverFileName',
+          caseSensitive: caseSensitive);
     });
   }
 
@@ -2505,9 +2506,10 @@ extension RecycleBinModelQueryProperty
     });
   }
 
-  QueryBuilder<RecycleBinModel, String, QQueryOperations> coverPathProperty() {
+  QueryBuilder<RecycleBinModel, String, QQueryOperations>
+      coverFileNameProperty() {
     return QueryBuilder.apply(this, (query) {
-      return query.addPropertyName(r'coverPath');
+      return query.addPropertyName(r'coverFileName');
     });
   }
 

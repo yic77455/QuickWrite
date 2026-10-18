@@ -1,7 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 云同步（WebDAV）与检查更新需要访问网络；该权限仅在此声明，release 包同样具备 -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- 应用内下载新版本后需要拉起系统安装程序，因此声明安装未知来源应用的权限 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+
     <application
-        android:label="quick_write"
-        android:name="${applicationName}"
+        android:label="@string/app_name"
         android:icon="@mipmap/launcher_icon">
         <activity
             android:name=".MainActivity"
@@ -30,6 +34,17 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- 把下载到应用外部存储目录的安装包以 content:// 地址共享给系统安装程序，
+             安卓 7.0 起禁止直接以 file:// 地址传递文件 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

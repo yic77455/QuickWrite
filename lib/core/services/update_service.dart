@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 
 /// 发布资产（Release 中上传的文件）
 class UpdateAsset {
@@ -107,36 +108,39 @@ class UpdateCancelToken {
 /// 应用更新服务
 ///
 /// 通过发布仓库 API 检查最新版本，并支持下载当前平台对应的安装包。
-/// 优先使用 GitHub，无法连接时自动切换到 Gitee 兜底。
+/// 优先使用 Gitee，国内访问更快更稳定，无法连接时自动切换到 GitHub 兜底。
 class UpdateService {
   UpdateService._();
 
   /// 仓库所有者
   static const String _owner = 'yic77455';
 
-  /// GitHub 仓库名称
-  static const String _githubRepo = 'QuickWrite';
-
   /// Gitee 仓库名称
   static const String _giteeRepo = 'quick-write';
 
-  /// 版本发布页地址（主源 GitHub）
-  static const String releasesPageUrl = 'https://github.com/$_owner/$_githubRepo/releases';
+  /// GitHub 仓库名称
+  static const String _githubRepo = 'QuickWrite';
+
+  /// Gitee 版本发布页地址
+  static const String _giteeReleasesPageUrl = 'https://gitee.com/$_owner/$_giteeRepo/releases';
+
+  /// 版本发布页地址（主源 Gitee）
+  static const String releasesPageUrl = _giteeReleasesPageUrl;
 
   /// 更新源列表
   ///
-  /// 按优先级排序：优先 GitHub，无法连接时自动切换到 Gitee
+  /// 按优先级排序：优先 Gitee，无法连接时自动切换到 GitHub 兜底
   static const List<_UpdateSource> _sources = [
-    _UpdateSource(
-      name: 'GitHub',
-      latestApi: 'https://api.github.com/repos/$_owner/$_githubRepo/releases/latest',
-      releasesPageUrl: releasesPageUrl,
-      headers: {'Accept': 'application/vnd.github+json'},
-    ),
     _UpdateSource(
       name: 'Gitee',
       latestApi: 'https://gitee.com/api/v5/repos/$_owner/$_giteeRepo/releases/latest',
-      releasesPageUrl: 'https://gitee.com/$_owner/$_giteeRepo/releases',
+      releasesPageUrl: _giteeReleasesPageUrl,
+    ),
+    _UpdateSource(
+      name: 'GitHub',
+      latestApi: 'https://api.github.com/repos/$_owner/$_githubRepo/releases/latest',
+      releasesPageUrl: 'https://github.com/$_owner/$_githubRepo/releases',
+      headers: {'Accept': 'application/vnd.github+json'},
     ),
   ];
 
@@ -356,9 +360,10 @@ class UpdateService {
 
   /// 当前平台对应的资产文件名关键词
   static List<String> _platformKeywords() {
-    if (Platform.isWindows) return const ['win', 'exe', 'msi', 'setup'];
-    if (Platform.isMacOS) return const ['mac', 'dmg', 'pkg'];
-    if (Platform.isLinux) return const ['linux', 'appimage', 'deb', 'rpm'];
+    if (PlatformCapabilities.isWindows) return const ['win', 'exe', 'msi', 'setup'];
+    if (PlatformCapabilities.isMacOS) return const ['mac', 'dmg', 'pkg'];
+    if (PlatformCapabilities.isLinux) return const ['linux', 'appimage', 'deb', 'rpm'];
+    if (PlatformCapabilities.isAndroid) return const ['apk'];
     return const [];
   }
 
@@ -367,6 +372,8 @@ class UpdateService {
   /// 优先保存到系统下载目录，取不到时退回到文档目录
   static Future<String> _resolveSavePath(String fileName) async {
     final baseDir = await getDownloadsDirectory() ?? await getApplicationDocumentsDirectory();
+    // 部分平台的下载目录并非默认存在，先确保目录可用再交给下载器写入
+    await baseDir.create(recursive: true);
     return '${baseDir.path}${Platform.pathSeparator}$fileName';
   }
 

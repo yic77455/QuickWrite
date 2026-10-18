@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -5,6 +6,7 @@ import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/providers/window_provider.dart';
 import 'package:quick_write/core/services/cache_services/window_cache_service.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/tab_close_guard.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/utils/word_count_utils.dart';
@@ -15,6 +17,9 @@ import 'left_sidebar/left_sidebar.dart';
 import 'right_sidebar/right_sidebar.dart';
 import 'toolbar/workspace_toolbar.dart';
 import 'editor/editor_container.dart';
+import 'widgets/mobile_workspace_app_bar.dart';
+import 'widgets/mobile_quick_input_bar.dart';
+import 'widgets/mobile_outline_toolbar.dart';
 
 /// 工作台页面
 class WorkspacePage extends StatelessWidget {
@@ -66,6 +71,21 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
   // 关闭是否已确认并完成收尾
   // 主窗口退出流程会先请求本窗口确认关闭，随后窗口自身关闭时不应再弹窗、再收尾
   bool _closeConfirmed = false;
+
+  // 移动端右抽屉的 Scaffold 控制器，用于将右侧面板状态同步到抽屉开合
+  final GlobalKey<ScaffoldState> _mobileScaffoldKey = GlobalKey<ScaffoldState>();
+
+  // 上一次已知的右侧面板展开状态；为 null 表示尚未完成首次同步
+  bool? _prevRightSidebarExpanded;
+
+  // 移动端左侧目录抽屉是否打开，用于同步顶部目录入口的选中高亮
+  bool _isMobileContentsDrawerOpen = false;
+
+  // 移动端左侧目录抽屉占屏幕宽度的比例
+  static const double _mobileDrawerWidthFactor = 0.75;
+
+  // 移动端右侧面板抽屉占屏幕宽度的比例
+  static const double _mobileRightDrawerWidthFactor = 0.75;
 
   @override
   void initState() {
@@ -167,6 +187,11 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
 
   @override
   Widget build(BuildContext context) {
+    // 移动端采用编辑区全屏 + 左右抽屉的布局
+    if (PlatformCapabilities.isMobile) {
+      return _buildMobileLayout(context);
+    }
+
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
       appBar: _workspaceTitleBar(context),
@@ -239,8 +264,169 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
     );
   }
 
+  /// 构建移动端布局：编辑区全屏，章节目录与属性面板分别收纳为左右抽屉
+  Widget _buildMobileLayout(BuildContext context) {
+    final workspaceProvider = context.watch<WorkspaceProvider>();
+    final colorScheme = Theme.of(context).colorScheme;
+    // 右侧面板的开合与右抽屉保持同步
+    _scheduleMobileRightDrawerSync(workspaceProvider.isRightSidebarExpanded);
+
+    // 横屏且输入法弹出时进入沉浸编辑：顶部操作栏与标签页栏一并收起，
+    // 避免两层固定栏与键盘上方的工具栏互相挤压，同时让正文可见区域最大化；
+    // 键盘收起后两层固定栏自动恢复
+    final bool immersiveEditing = MediaQuery.orientationOf(context) == Orientation.landscape &&
+        MediaQuery.viewInsetsOf(context).bottom > 0;
+
+    // 顶部系统状态栏高度：沉浸编辑时顶部操作栏已收起，改由正文区自行避让
+    final double topInset = MediaQuery.paddingOf(context).top;
+
+    return PopScope(
+      // 拦截系统返回键，交由 _handleMobileBack 处理，避免直接退出应用
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _handleMobileBack();
+      },
+      child: Scaffold(
+        key: _mobileScaffoldKey,
+        backgroundColor: colorScheme.secondaryContainer,
+        // 左侧抽屉：章节目录与设定，宽度占屏幕的 75%
+        // 抽屉底色与面板一致，避免系统状态栏区域与目录面板出现色差
+        drawer: Drawer(
+          width: MediaQuery.sizeOf(context).width * _mobileDrawerWidthFactor,
+          backgroundColor: colorScheme.surface,
+          // 抽屉内容加绘制隔离：滑出与收回只改变图层位置，可直接复用已缓存的图层
+          child: const SafeArea(child: RepaintBoundary(child: LeftSidebar(forceExpanded: true))),
+        ),
+        // 右侧抽屉：属性与工具面板，宽度占屏幕的 75%
+        endDrawer: Drawer(
+          width: MediaQuery.sizeOf(context).width * _mobileRightDrawerWidthFactor,
+          backgroundColor: colorScheme.surface,
+          // 与左侧抽屉同理，隔离绘制避免抽屉滑动时逐帧重绘下方正文
+          child: const SafeArea(child: RepaintBoundary(child: RightSidebar(forceExpanded: true))),
+        ),
+        // 左抽屉开合时同步顶部目录入口的选中高亮
+        onDrawerChanged: (isOpen) {
+          if (_isMobileContentsDrawerOpen == isOpen) return;
+          setState(() => _isMobileContentsDrawerOpen = isOpen);
+        },
+        // 用户滑动或点击遮罩关闭右抽屉时，同步收起右侧面板状态
+        onEndDrawerChanged: (isOpen) {
+          if (!isOpen) context.read<WorkspaceProvider>().closeRightSidebar();
+        },
+        // 常规状态下应用界面延伸到系统状态栏后方，由顶部操作栏自行避让系统状态栏；
+        // 沉浸编辑时顶部操作栏已收起，改由下方 AnimatedPadding 避让，避免正文被系统状态栏压住。
+        // 底部间距交由下方状态栏自行避让系统导航栏，此处不再重复避让
+        body: SafeArea(
+          top: false,
+          bottom: false,
+          // 正文区域加绘制隔离：抽屉滑出与收回期间正文保持静止，可直接复用已缓存的图层
+          child: RepaintBoundary(
+            child: AnimatedPadding(
+              // 沉浸编辑时补上系统状态栏高度，与顶部操作栏的收起动画同步，全程无跳动
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOut,
+              padding: EdgeInsets.only(top: immersiveEditing ? topInset : 0),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  // 键盘上方工具栏可占用的最大高度：扣除顶部操作栏（含其状态栏安全区）后的剩余高度。
+                  // 沉浸编辑时顶部操作栏已收起，无需扣减；横屏等纵向空间紧张的场景下
+                  // 工具栏会被压缩到该上限内，保证整列布局不溢出
+                  final double chromeHeight =
+                      immersiveEditing ? 0.0 : MobileWorkspaceAppBar.contentHeight + topInset;
+                  final double barsMaxHeight = math.max(0.0, constraints.maxHeight - chromeHeight);
+
+                  return Column(
+                    children: [
+                      // 顶部操作栏（自定义，不占用 Scaffold 的 appBar 槽位）
+                      // 移动端横屏输入法弹出时收起，把纵向空间全部让给编辑区；
+                      // 占满整宽由外层 SizedBox 保证，使收起/恢复动画只发生在纵向
+                      SizedBox(
+                        width: double.infinity,
+                        child: AnimatedSize(
+                          duration: const Duration(milliseconds: 180),
+                          curve: Curves.easeOut,
+                          alignment: Alignment.topCenter,
+                          child: immersiveEditing
+                              ? const SizedBox.shrink()
+                              // 监听专用的历史状态通知器，仅刷新撤销/恢复按钮的禁用态
+                              : ListenableBuilder(
+                                  listenable: workspaceProvider.editHistoryNotifier,
+                                  builder: (context, _) => MobileWorkspaceAppBar(
+                                    onBack: _handleBackToShelf,
+                                    onUndo: workspaceProvider.undo,
+                                    onRedo: workspaceProvider.redo,
+                                    canUndo: workspaceProvider.canUndo,
+                                    canRedo: workspaceProvider.canRedo,
+                                    onContents: () => _mobileScaffoldKey.currentState?.openDrawer(),
+                                    isContentsSelected: _isMobileContentsDrawerOpen,
+                                  ),
+                                ),
+                        ),
+                      ),
+
+                      // 编辑区占满剩余空间（沉浸编辑时一并收起编辑区内的标签页栏）
+                      Expanded(child: _buildEditorCard(context, hideTabBar: immersiveEditing)),
+
+                      // 键盘上方的快捷输入栏（键盘弹出时显示）
+                      ConstrainedBox(
+                        constraints: BoxConstraints(maxHeight: barsMaxHeight),
+                        child: const MobileQuickInputBar(),
+                      ),
+
+                      // 键盘上方的大纲编辑器工具栏（键盘弹出或节点批量选择模式下显示）
+                      // 与快捷输入栏分属不同类型的标签页，同一时刻只会显示其中一个
+                      ConstrainedBox(
+                        constraints: BoxConstraints(maxHeight: barsMaxHeight),
+                        child: const MobileOutlineToolbar(),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+
+        // 底部状态栏（精简信息，仅保留保存状态与字数）
+        // 固定在屏幕底部，键盘弹出时由输入法直接覆盖，不随输入法上移
+        bottomNavigationBar: SafeArea(
+          top: false,
+          child: _buildMobileBottomStatusBar(context),
+        ),
+      ),
+    );
+  }
+
+  /// 将右侧面板的展开状态同步到右抽屉的开合
+  ///
+  /// 工具栏按钮与右侧面板的关闭按钮都会改变展开状态，此处统一映射为抽屉的打开与关闭
+  void _scheduleMobileRightDrawerSync(bool expanded) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
+      // 首次同步只记录状态，避免进入工作台时自动弹出右抽屉
+      if (_prevRightSidebarExpanded == null) {
+        _prevRightSidebarExpanded = expanded;
+        return;
+      }
+      if (_prevRightSidebarExpanded == expanded) return;
+      _prevRightSidebarExpanded = expanded;
+
+      final scaffoldState = _mobileScaffoldKey.currentState;
+      if (scaffoldState == null) return;
+      if (expanded) {
+        scaffoldState.openEndDrawer();
+      } else {
+        scaffoldState.closeEndDrawer();
+      }
+    });
+  }
+
   /// 构建编辑器卡片
-  Widget _buildEditorCard(BuildContext context) {
+  ///
+  /// [hideTabBar] 为 true 时收起编辑区内部的标签页栏（移动端横屏沉浸编辑）
+  Widget _buildEditorCard(BuildContext context, {bool hideTabBar = false}) {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Container(
@@ -248,7 +434,7 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
       decoration: BoxDecoration(color: colorScheme.surface, borderRadius: BorderRadius.circular(6)),
       // 裁剪子组件，确保圆角生效
       clipBehavior: Clip.antiAlias,
-      child: const EditorContainer(),
+      child: EditorContainer(hideTabBar: hideTabBar),
     );
   }
 
@@ -258,7 +444,7 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
     return const Positioned(left: 0, top: 0, bottom: 0, child: Center(child: LeftSidebarExpandButton()));
   }
 
-  /// 构建底部状态栏
+  /// 构建底部状态栏（桌面端）
   Widget _buildBottomStatusBar(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final workspaceProvider = context.watch<WorkspaceProvider>();
@@ -278,85 +464,145 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
 
           const Spacer(),
 
-          // 中间：统计信息
-          // 通过 ListenableBuilder 监听专用的字数通知器，编辑器内容变化时仅重建此统计区域；
-          // 内部再以 ValueListenableBuilder 监听选中字数变化，避免整个状态栏与编辑器重建
-          ListenableBuilder(
-            listenable: workspaceProvider.wordCountNotifier,
-            builder: (context, _) {
-              // 大纲类型标签页使用独立的统计格式
-              final isOutlineTab = currentTab?.usesOutlineEditor ?? false;
-              final topicCount = currentTab?.topicCount ?? 0;
-              // 获取当前章节字数
-              final currentWordCount = currentTab?.wordCount ?? 0;
-              // 获取选中字数通知器（为空时直接显示总字数，无需监听）
-              final selectedWordCountNotifier = currentTab?.selectedWordCountNotifier;
-
-              return Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // 大纲标签页额外显示主题数，正文标签页仅显示字数
-                  if (isOutlineTab) ...[
-                    MouseRegion(
-                      cursor: SystemMouseCursors.click,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.account_tree_outlined, size: 14),
-                          const SizedBox(width: 4),
-                          Text('主题：$topicCount', style: context.bodySmall),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                  ],
-                  MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: GestureDetector(
-                      onTap: () => _showWordCountDialog(context, workspaceProvider),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.text_fields, size: 14),
-                          const SizedBox(width: 4),
-                          if (selectedWordCountNotifier == null)
-                            Text('字数：$currentWordCount 字', style: context.bodySmall)
-                          else
-                            ValueListenableBuilder<int>(
-                              valueListenable: selectedWordCountNotifier,
-                              builder: (context, selectedWordCount, _) {
-                                final wordCountText = selectedWordCount > 0
-                                    ? '字数：$selectedWordCount/$currentWordCount 字'
-                                    : '字数：$currentWordCount 字';
-                                return Text(wordCountText, style: context.bodySmall);
-                              },
-                            ),
-                        ],
-                      ),
-                    ),
+          // 大纲标签页额外显示主题数，正文标签页仅显示字数
+          if (currentTab?.usesOutlineEditor ?? false) ...[
+            // 监听专用的字数通知器，主题数变化时仅重建此区域
+            ListenableBuilder(
+              listenable: workspaceProvider.wordCountNotifier,
+              builder: (context, _) {
+                return MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.account_tree_outlined, size: 14),
+                      const SizedBox(width: 4),
+                      Text('主题：${currentTab?.topicCount ?? 0}', style: context.bodySmall),
+                    ],
                   ),
-                ],
-              );
-            },
-          ),
+                );
+              },
+            ),
+            const SizedBox(width: 16),
+          ],
+
+          // 字数统计
+          _buildWordCountIndicator(context, workspaceProvider, currentTab),
 
           const SizedBox(width: 16),
 
-          // 右侧：状态信息
-          Icon(
-            Icons.save_outlined,
-            size: 14,
-            color: currentTab?.isModified == true ? colorScheme.error : colorScheme.onSurfaceVariant,
-          ),
-          const SizedBox(width: 4),
-          Text(
-            currentTab?.isModified == true ? '未保存' : '已保存',
-            style: context.bodySmall?.copyWith(
-              color: currentTab?.isModified == true ? colorScheme.error : colorScheme.onSurfaceVariant,
-            ),
-          ),
+          // 右侧：保存状态信息
+          _buildSaveStatusIndicator(context, colorScheme, currentTab),
         ],
       ),
+    );
+  }
+
+  /// 构建底部状态栏（移动端）
+  ///
+  /// 精简信息以防窄屏溢出：左侧显示作品名，右侧保留主题数与字数统计
+  Widget _buildMobileBottomStatusBar(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final workspaceProvider = context.watch<WorkspaceProvider>();
+    final currentTab = workspaceProvider.currentTab;
+
+    return Container(
+      height: 28,
+      margin: const EdgeInsets.fromLTRB(2, 0, 2, 2),
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(color: colorScheme.surface, borderRadius: BorderRadius.circular(6)),
+      child: Row(
+        children: [
+          // 左侧：作品名（过长时省略号截断）
+          Expanded(
+            child: Text(
+              '《${workspaceProvider.bookTitle}》',
+              style: context.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+
+          const SizedBox(width: 12),
+
+          // 大纲标签页额外显示主题数，正文标签页仅显示字数
+          if (currentTab?.usesOutlineEditor ?? false) ...[
+            // 监听专用的字数通知器，主题数变化时仅重建此区域
+            ListenableBuilder(
+              listenable: workspaceProvider.wordCountNotifier,
+              builder: (context, _) => Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.account_tree_outlined, size: 14),
+                  const SizedBox(width: 4),
+                  Text('主题：${currentTab?.topicCount ?? 0}', style: context.bodySmall),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+          ],
+
+          // 右侧：字数统计
+          _buildWordCountIndicator(context, workspaceProvider, currentTab),
+        ],
+      ),
+    );
+  }
+
+  /// 构建保存状态指示（图标 + 文案，存在未保存修改时用错误色提示）
+  Widget _buildSaveStatusIndicator(BuildContext context, ColorScheme colorScheme, EditorTab? currentTab) {
+    final isModified = currentTab?.isModified == true;
+    final color = isModified ? colorScheme.error : colorScheme.onSurfaceVariant;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.save_outlined, size: 14, color: color),
+        const SizedBox(width: 4),
+        Text(isModified ? '未保存' : '已保存', style: context.bodySmall?.copyWith(color: color)),
+      ],
+    );
+  }
+
+  /// 构建字数统计指示（点击可打开详细字数统计弹窗）
+  ///
+  /// 通过 ListenableBuilder 监听专用的字数通知器，编辑器内容变化时仅重建此区域；
+  /// 内部再以 ValueListenableBuilder 监听选中字数变化，避免整个状态栏与编辑器重建
+  Widget _buildWordCountIndicator(BuildContext context, WorkspaceProvider provider, EditorTab? currentTab) {
+    return ListenableBuilder(
+      listenable: provider.wordCountNotifier,
+      builder: (context, _) {
+        // 获取当前章节字数
+        final currentWordCount = currentTab?.wordCount ?? 0;
+        // 获取选中字数通知器（为空时直接显示总字数，无需监听）
+        final selectedWordCountNotifier = currentTab?.selectedWordCountNotifier;
+
+        return MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: () => _showWordCountDialog(context, provider),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.text_fields, size: 14),
+                const SizedBox(width: 4),
+                if (selectedWordCountNotifier == null)
+                  Text('字数：$currentWordCount 字', style: context.bodySmall)
+                else
+                  ValueListenableBuilder<int>(
+                    valueListenable: selectedWordCountNotifier,
+                    builder: (context, selectedWordCount, _) {
+                      final wordCountText = selectedWordCount > 0
+                          ? '字数：$selectedWordCount/$currentWordCount 字'
+                          : '字数：$currentWordCount 字';
+                      return Text(wordCountText, style: context.bodySmall);
+                    },
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -395,7 +641,32 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
     await provider.saveTabSession();
     // 返回书架主界面
     if (!mounted) return;
-    context.go('/');
+    // 移动端工作台以 push 方式打开，返回时弹出当前页面以播放反向切换动效；
+    // 工作台为唯一页面时无页面可弹出，直接跳转到书架
+    if (PlatformCapabilities.isMobile && context.canPop()) {
+      context.pop();
+    } else {
+      context.go('/');
+    }
+  }
+
+  /// 处理移动端系统返回键
+  ///
+  /// 抽屉打开时优先收起抽屉，与系统返回键的常规行为一致；
+  /// 否则走与顶部返回按钮相同的流程返回书架（含未保存内容的确认）
+  void _handleMobileBack() {
+    final scaffoldState = _mobileScaffoldKey.currentState;
+    if (scaffoldState != null) {
+      if (scaffoldState.isDrawerOpen) {
+        scaffoldState.closeDrawer();
+        return;
+      }
+      if (scaffoldState.isEndDrawerOpen) {
+        scaffoldState.closeEndDrawer();
+        return;
+      }
+    }
+    _handleBackToShelf();
   }
 
   /// 构建标题栏

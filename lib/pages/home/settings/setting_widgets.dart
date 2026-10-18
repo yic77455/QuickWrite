@@ -105,6 +105,12 @@ class SettingTile extends StatelessWidget {
   /// 是否启用
   final bool enabled;
 
+  /// 是否将右侧控件换行放到标题下方
+  ///
+  /// 移动端窄屏下，宽度较大的控件与标题同行排列会挤压文字说明，
+  /// 置为 true 时控件独占一行展示
+  final bool trailingBelow;
+
   const SettingTile({
     super.key,
     required this.icon,
@@ -114,6 +120,7 @@ class SettingTile extends StatelessWidget {
     this.onTap,
     this.accentColor,
     this.enabled = true,
+    this.trailingBelow = false,
   });
 
   @override
@@ -124,55 +131,32 @@ class SettingTile extends StatelessWidget {
 
     final content = Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-      child: Row(
-        children: [
-          // 图标容器：使用强调色的低透明度背景
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: effectiveAccent.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
-              icon,
-              size: 18,
-              color: effectiveAccent,
-            ),
-          ),
-          const SizedBox(width: 14),
-          // 标题与副标题
-          Expanded(
-            child: Column(
+      child: trailingBelow
+          ? Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  title,
-                  style: context.titleLarge?.copyWith(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                if (subtitle != null) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle!,
-                    style: context.bodySmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-                      height: 1.4,
-                    ),
-                  ),
+                _buildTitleRow(context, colorScheme, effectiveAccent),
+                if (trailing != null) ...[
+                  const SizedBox(height: 12),
+                  trailing!,
+                ],
+              ],
+            )
+          : Row(
+              // 顶部对齐：副标题换行时，图标与右侧控件始终保持在首行位置
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildIconBox(effectiveAccent),
+                const SizedBox(width: 14),
+                // 标题与副标题
+                Expanded(child: _buildTitleColumn(context, colorScheme)),
+                // 右侧控件
+                if (trailing != null) ...[
+                  const SizedBox(width: 12),
+                  trailing!,
                 ],
               ],
             ),
-          ),
-          // 右侧控件
-          if (trailing != null) ...[
-            const SizedBox(width: 12),
-            trailing!,
-          ],
-        ],
-      ),
     );
 
     // 禁用或无点击回调时只渲染内容
@@ -188,6 +172,61 @@ class SettingTile extends StatelessWidget {
         hoverColor: colorScheme.onSurface.withValues(alpha: 0.06),
         child: content,
       ),
+    );
+  }
+
+  /// 标题行：左侧图标容器与标题说明
+  Widget _buildTitleRow(BuildContext context, ColorScheme colorScheme, Color accent) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildIconBox(accent),
+        const SizedBox(width: 14),
+        Expanded(child: _buildTitleColumn(context, colorScheme)),
+      ],
+    );
+  }
+
+  /// 图标容器：使用强调色的低透明度背景
+  Widget _buildIconBox(Color accent) {
+    return Container(
+      width: 36,
+      height: 36,
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Icon(
+        icon,
+        size: 18,
+        color: accent,
+      ),
+    );
+  }
+
+  /// 标题与副标题
+  Widget _buildTitleColumn(BuildContext context, ColorScheme colorScheme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: context.titleLarge?.copyWith(
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        if (subtitle != null) ...[
+          const SizedBox(height: 2),
+          Text(
+            subtitle!,
+            style: context.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+              height: 1.4,
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

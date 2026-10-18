@@ -392,11 +392,10 @@ class CloudSyncService extends ChangeNotifier {
         _conflictNoticeHandler?.call(conflictCopyPaths);
       }
 
-      // 全部处理成功时才更新上次同步时间，存在失败时便于继续重试
-      if (summary.failedCount == 0) {
-        _config.lastSyncTime = DateTime.now();
-        await _config.saveConfig();
-      }
+      // 记录本次同步的完成时间：个别文件处理失败时同样属于已执行过一次同步，
+      // 失败的部分因未写入基线，会在下次同步自动重试
+      _config.lastSyncTime = DateTime.now();
+      await _config.saveConfig();
       return CloudSyncResult.success(_describeSummary(summary));
     } catch (e) {
       return CloudSyncResult.failure('同步失败：${WebDavClient.describeError(e)}');

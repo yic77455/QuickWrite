@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:quick_write/core/constants/material_icons.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
+import 'package:quick_write/shared/widgets/widgets.dart';
 
 /// 查找替换栏
 ///
@@ -101,6 +104,30 @@ class FindReplaceBarState extends State<FindReplaceBar> {
   /// 是否大小写敏感
   bool _caseSensitive = false;
 
+  /// 行内图标按钮的点击区边长
+  static const double _iconButtonSize = 24;
+
+  /// 匹配计数区的宽度
+  static const double _matchCountWidth = 48;
+
+  /// 行内相邻元素之间的间距
+  static const double _rowGap = 4;
+
+  /// 查找行输入框之后各控件的固定宽度合计
+  /// （间距 + 匹配计数 + 间距 + 上一个 + 下一个 + 关闭）
+  static const double _findTrailingFixedWidth =
+      _rowGap + _matchCountWidth + _rowGap + _iconButtonSize * 3;
+
+  /// 替换行输入框之后各控件的固定宽度合计（间距 + 替换 + 全部替换）
+  static const double _replaceTrailingFixedWidth = _rowGap + _iconButtonSize * 2;
+
+  /// 替换行末尾的占位宽度
+  ///
+  /// 由两行输入框之后固定宽度的差值决定，与屏幕宽度无关，
+  /// 因此替换输入框在任意屏幕宽度下都与查找输入框等宽
+  static const double _replaceTailPlaceholder =
+      _findTrailingFixedWidth - _replaceTrailingFixedWidth;
+
   @override
   void initState() {
     super.initState();
@@ -177,6 +204,10 @@ class FindReplaceBarState extends State<FindReplaceBar> {
       _caseSensitive = !_caseSensitive;
     });
     widget.onCaseSensitiveChanged?.call(_caseSensitive);
+    // 移动端没有悬停提示，以浮动提示反馈切换结果
+    if (PlatformCapabilities.isMobile) {
+      SnackBarService.show(context, _caseSensitive ? '已开启区分大小写' : '已关闭区分大小写');
+    }
   }
 
   /// 构建匹配计数文本
@@ -191,7 +222,8 @@ class FindReplaceBarState extends State<FindReplaceBar> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Container(
-      width: 390,
+      // 移动端铺满屏幕宽度，桌面端使用固定宽度
+      width: PlatformCapabilities.isMobile ? double.infinity : 390,
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainerLowest,
         border: Border(
@@ -242,13 +274,13 @@ class FindReplaceBarState extends State<FindReplaceBar> {
               onPressed: _toggleReplace,
               colorScheme: colorScheme,
             ),
-          const SizedBox(width: 4),
+          const SizedBox(width: _rowGap),
           // 查找输入框
           Flexible(child: _buildFindInputField(colorScheme)),
-          const SizedBox(width: 4),
+          const SizedBox(width: _rowGap),
           // 匹配计数
           _buildMatchCountWidget(colorScheme),
-          const SizedBox(width: 4),
+          const SizedBox(width: _rowGap),
           // 查找上一个
           _buildIconButton(
             icon: Icons.keyboard_arrow_up_rounded,
@@ -281,8 +313,8 @@ class FindReplaceBarState extends State<FindReplaceBar> {
       padding: const EdgeInsets.fromLTRB(8, 0, 4, 8),
       child: Row(
         children: [
-          // 占位，与查找行对齐
-          const SizedBox(width: 28),
+          // 占位，与查找行的展开按钮对齐
+          const SizedBox(width: _iconButtonSize + _rowGap),
           // 替换输入框
           Flexible(
             child: _buildInputField(
@@ -295,7 +327,8 @@ class FindReplaceBarState extends State<FindReplaceBar> {
               },
             ),
           ),
-          const SizedBox(width: 4),
+          // 替换与全部替换按钮紧邻输入框
+          const SizedBox(width: _rowGap),
           // 替换当前
           _buildIconButton(
             icon: Icons.find_replace_rounded,
@@ -305,11 +338,13 @@ class FindReplaceBarState extends State<FindReplaceBar> {
           ),
           // 替换全部
           _buildIconButton(
-            icon: Icons.find_replace_outlined,
+            icon: MaterialIcons.laps,
             tooltip: '替换全部',
             onPressed: widget.onReplaceAll,
             colorScheme: colorScheme,
           ),
+          // 末尾占位，使替换输入框与查找输入框等宽
+          const SizedBox(width: _replaceTailPlaceholder),
         ],
       ),
     );
@@ -334,7 +369,10 @@ class FindReplaceBarState extends State<FindReplaceBar> {
         style: context.bodySmall?.copyWith(color: colorScheme.onSurface),
         decoration: InputDecoration(
           isDense: true,
-          constraints: const BoxConstraints.tightFor(width: 210, height: 32),
+          // 移动端不限制输入框宽度，由 Row 分配剩余空间使其自适应撑满
+          constraints: PlatformCapabilities.isMobile
+              ? const BoxConstraints.tightFor(height: 32)
+              : const BoxConstraints.tightFor(width: 210, height: 32),
           contentPadding: const EdgeInsets.fromLTRB(8, 18, 8, 8),
           hintText: hint,
           hintStyle: context.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5)),
@@ -396,7 +434,7 @@ class FindReplaceBarState extends State<FindReplaceBar> {
     final hasResult = widget.totalMatchCount > 0 && _findController.text.isNotEmpty;
     final alpha = hasResult ? 1.0 : 0.7;
     return SizedBox(
-      width: 48,
+      width: _matchCountWidth,
       child: Center(
         child: Text(text, style: context.bodySmall?.copyWith(fontSize: 11, color: colorScheme.onSurfaceVariant.withValues(alpha: alpha))),
       ),
@@ -434,8 +472,8 @@ class FindReplaceBarState extends State<FindReplaceBar> {
     required ColorScheme colorScheme,
   }) {
     return SizedBox(
-      width: 24,
-      height: 24,
+      width: _iconButtonSize,
+      height: _iconButtonSize,
       child: IconButton(
         tooltip: tooltip,
         onPressed: onPressed,
