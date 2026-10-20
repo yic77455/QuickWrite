@@ -36,7 +36,6 @@ class ImeCursorFixer {
       await _channel.invokeMethod('updateCursorPosition', {
         'x': globalRect.left,
         'y': globalRect.top,
-        'width': globalRect.width,
         'height': globalRect.height,
         'textHeight': textHeight,
       });
@@ -45,11 +44,34 @@ class ImeCursorFixer {
     }
   }
 
+  /// 同步编辑区尺寸与坐标变换到 Flutter 引擎
+  ///
+  /// 引擎会用该变换把光标矩形换算成视图坐标，变换中包含滚动位移。
+  /// 滚动后必须重新同步，否则换算结果会停留在滚动前的位置，
+  /// 表现为候选框偏移一行且不会自行恢复。
+  ///
+  /// [transform] 渲染对象到根视图的 4x4 变换矩阵（按列主序展开的 16 个值）。
+  static Future<void> reportEditableTransform({
+    required Size size,
+    required List<double> transform,
+  }) async {
+    if (!_enabled) return;
+    try {
+      await SystemChannels.textInput.invokeMethod<void>('TextInput.setEditableSizeAndTransform', {
+        'width': size.width,
+        'height': size.height,
+        'transform': transform,
+      });
+    } catch (e) {
+      debugPrint('ImeCursorFixer transform channel error: $e');
+    }
+  }
+
   /// 用真实光标矩形覆盖 Flutter 引擎内部记录的光标矩形
   ///
-  /// 框架在没有组合文本时会把光标矩形按文本起始位置上报，引擎据此定位输入法窗口，
-  /// 导致每次开始组字时候选框先出现在文本开头、再跳到光标处。这里在组字开始前
-  /// 把真实光标矩形回填给引擎，使引擎自身的定位结果始终正确，从根源上消除闪烁。
+  /// 引擎按这份矩形定位输入法窗口。框架在无组合文本时会把它按文本起始位置上报，
+  /// 编辑器滚动后也不会自动跟随，因此需要在光标或滚动位置变化后主动回填，
+  /// 让引擎始终基于当前光标定位。
   ///
   /// [localRect] 光标在渲染层局部坐标系下的矩形，与框架上报组合区域时使用的坐标系一致。
   static Future<void> reportCaretRectToEngine(Rect localRect) async {
@@ -199,12 +221,9 @@ class _ImeCursorFixerWrapperState extends State<ImeCursorFixerWrapper> with Widg
       isComposing ? TextPosition(offset: composing.start) : selection.extent,
     );
 
-    // 无组合文本时，框架会把光标矩形按文本起始位置上报给引擎，导致引擎在
-    // 组字开始瞬间把输入法窗口定位到文本开头。这里用真实光标矩形覆盖引擎缓存，
-    // 让引擎自身的定位始终正确，避免候选框先闪到别处再跳回光标处。
-    if (!isComposing) {
-      ImeCursorFixer.reportCaretRectToEngine(rect);
-    }
+    // 用真实光标矩形覆盖引擎缓存，使引擎自身的定位始终正确：
+    // 无组合文本时框架会按文本起始位置上报，导致组字开始时窗口先闪到文本开头。
+    ImeCursorFixer.reportCaretRectToEngine(rect);
 
     // 光标/组合区域在视图坐标系下的绝对矩形，交由 C++ 侧定位输入法窗口
     final globalRect = renderEditable.localToGlobal(rect.topLeft) & rect.size;

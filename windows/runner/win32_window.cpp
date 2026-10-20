@@ -185,16 +185,12 @@ Win32Window::MessageHandler(HWND hwnd,
                             WPARAM const wparam,
                             LPARAM const lparam) noexcept {
   switch (message) {
-     case WM_IME_STARTCOMPOSITION: {
-      ApplyImeCursorToWindow(hwnd);
-      return 0;
-    }
-    case WM_IME_COMPOSITION: {
+     case WM_IME_COMPOSITION: {
       break;
     }
     case WM_IME_NOTIFY: {
-      if (wparam == IMN_OPENCANDIDATE) {
-        ApplyImeCursorToWindow(hwnd);
+      if (wparam == IMN_SETCOMPOSITIONWINDOW) {
+        ApplyImeCompositionAnchorToView(hwnd);
       }
       break;
     }
@@ -246,7 +242,6 @@ namespace {
 struct ImePhysicalRect {
   LONG left = 0;
   LONG top = 0;
-  LONG right = 0;
   LONG bottom = 16;
   LONG text_height = 16;
 };
@@ -269,7 +264,6 @@ ImePhysicalRect ToPhysicalImeRect(HWND target_hwnd,
   ImePhysicalRect rect;
   rect.left = static_cast<LONG>(pos.x * scale);
   rect.top = static_cast<LONG>(pos.y * scale);
-  rect.right = static_cast<LONG>((pos.x + pos.width) * scale);
   rect.bottom = static_cast<LONG>((pos.y + pos.height) * scale);
   if (rect.bottom <= rect.top) {
     rect.bottom = rect.top + 16;
@@ -283,7 +277,7 @@ ImePhysicalRect ToPhysicalImeRect(HWND target_hwnd,
 
 }  // namespace
 
-void ApplyImeCursor(HWND target_hwnd, const ImeCursorPosition& pos) {
+void ApplyImeCompositionWindow(HWND target_hwnd, const ImeCursorPosition& pos) {
   if (!pos.valid) {
     return;
   }
@@ -313,42 +307,27 @@ void ApplyImeCursor(HWND target_hwnd, const ImeCursorPosition& pos) {
   cf.ptCurrentPos.y = composition_top;
   ImmSetCompositionWindow(hImc, &cf);
  
-  // Anchor the candidate window at the bottom-left corner and exclude the
-  // whole rect so that it never covers the text being typed. This is identical
-  // to the Flutter engine's own placement, so the two never fight each other.
-  CANDIDATEFORM cdf = {};
-  cdf.dwIndex = 0;
-  cdf.dwStyle = CFS_EXCLUDE;
-  cdf.ptCurrentPos.x = rect.left;
-  cdf.ptCurrentPos.y = rect.bottom;
-  cdf.rcArea.left = rect.left;
-  cdf.rcArea.top = rect.top;
-  cdf.rcArea.right = rect.right;
-  cdf.rcArea.bottom = rect.bottom;
-  ImmSetCandidateWindow(hImc, &cdf);
- 
   ImmReleaseContext(target_hwnd, hImc);
 }
 
-void Win32Window::ApplyImeCursorToWindow(HWND hwnd) {
+void Win32Window::ApplyImeCompositionAnchorToView(HWND hwnd) {
   if (applying_ime_cursor_) return;
   applying_ime_cursor_ = true;
 
-  ApplyImeCursor(child_content_ ? child_content_ : hwnd, ime_cursor_pos_);
+  ApplyImeCompositionWindow(child_content_ ? child_content_ : hwnd, ime_cursor_pos_);
   applying_ime_cursor_ = false;
 }
  
-void Win32Window::UpdateImeCursorPosition(double x, double y, double width, double height,
+void Win32Window::UpdateImeCursorPosition(double x, double y, double height,
                                           double text_height) {
   ime_cursor_pos_.x = x;
   ime_cursor_pos_.y = y;
-  ime_cursor_pos_.width = (width > 0) ? width : 0;
   ime_cursor_pos_.height = (height > 0) ? height : 16;
   ime_cursor_pos_.text_height = (text_height > 0) ? text_height : 16;
   ime_cursor_pos_.valid = true;
 
   if (window_handle_) {
-    ApplyImeCursorToWindow(window_handle_);
+    ApplyImeCompositionAnchorToView(window_handle_);
   }
 }
 
@@ -389,18 +368,19 @@ LRESULT CALLBACK Win32Window::ChildSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPa
   Win32Window* that = reinterpret_cast<Win32Window*>(dwRefData);
   if (that) {
     switch (uMsg) {
-      case WM_IME_STARTCOMPOSITION:
       case WM_IME_COMPOSITION: {
         // Call the original window proc first so Flutter does its thing
         LRESULT result = DefSubclassProc(hWnd, uMsg, wParam, lParam);
-        // Then apply our correct coordinates
-        that->ApplyImeCursorToWindow(hWnd);
+        // Then anchor the composition window at the bottom of the text line
+        that->ApplyImeCompositionAnchorToView(hWnd);
         return result;
       }
       case WM_IME_NOTIFY: {
         LRESULT result = DefSubclassProc(hWnd, uMsg, wParam, lParam);
-        if (wParam == IMN_OPENCANDIDATE || wParam == 0x0006 /* IMN_CHANGECANDIDATE */ || wParam == 0x000B /* IMN_SETCOMPOSITIONWINDOW */) {
-          that->ApplyImeCursorToWindow(hWnd);
+        // Some IMEs move the composition window themselves; re-anchor it after
+        // they do so the candidate stays below the text line
+        if (wParam == 0x000B /* IMN_SETCOMPOSITIONWINDOW */) {
+          that->ApplyImeCompositionAnchorToView(hWnd);
         }
         return result;
       }

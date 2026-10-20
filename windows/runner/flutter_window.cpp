@@ -31,12 +31,8 @@ static bool ReadImeCursorPosition(const flutter::EncodableMap& args,
 
   pos->x = read("x", 0);
   pos->y = read("y", 0);
-  pos->width = read("width", 0);
   pos->height = read("height", 16);
   pos->text_height = read("textHeight", 16);
-  if (pos->width < 0) {
-    pos->width = 0;
-  }
   if (pos->height <= 0) {
     pos->height = 16;
   }
@@ -56,7 +52,7 @@ struct ImeWindowContext {
     if (applying) return;
     applying = true;
 
-    ApplyImeCursor(target_hwnd, pos);
+    ApplyImeCompositionWindow(target_hwnd, pos);
 
     applying = false;
   }
@@ -68,7 +64,6 @@ static LRESULT CALLBACK MultiWindowSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPa
   ImeWindowContext* ctx = reinterpret_cast<ImeWindowContext*>(dwRefData);
   if (ctx) {
     switch (uMsg) {
-      case WM_IME_STARTCOMPOSITION:
       case WM_IME_COMPOSITION: {
         LRESULT result = DefSubclassProc(hWnd, uMsg, wParam, lParam);
         ctx->Apply(hWnd);
@@ -76,7 +71,9 @@ static LRESULT CALLBACK MultiWindowSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPa
       }
       case WM_IME_NOTIFY: {
         LRESULT result = DefSubclassProc(hWnd, uMsg, wParam, lParam);
-        if (wParam == IMN_OPENCANDIDATE || wParam == 0x0006 || wParam == 0x000B) {
+        // Some IMEs move the composition window themselves; re-anchor it after
+        // they do so the candidate stays below the text line
+        if (wParam == 0x000B /* IMN_SETCOMPOSITIONWINDOW */) {
           ctx->Apply(hWnd);
         }
         return result;
@@ -137,7 +134,7 @@ void AttachImeFixerToMultiWindow(flutter::FlutterViewController* controller) {
             
             result->Success();
           } else {
-            result->Error("INVALID_ARGS", "Expected map with x, y, width, height");
+            result->Error("INVALID_ARGS", "Expected map with x, y, height, textHeight");
           }
         } else {
           result->NotImplemented();
@@ -187,17 +184,16 @@ bool FlutterWindow::OnCreate() {
             if (args) {
               ImeCursorPosition pos;
               ReadImeCursorPosition(*args, &pos);
-              UpdateImeCursorPosition(pos.x, pos.y, pos.width, pos.height,
+              UpdateImeCursorPosition(pos.x, pos.y, pos.height,
                                       pos.text_height);
               result->Success();
             } else {
-              result->Error("INVALID_ARGS", "Expected map with x, y, width, height");
+              result->Error("INVALID_ARGS", "Expected map with x, y, height, textHeight");
             }
           } else {
             result->NotImplemented();
           }
         });
-
     ime_channel_ = std::move(channel);
   DesktopMultiWindowSetWindowCreatedCallback([](void *controller) {
     auto *flutter_view_controller =

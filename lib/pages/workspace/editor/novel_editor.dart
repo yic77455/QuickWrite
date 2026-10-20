@@ -230,6 +230,13 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 缓存窗口最小化状态，用于检测从最小化恢复的情况
   bool _wasMinimized = false;
 
+  /// 输入法光标上报器的状态键
+  ///
+  /// 布局阶段修正滚动位置后需要立即刷新输入法坐标，
+  /// 通过它直接触发上报，避免候选框停留在滚动前的位置。
+  final GlobalKey<ReEditorImeReporterState> _imeReporterKey =
+      GlobalKey<ReEditorImeReporterState>();
+
   /// 缓存软键盘高度，用于识别键盘新升起导致的视口压缩
   double _keyboardHeight = 0;
 
@@ -507,16 +514,25 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 修正发生在 Paint 之前，因此结果随当帧一并呈现，不会出现先渲染再滚动的二次跳动。
   /// 一是补偿额外顶边距变化导致的滚动偏移，二是让末行连同底边距对齐视口底部。
   void _onApplyContentDimensions(ScrollPosition position, double minExt, double maxExt) {
+    bool corrected = false;
     if (_pendingExtraPaddingDelta != null) {
       final double targetOffset = (position.pixels + _pendingExtraPaddingDelta!).clamp(minExt, maxExt);
       if ((position.pixels - targetOffset).abs() > 0.5) {
         position.correctPixels(targetOffset);
+        corrected = true;
       }
       _pendingExtraPaddingDelta = null;
     }
     if (_pendingBottomAlignment) {
       _pendingBottomAlignment = false;
-      _alignLastLineWithBottomPadding(position, minExt, maxExt);
+      if (_alignLastLineWithBottomPadding(position, minExt, maxExt)) {
+        corrected = true;
+      }
+    }
+    // 滚动位置改变后光标在屏幕上的位置随之变化，需要在当帧内刷新输入法坐标：
+    // 若等到下一帧，输入法会先按滚动前的位置显示候选框，再跳回正确位置
+    if (corrected) {
+      _imeReporterKey.currentState?.reportNow();
     }
   }
 
@@ -527,14 +543,16 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 正文未撑满视口（滚动内容由纸张最小页高撑起）时该值同样不足视口高度，视口不会被推到纸张末尾；
   /// 正文撑满视口后，滚动内容的下边缘即末行下方的这段留白，
   /// 该值等于滚动内容的最大偏移，末行、纸张下边缘与其外留白一并对齐视口底部。
-  void _alignLastLineWithBottomPadding(ScrollPosition position, double minExt, double maxExt) {
+  bool _alignLastLineWithBottomPadding(ScrollPosition position, double minExt, double maxExt) {
     final double? lineBottom = _codeScrollController.contentBottomOfLine(widget.controller.codeLines.length - 1);
-    if (lineBottom == null) return;
+    if (lineBottom == null) return false;
     final double bottomMargin = _resolvedBottomPadding + _resolvedBottomGap;
     final double targetOffset = (lineBottom + bottomMargin - position.viewportDimension).clamp(minExt, maxExt);
     if (targetOffset > position.pixels + 0.5) {
       position.correctPixels(targetOffset);
+      return true;
     }
+    return false;
   }
 
   /// 执行一次程序化编辑并标注事件来源
@@ -1190,6 +1208,7 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
         : null;
 
     return ReEditorImeReporter(
+      key: _imeReporterKey,
       controller: widget.controller,
       focusNode: _focusNode,
       scrollController: _scrollController,

@@ -11,21 +11,22 @@
 // the Flutter view client area. Sub-pixel values are preserved so that the
 // physical pixel conversion matches the Flutter engine exactly.
 struct ImeCursorPosition {  
-  double x = 0;         // Left edge of the rect
-  double y = 0;         // Top edge of the rect
-  double width = 0;     // Rect width; zero for a plain caret
-  double height = 16;   // Rect height, i.e. the full text line height
+  double x = 0;           // Left edge of the rect
+  double y = 0;           // Top edge of the rect
+  double height = 16;     // Rect height, i.e. the full text line height
   double text_height = 16; // Glyph height of the text, used to anchor the
                            // composition window at the bottom of the line
-  bool valid = false;   // Whether a position has been reported by Dart yet
+  bool valid = false;     // Whether a position has been reported by Dart yet
 };  
 
-// Applies the IME tracking rect to the input context of the target window.
-// The composition window is anchored at the bottom of the text glyphs, while
-// the candidate window sits at the bottom-left corner of the rect and uses the
-// whole rect as its exclusion area. The candidate placement is identical to
-// the Flutter engine's, so the IME window does not jump back and forth.
-void ApplyImeCursor(HWND target_hwnd, const ImeCursorPosition& pos);
+// Places the composition window of the target window at the bottom of the text
+// glyphs. IMEs which draw the composing string inside their candidate window
+// derive the candidate position from this anchor, so anchoring at the top of
+// the line would make the candidate overlap the upper half of the text line.
+// The candidate window itself is left to the Flutter engine, which positions it
+// from the caret rect fed by the framework: keeping a single placement authority
+// avoids the candidate being moved twice within one keystroke.
+void ApplyImeCompositionWindow(HWND target_hwnd, const ImeCursorPosition& pos);
 
 // A class abstraction for a high DPI-aware Win32 Window. Intended to be
 // inherited from by classes that wish to specialize with custom
@@ -44,7 +45,7 @@ class Win32Window {
     Size(unsigned int width, unsigned int height)
         : width(width), height(height) {}
   };
-  void UpdateImeCursorPosition(double x, double y, double width, double height,
+  void UpdateImeCursorPosition(double x, double y, double height,
                                double text_height); 
 
   Win32Window();
@@ -78,7 +79,7 @@ class Win32Window {
   RECT GetClientArea();
 
  protected:
-  void ApplyImeCursorToWindow(HWND hwnd);
+  void ApplyImeCompositionAnchorToView(HWND hwnd);
 
   // Processes and route salient window messages for mouse handling,
   // size change and DPI. Delegates handling of these to member overloads that

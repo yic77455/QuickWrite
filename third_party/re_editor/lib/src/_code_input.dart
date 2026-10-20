@@ -472,14 +472,20 @@ class _CodeInputController extends ChangeNotifier implements DeltaTextInputClien
     if (render == null) {
       return;
     }
-    final Offset? composingStart = render.calculateTextPositionViewportOffset(selection.base.copyWith(
-      offset: _remoteEditingValue?.composing.start
-    ));
-    final Offset? composingEnd = render.calculateTextPositionViewportOffset(selection.extent.copyWith(
-      offset: _remoteEditingValue?.composing.end
-    ));
-    if (composingStart != null && composingEnd != null) {
-      _textInputConnection!.setComposingRect(Rect.fromPoints(composingStart, composingEnd + Offset(0, render.lineHeight)));
+    final TextRange composing = _remoteEditingValue?.composing ?? TextRange.empty;
+    Offset? composingStart;
+    // 仅在存在实际组合文本时上报组合区域；
+    // 无效组合范围换算出的坐标会落在行首，干扰输入法窗口的定位
+    if (composing.isValid && !composing.isCollapsed) {
+      composingStart = render.calculateTextPositionViewportOffset(selection.base.copyWith(
+        offset: composing.start
+      ));
+      final Offset? composingEnd = render.calculateTextPositionViewportOffset(selection.extent.copyWith(
+        offset: composing.end
+      ));
+      if (composingStart != null && composingEnd != null) {
+        _textInputConnection!.setComposingRect(Rect.fromPoints(composingStart, composingEnd + Offset(0, render.lineHeight)));
+      }
     }
     final Offset? caret = render.calculateTextPositionViewportOffset(selection.base) ?? composingStart;
     if (caret != null) {

@@ -33,12 +33,15 @@ class ReEditorImeReporter extends StatefulWidget {
   final Widget child;
 
   @override
-  State<ReEditorImeReporter> createState() => _ReEditorImeReporterState();
+  State<ReEditorImeReporter> createState() => ReEditorImeReporterState();
 }
 
-class _ReEditorImeReporterState extends State<ReEditorImeReporter> with WidgetsBindingObserver {
+class ReEditorImeReporterState extends State<ReEditorImeReporter> with WidgetsBindingObserver {
   /// 连续读取失败次数，用于诊断 re_editor 升级导致的坐标换算失配
   static const int _failureLogInterval = 60;
+
+  /// 坐标读取失败时的最大重试次数（按帧计）
+  static const int _maxReportRetries = 4;
 
   /// 缓存已找到的排版渲染对象，避免每次光标移动都遍历元素树
   Object? _cachedRender;
@@ -46,11 +49,20 @@ class _ReEditorImeReporterState extends State<ReEditorImeReporter> with WidgetsB
   /// 连续读取失败次数
   int _failureCount = 0;
 
+  /// 立即上报当前光标矩形
+  ///
+  /// 编辑器在布局阶段修正滚动位置后调用，使引擎在当帧内就拿到滚动后的坐标，
+  /// 不必等到下一帧才纠正输入法窗口，避免候选框先出现在滚动前的位置再跳回。
+  void reportNow() {
+    if (!PlatformCapabilities.needsImeCursorFix) return;
+    if (!_tryReportNow()) _scheduleReport();
+  }
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    widget.controller.addListener(_scheduleReport);
+    widget.controller.addListener(_onControllerChanged);
     widget.focusNode.addListener(_onFocusChanged);
     widget.scrollController?.addListener(_scheduleReport);
   }
@@ -59,8 +71,8 @@ class _ReEditorImeReporterState extends State<ReEditorImeReporter> with WidgetsB
   void didUpdateWidget(ReEditorImeReporter oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
-      oldWidget.controller.removeListener(_scheduleReport);
-      widget.controller.addListener(_scheduleReport);
+      oldWidget.controller.removeListener(_onControllerChanged);
+      widget.controller.addListener(_onControllerChanged);
     }
     if (oldWidget.focusNode != widget.focusNode) {
       oldWidget.focusNode.removeListener(_onFocusChanged);
@@ -75,7 +87,7 @@ class _ReEditorImeReporterState extends State<ReEditorImeReporter> with WidgetsB
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    widget.controller.removeListener(_scheduleReport);
+    widget.controller.removeListener(_onControllerChanged);
     widget.focusNode.removeListener(_onFocusChanged);
     widget.scrollController?.removeListener(_scheduleReport);
     super.dispose();
@@ -89,11 +101,27 @@ class _ReEditorImeReporterState extends State<ReEditorImeReporter> with WidgetsB
     }
   }
 
+  /// 光标或文本变化时立即上报
+  ///
+  /// 鼠标点击或方向键移动光标后选区已确定、排版也未变化，
+  /// 此时同步上报可确保引擎在用户下一次按键之前就拿到新位置，
+  /// 避免首次输入时候选框仍按旧光标显示。
+  void _onControllerChanged() {
+    if (!PlatformCapabilities.needsImeCursorFix) return;
+    _tryReportNow();
+    // 文本变化会改变排版与滚动，帧后再核对一次最终位置
+    _scheduleReport();
+  }
+
   /// 等当前帧布局完成后再读取光标坐标
   void _scheduleReport() {
     // 当前平台不需要修正输入法候选框时，跳过整个上报流程
     if (!PlatformCapabilities.needsImeCursorFix) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) => _tryReportNow());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _reportWithRetry(0);
+      // 排版与滚动可能在本帧末才稳定，下一帧再核对一次
+      WidgetsBinding.instance.addPostFrameCallback((_) => _reportWithRetry(0));
+    });
   }
 
   /// 获取焦点时立即上报
@@ -105,8 +133,19 @@ class _ReEditorImeReporterState extends State<ReEditorImeReporter> with WidgetsB
     if (!widget.focusNode.hasFocus) return;
     if (!_tryReportNow()) {
       // 组件刚构建尚未完成布局时读取失败，等下一帧重试
-      WidgetsBinding.instance.addPostFrameCallback((_) => _tryReportNow());
+      _scheduleReport();
     }
+  }
+
+  /// 上报光标矩形，读取失败时在后续帧继续尝试
+  ///
+  /// 换行后光标落在新增的行上，该行在当帧排版完成前取不到坐标；
+  /// 若此时放弃上报，输入法会一直停留在换行前的屏幕位置。
+  void _reportWithRetry(int attempt) {
+    if (!mounted) return;
+    if (_tryReportNow()) return;
+    if (attempt >= _maxReportRetries) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) => _reportWithRetry(attempt + 1));
   }
 
   /// 读取光标矩形并上报；渲染对象不可用或读取失败时返回 false
@@ -120,41 +159,36 @@ class _ReEditorImeReporterState extends State<ReEditorImeReporter> with WidgetsB
     }
 
     final CodeLineSelection selection = widget.controller.selection;
-    // 正在输入拼音时锚定到拼音起始位置，避免候选框随拼音右移而跳动
-    final TextRange composing = widget.controller.composing;
-    final CodeLinePosition anchor = composing.isValid && !composing.isCollapsed
-        ? selection.extent.copyWith(offset: composing.start)
-        : selection.extent;
 
     try {
       // 通过渲染对象换算光标在视口局部坐标系下的位置。
       // 方法名与参数类型均为公开成员，仅所属类不对外公开，因此以动态调用接入。
       final dynamic codeFieldRender = render;
       final double lineHeight = codeFieldRender.lineHeight as double;
-      final Offset? anchorOffset = codeFieldRender.calculateTextPositionViewportOffset(anchor) as Offset?;
-      if (anchorOffset == null) {
+      final Offset? caretOffset =
+          codeFieldRender.calculateTextPositionViewportOffset(selection.extent) as Offset?;
+      if (caretOffset == null) {
         _recordFailure('光标不在可见区域内');
         return false;
       }
 
-      // 组合文本的矩形与 re_editor 上报给引擎的组合区域保持一致，
-      // 无组合文本时退化为纯光标矩形（宽度为 0）
-      final Offset? composingEndOffset = composing.isValid && !composing.isCollapsed
-          ? codeFieldRender.calculateTextPositionViewportOffset(
-              selection.extent.copyWith(offset: composing.end),
-            ) as Offset? : null;
-      final Rect localRect = composingEndOffset != null
-          ? Rect.fromPoints(anchorOffset, composingEndOffset + Offset(0, lineHeight))
-          : Rect.fromLTWH(anchorOffset.dx, anchorOffset.dy, 0, lineHeight);
+      final Rect localRect = Rect.fromLTWH(caretOffset.dx, caretOffset.dy, 0, lineHeight);
+      final RenderBox renderBox = render as RenderBox;
 
       _failureCount = 0;
 
-      // 无组合文本时，用真实光标矩形覆盖引擎缓存，避免开始组字时因引擎缓存错误而闪烁
-      if (!composing.isValid || composing.isCollapsed) {
-        ImeCursorFixer.reportCaretRectToEngine(localRect);
-      }
+      // 先同步包含滚动位移的变换矩阵，再同步光标矩形：
+      // 引擎按「矩形 × 变换」计算输入法窗口位置，两者都必须是当前值，
+      // 否则换行引起滚动后候选框会停留在滚动前的位置。
+      ImeCursorFixer.reportEditableTransform(
+        size: renderBox.size,
+        transform: renderBox.getTransformTo(null).storage,
+      );
+      // 组字范围在上屏瞬间可能尚未与最新文本同步，因此定位一律使用选区光标；
+      // 这里把真实光标矩形回填给引擎，使其在任何时刻都基于当前光标定位。
+      ImeCursorFixer.reportCaretRectToEngine(localRect);
       // 将绝对矩形上报给原生层输入法窗口定位
-      final globalRect = (render as RenderBox).localToGlobal(localRect.topLeft) & localRect.size;
+      final Rect globalRect = renderBox.localToGlobal(localRect.topLeft) & localRect.size;
 
       // 字号决定文字字形高度，用于把组字窗口锚定在文字行底部
       final TextStyle textStyle = codeFieldRender.textStyle as TextStyle;
