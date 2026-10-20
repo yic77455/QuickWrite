@@ -57,13 +57,17 @@ class AboutPage extends StatelessWidget {
     (icon: Icons.bar_chart_rounded, label: '码字统计'),
   ];
 
-  /// 直接依赖的第三方组件及其许可协议
+  /// 直接依赖的第三方组件、内置图标字体及其许可协议
   ///
-  /// 与 pubspec.yaml 中的直接依赖一一对应；间接依赖可通过
+  /// 与 pubspec.yaml 中的直接依赖以及项目内置的图标字体对应；间接依赖可通过
   /// "查看完整第三方许可"入口查看（由 Flutter 汇总全部已注册许可）
   static const List<({String name, String license})> _dependencies = [
     (name: 'Flutter SDK', license: 'BSD-3-Clause'),
     (name: 'flutter_localizations', license: 'BSD-3-Clause'),
+    // Flutter 内置的 Material 图标字体（uses-material-design）
+    (name: 'Material Icons', license: 'Apache-2.0'),
+    // 项目内置的 Material Symbols 图标字体（物理文件位于 assets/icons）
+    (name: 'Material Symbols', license: 'Apache-2.0'),
     (name: 'cupertino_icons', license: 'MIT'),
     (name: 'go_router', license: 'BSD-3-Clause'),
     (name: 'window_manager', license: 'MIT'),
@@ -90,6 +94,8 @@ class AboutPage extends StatelessWidget {
     (name: 'flutter_launcher_icons', license: 'MIT'),
     (name: 'tray_manager', license: 'MIT'),
     (name: 'package_info_plus', license: 'BSD-3-Clause'),
+    // 安卓端通过 FileProvider 拉起安装包所依赖的原生库
+    (name: 'androidx.core', license: 'Apache-2.0'),
   ];
 
   // =========================================================
@@ -380,14 +386,25 @@ class AboutPage extends StatelessWidget {
         ),
         const SizedBox(height: 20),
 
-        // 直接依赖清单
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            for (final dependency in _dependencies) _buildDependencyCard(context, dependency),
-          ],
-        ),
+        // 直接依赖清单：移动端一行一项、宽度撑满可用区域；桌面端为固定宽度卡片自动换行
+        if (PlatformCapabilities.isMobile)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var index = 0; index < _dependencies.length; index++) ...[
+                if (index > 0) const SizedBox(height: 10),
+                _buildDependencyCard(context, _dependencies[index]),
+              ],
+            ],
+          )
+        else
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              for (final dependency in _dependencies) _buildDependencyCard(context, dependency),
+            ],
+          ),
         const SizedBox(height: 14),
 
         // 完整许可入口：覆盖间接依赖在内的全部第三方许可
@@ -410,11 +427,13 @@ class AboutPage extends StatelessWidget {
   }
 
   /// 单个依赖条目：组件名与许可协议标签
+  ///
+  /// 移动端不限定宽度，随父级布局自适应；桌面端保持固定宽度以便流式排布
   Widget _buildDependencyCard(BuildContext context, ({String name, String license}) dependency) {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Container(
-      width: 210,
+      width: PlatformCapabilities.isMobile ? null : 210,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: colorScheme.surfaceContainerLowest,

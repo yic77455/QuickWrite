@@ -325,7 +325,7 @@ class _LineChartPainter extends CustomPainter {
   });
 
   // 绘图区域内边距：左留 Y 轴标签，底留 X 轴标签，上右留少量间距
-  static const double _leftPadding = 48;
+  static final double _leftPadding = PlatformCapabilities.isMobile ? 32 : 36;
   static const double _rightPadding = 16;
   static const double _topPadding = 16;
   static const double _bottomPadding = 28;

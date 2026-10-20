@@ -60,9 +60,14 @@ class _WorkspaceContent extends StatefulWidget {
   State<_WorkspaceContent> createState() => _WorkspaceContentState();
 }
 
-class _WorkspaceContentState extends State<_WorkspaceContent> {
+class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindingObserver {
   // 上一次已知的可用宽度，避免重复更新
   double _lastKnownWidth = 0;
+
+  // 软键盘当前是否弹出
+  // 只记录显示状态而非键盘高度：键盘升降过程中内边距逐帧变化，
+  // 若布局直接依赖内边距，整个工作台会在动画期间逐帧重建，导致掉帧且界面跟不上键盘
+  bool _keyboardVisible = false;
 
   // 保存 WindowProvider 引用，便于在 dispose 中安全清空回调
   // dispose 阶段 widget 已从树中移除，不能再通过 context.read 获取 Provider
@@ -90,6 +95,8 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
   @override
   void initState() {
     super.initState();
+    // 监听窗口度量变化，仅用于跟踪软键盘的显示状态
+    WidgetsBinding.instance.addObserver(this);
     // 初始化工作台数据
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -159,8 +166,11 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // 挂载或窗口尺寸变化时同步键盘显示状态
+    _keyboardVisible = View.of(context).viewInsets.bottom > 0;
     // 监听窗口宽度变化，更新可用宽度并自动调整边栏
-    final availableWidth = MediaQuery.of(context).size.width;
+    // 仅依赖尺寸一项，键盘内边距变化不会触发本页面重建
+    final availableWidth = MediaQuery.sizeOf(context).width;
     if (_lastKnownWidth != availableWidth) {
       _lastKnownWidth = availableWidth;
       // 延迟到当前 build 帧结束后再更新，避免在 build 阶段调用 notifyListeners 导致报错
@@ -173,7 +183,24 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
   }
 
   @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    // 工作台布局只在移动端跟踪软键盘
+    if (!PlatformCapabilities.isMobile) return;
+    // 度量变化当帧布局尚未完成，键盘高度需等布局结束后读取
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final bool isVisible = View.of(context).viewInsets.bottom > 0;
+      // 仅在显示状态切换时重建，键盘动画期间的连续变化被合并掉
+      if (isVisible != _keyboardVisible) {
+        setState(() => _keyboardVisible = isVisible);
+      }
+    });
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     // 使用 initState 中保存的引用清空回调，避免在 dispose 中使用已失效的 context
     // 同窗口模式下从工作台返回书架时，WorkspacePage 会被卸载，
     // 若不清空 onBeforeClose，下次关闭主窗口时会因使用失效的 context 而报错
@@ -274,11 +301,11 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
     // 横屏且输入法弹出时进入沉浸编辑：顶部操作栏与标签页栏一并收起，
     // 避免两层固定栏与键盘上方的工具栏互相挤压，同时让正文可见区域最大化；
     // 键盘收起后两层固定栏自动恢复
-    final bool immersiveEditing = MediaQuery.orientationOf(context) == Orientation.landscape &&
-        MediaQuery.viewInsetsOf(context).bottom > 0;
+    final bool immersiveEditing = MediaQuery.orientationOf(context) == Orientation.landscape && _keyboardVisible;
 
-    // 顶部系统状态栏高度：沉浸编辑时顶部操作栏已收起，改由正文区自行避让
-    final double topInset = MediaQuery.paddingOf(context).top;
+    // 顶部系统状态栏高度：取窗口视图的原始内边距，
+    // 避免依赖会随键盘升降变化的应用内边距而触发重建
+    final double topInset = View.of(context).padding.top / View.of(context).devicePixelRatio;
 
     return PopScope(
       // 拦截系统返回键，交由 _handleMobileBack 处理，避免直接退出应用
@@ -322,67 +349,70 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
           bottom: false,
           // 正文区域加绘制隔离：抽屉滑出与收回期间正文保持静止，可直接复用已缓存的图层
           child: RepaintBoundary(
-            child: AnimatedPadding(
-              // 沉浸编辑时补上系统状态栏高度，与顶部操作栏的收起动画同步，全程无跳动
-              duration: const Duration(milliseconds: 180),
-              curve: Curves.easeOut,
-              padding: EdgeInsets.only(top: immersiveEditing ? topInset : 0),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  // 键盘上方工具栏可占用的最大高度：扣除顶部操作栏（含其状态栏安全区）后的剩余高度。
-                  // 沉浸编辑时顶部操作栏已收起，无需扣减；横屏等纵向空间紧张的场景下
-                  // 工具栏会被压缩到该上限内，保证整列布局不溢出
-                  final double chromeHeight =
-                      immersiveEditing ? 0.0 : MobileWorkspaceAppBar.contentHeight + topInset;
-                  final double barsMaxHeight = math.max(0.0, constraints.maxHeight - chromeHeight);
+            // 屏蔽键盘内边距对子树的影响，避免整个编辑区在键盘动画期间逐帧重建
+            child: _KeyboardStableMediaQuery(
+              child: AnimatedPadding(
+                // 沉浸编辑时补上系统状态栏高度，与顶部操作栏的收起动画同步，全程无跳动
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOut,
+                padding: EdgeInsets.only(top: immersiveEditing ? topInset : 0),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    // 键盘上方工具栏可占用的最大高度：扣除顶部操作栏（含其状态栏安全区）后的剩余高度。
+                    // 沉浸编辑时顶部操作栏已收起，无需扣减；横屏等纵向空间紧张的场景下
+                    // 工具栏会被压缩到该上限内，保证整列布局不溢出
+                    final double chromeHeight =
+                        immersiveEditing ? 0.0 : MobileWorkspaceAppBar.contentHeight + topInset;
+                    final double barsMaxHeight = math.max(0.0, constraints.maxHeight - chromeHeight);
 
-                  return Column(
-                    children: [
-                      // 顶部操作栏（自定义，不占用 Scaffold 的 appBar 槽位）
-                      // 移动端横屏输入法弹出时收起，把纵向空间全部让给编辑区；
-                      // 占满整宽由外层 SizedBox 保证，使收起/恢复动画只发生在纵向
-                      SizedBox(
-                        width: double.infinity,
-                        child: AnimatedSize(
-                          duration: const Duration(milliseconds: 180),
-                          curve: Curves.easeOut,
-                          alignment: Alignment.topCenter,
-                          child: immersiveEditing
-                              ? const SizedBox.shrink()
-                              // 监听专用的历史状态通知器，仅刷新撤销/恢复按钮的禁用态
-                              : ListenableBuilder(
-                                  listenable: workspaceProvider.editHistoryNotifier,
-                                  builder: (context, _) => MobileWorkspaceAppBar(
-                                    onBack: _handleBackToShelf,
-                                    onUndo: workspaceProvider.undo,
-                                    onRedo: workspaceProvider.redo,
-                                    canUndo: workspaceProvider.canUndo,
-                                    canRedo: workspaceProvider.canRedo,
-                                    onContents: () => _mobileScaffoldKey.currentState?.openDrawer(),
-                                    isContentsSelected: _isMobileContentsDrawerOpen,
+                    return Column(
+                      children: [
+                        // 顶部操作栏（自定义，不占用 Scaffold 的 appBar 槽位）
+                        // 移动端横屏输入法弹出时收起，把纵向空间全部让给编辑区；
+                        // 占满整宽由外层 SizedBox 保证，使收起/恢复动画只发生在纵向
+                        SizedBox(
+                          width: double.infinity,
+                          child: AnimatedSize(
+                            duration: const Duration(milliseconds: 180),
+                            curve: Curves.easeOut,
+                            alignment: Alignment.topCenter,
+                            child: immersiveEditing
+                                ? const SizedBox.shrink()
+                                // 监听专用的历史状态通知器，仅刷新撤销/恢复按钮的禁用态
+                                : ListenableBuilder(
+                                    listenable: workspaceProvider.editHistoryNotifier,
+                                    builder: (context, _) => MobileWorkspaceAppBar(
+                                      onBack: _handleBackToShelf,
+                                      onUndo: workspaceProvider.undo,
+                                      onRedo: workspaceProvider.redo,
+                                      canUndo: workspaceProvider.canUndo,
+                                      canRedo: workspaceProvider.canRedo,
+                                      onContents: () => _mobileScaffoldKey.currentState?.openDrawer(),
+                                      isContentsSelected: _isMobileContentsDrawerOpen,
+                                    ),
                                   ),
-                                ),
+                          ),
                         ),
-                      ),
 
-                      // 编辑区占满剩余空间（沉浸编辑时一并收起编辑区内的标签页栏）
-                      Expanded(child: _buildEditorCard(context, hideTabBar: immersiveEditing)),
+                        // 编辑区占满剩余空间（沉浸编辑时一并收起编辑区内的标签页栏）
+                        Expanded(child: _buildEditorCard(context, hideTabBar: immersiveEditing)),
 
-                      // 键盘上方的快捷输入栏（键盘弹出时显示）
-                      ConstrainedBox(
-                        constraints: BoxConstraints(maxHeight: barsMaxHeight),
-                        child: const MobileQuickInputBar(),
-                      ),
+                        // 键盘上方的快捷输入栏（键盘弹出时显示）
+                        ConstrainedBox(
+                          constraints: BoxConstraints(maxHeight: barsMaxHeight),
+                          child: const MobileQuickInputBar(),
+                        ),
 
-                      // 键盘上方的大纲编辑器工具栏（键盘弹出或节点批量选择模式下显示）
-                      // 与快捷输入栏分属不同类型的标签页，同一时刻只会显示其中一个
-                      ConstrainedBox(
-                        constraints: BoxConstraints(maxHeight: barsMaxHeight),
-                        child: const MobileOutlineToolbar(),
-                      ),
-                    ],
-                  );
-                },
+                        // 键盘上方的大纲编辑器工具栏（键盘弹出或节点批量选择模式下显示）
+                        // 与快捷输入栏分属不同类型的标签页，同一时刻只会显示其中一个
+                        ConstrainedBox(
+                          constraints: BoxConstraints(maxHeight: barsMaxHeight),
+                          child: const MobileOutlineToolbar(),
+                        ),
+                      ],
+                    );
+                  },
+                ),
               ),
             ),
           ),
@@ -691,6 +721,50 @@ class _WorkspaceContentState extends State<_WorkspaceContent> {
       leadingWidth: 40,
       titleSpacing: 4,
       height: 40,
+    );
+  }
+}
+
+/// 键盘无关的 MediaQuery 包装
+///
+/// 软键盘升降时窗口内边距与底部安全区会逐帧变化，子树中依赖 MediaQuery 的组件
+/// 会在键盘动画期间逐帧重建，既造成掉帧也让界面跟不上键盘。
+/// 正文区域只关心自身排版、不需要键盘内边距，因此这里把键盘相关字段固定为
+/// 键盘收起时的取值，使其在键盘升降期间保持稳定。
+class _KeyboardStableMediaQuery extends StatefulWidget {
+  /// 被包裹的子树
+  final Widget child;
+
+  const _KeyboardStableMediaQuery({required this.child});
+
+  @override
+  State<_KeyboardStableMediaQuery> createState() => _KeyboardStableMediaQueryState();
+}
+
+class _KeyboardStableMediaQueryState extends State<_KeyboardStableMediaQuery> {
+  /// 键盘收起时的底部安全区高度
+  double _bottomPadding = 0;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final MediaQueryData data = MediaQuery.of(context);
+    // 仅在键盘收起时记录：键盘弹出后底部安全区被输入法覆盖，此时取值不再有效
+    if (data.viewInsets.bottom <= 0) {
+      _bottomPadding = data.padding.bottom;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final MediaQueryData data = MediaQuery.of(context);
+    return MediaQuery(
+      // 清空键盘内边距并还原键盘收起时的底部安全区，使子树不随键盘升降重建
+      data: data.copyWith(
+        viewInsets: EdgeInsets.zero,
+        padding: data.padding.copyWith(bottom: _bottomPadding),
+      ),
+      child: widget.child,
     );
   }
 }

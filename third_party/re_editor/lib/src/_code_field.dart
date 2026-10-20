@@ -635,6 +635,24 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
 
   Offset get paintOffset => Offset(_horizontalViewport?.pixels ?? 0, _verticalViewport.pixels);
 
+  /// 指定逻辑行底部在滚动内容坐标系中的偏移
+  ///
+  /// 自适应高度模式下，编辑器在滚动内容中的偏移（[_externalContentOffset]）
+  /// 与顶部内边距（[paddingTop]）由外部滚动容器提供，此处一并将它们计入，
+  /// 使返回值可直接与外部滚动位置（像素）比较。
+  /// 行排版尚未完成、索引越界或非自适应高度模式时返回 null。
+  double? contentBottomOfLine(int index) {
+    final List<double>? tops = _lineTops;
+    if (_externalScrollController == null ||
+        tops == null ||
+        index < 0 ||
+        index >= _codes.length) {
+      return null;
+    }
+    // _lineTops 为前缀和，第 index + 1 项即为该行底部的偏移
+    return paddingTop + tops[index + 1] + _externalContentOffset;
+  }
+
   CodeLineRenderParagraph? findDisplayParagraphByLineIndex(int index) {
     for (final CodeLineRenderParagraph paragraph in _displayParagraphs) {
       if (paragraph.index == index) {
@@ -920,6 +938,31 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
     });
   }
 
+  /// 自适应高度模式下拖拽到视口边缘时滚动外部滚动容器
+  ///
+  /// 编辑器局部坐标的原点对应外部滚动内容中的 [_externalContentOffset] 处，
+  /// 因此用外部滚动位置与视口高度换算出可视区的上下边缘，指针越过边缘即按行高滚动一行。
+  void _autoScrollExternalWhenDragging(Offset localPosition, double unit) {
+    final ScrollPosition? position = _externalScrollPosition;
+    if (position == null || !position.hasViewportDimension) {
+      return;
+    }
+    final double topEdge = position.pixels - _externalContentOffset;
+    final double bottomEdge = topEdge + position.viewportDimension;
+    final double target;
+    if (localPosition.dy < topEdge + unit) {
+      target = position.pixels - unit;
+    } else if (localPosition.dy > bottomEdge - unit) {
+      target = position.pixels + unit;
+    } else {
+      return;
+    }
+    final double clamped = target.clamp(position.minScrollExtent, position.maxScrollExtent);
+    if ((clamped - position.pixels).abs() > 0.5) {
+      position.jumpTo(clamped);
+    }
+  }
+
   void forceRepaint() {
     _highlighter.clearCache();
     _displayParagraphs.clear();
@@ -932,10 +975,16 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
     markNeedsPaint();
   }
 
+  /// 拖拽选区手柄或浮动光标到视口边缘时滚动视口
+  ///
+  /// 自适应高度模式下编辑器高度等于内容总高、自身不承载滚动，
+  /// 无法用自身高度判断视口边缘，改为依据外部滚动容器的位置与高度判定。
   void autoScrollWhenDragging(Offset dragPosition) {
     final Offset offset = globalToLocal(dragPosition);
     final double unit = _preferredLineHeight;
-    if (_verticalViewportSize != null) {
+    if (_intrinsic) {
+      _autoScrollExternalWhenDragging(offset, unit);
+    } else if (_verticalViewportSize != null) {
       if (offset.dy < unit) {
         _alignTopEdge(
           offset: _verticalViewport.pixels - unit

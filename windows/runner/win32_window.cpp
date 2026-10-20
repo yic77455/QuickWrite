@@ -240,61 +240,113 @@ Win32Window::MessageHandler(HWND hwnd,
   return DefWindowProc(window_handle_, message, wparam, lparam);
 }
 
-void Win32Window::ApplyImeCursorToWindow(HWND hwnd) {
-  if (applying_ime_cursor_) return;
-  applying_ime_cursor_ = true;
+namespace {
 
-  HWND target_hwnd = child_content_ ? child_content_ : hwnd;
-  HIMC hImc = ImmGetContext(target_hwnd);
-  if (!hImc) {
-    applying_ime_cursor_ = false;
-    return;
-  }
- 
+// Physical pixel rectangle of the IME tracking area in client coordinates.
+struct ImePhysicalRect {
+  LONG left = 0;
+  LONG top = 0;
+  LONG right = 0;
+  LONG bottom = 16;
+  LONG text_height = 16;
+};
+
+// Converts the logical tracking rect into physical client pixels.
+// The conversion mirrors the Flutter engine: scale by the window DPI, then
+// truncate. Sharing the same rule keeps the engine's placement and ours
+// pixel-identical.
+ImePhysicalRect ToPhysicalImeRect(HWND target_hwnd,
+                                  const ImeCursorPosition& pos) {
   UINT dpi = 96;
   using GetDpiForWindowFn = UINT(WINAPI*)(HWND);
   static auto getDpiForWindow = reinterpret_cast<GetDpiForWindowFn>(
       GetProcAddress(GetModuleHandle(L"User32.dll"), "GetDpiForWindow"));
   if (getDpiForWindow) {
-    dpi = getDpiForWindow(hwnd);
+    dpi = getDpiForWindow(target_hwnd);
+  }
+
+  const double scale = static_cast<double>(dpi) / 96.0;
+  ImePhysicalRect rect;
+  rect.left = static_cast<LONG>(pos.x * scale);
+  rect.top = static_cast<LONG>(pos.y * scale);
+  rect.right = static_cast<LONG>((pos.x + pos.width) * scale);
+  rect.bottom = static_cast<LONG>((pos.y + pos.height) * scale);
+  if (rect.bottom <= rect.top) {
+    rect.bottom = rect.top + 16;
+  }
+  rect.text_height = static_cast<LONG>(pos.text_height * scale);
+  if (rect.text_height <= 0 || rect.text_height > rect.bottom - rect.top) {
+    rect.text_height = rect.bottom - rect.top;
+  }
+  return rect;
+}
+
+}  // namespace
+
+void ApplyImeCursor(HWND target_hwnd, const ImeCursorPosition& pos) {
+  if (!pos.valid) {
+    return;
+  }
+
+  HIMC hImc = ImmGetContext(target_hwnd);
+  if (!hImc) {
+    return;
   }
  
-  auto toPhysical = [&](int32_t logical) -> LONG {
-    return static_cast<LONG>(logical * static_cast<double>(dpi) / 96.0 + 0.5);
-  };
- 
-  LONG physX = toPhysical(ime_cursor_pos_.x);
-  LONG physY = toPhysical(ime_cursor_pos_.y);
-  LONG physH = toPhysical(ime_cursor_pos_.height);
- 
-  POINT clientPt = {physX, physY};
+  const ImePhysicalRect rect = ToPhysicalImeRect(target_hwnd, pos);
+
+  // Anchor the composition window at the bottom of the text glyphs. IMEs that
+  // draw the composing string inside their candidate window derive the
+  // candidate position from this anchor, so anchoring at the rect top would
+  // make the candidate overlap the upper half of the text line.
+  LONG composition_top = rect.bottom - rect.text_height;
+  if (composition_top < rect.top) {
+    composition_top = rect.top;
+  }
+  if (composition_top > rect.bottom - 1) {
+    composition_top = rect.bottom - 1;
+  }
 
   COMPOSITIONFORM cf = {};
   cf.dwStyle = CFS_POINT;
-  cf.ptCurrentPos.x = clientPt.x;
-  cf.ptCurrentPos.y = clientPt.y - physH; 
+  cf.ptCurrentPos.x = rect.left;
+  cf.ptCurrentPos.y = composition_top;
   ImmSetCompositionWindow(hImc, &cf);
  
+  // Anchor the candidate window at the bottom-left corner and exclude the
+  // whole rect so that it never covers the text being typed. This is identical
+  // to the Flutter engine's own placement, so the two never fight each other.
   CANDIDATEFORM cdf = {};
   cdf.dwIndex = 0;
   cdf.dwStyle = CFS_EXCLUDE;
-  cdf.ptCurrentPos.x = clientPt.x;
-  cdf.ptCurrentPos.y = clientPt.y;
-  cdf.rcArea.left   = clientPt.x;
-  cdf.rcArea.top    = clientPt.y - physH;
-  cdf.rcArea.right  = clientPt.x + toPhysical(2); 
-  cdf.rcArea.bottom = clientPt.y;
+  cdf.ptCurrentPos.x = rect.left;
+  cdf.ptCurrentPos.y = rect.bottom;
+  cdf.rcArea.left = rect.left;
+  cdf.rcArea.top = rect.top;
+  cdf.rcArea.right = rect.right;
+  cdf.rcArea.bottom = rect.bottom;
   ImmSetCandidateWindow(hImc, &cdf);
  
   ImmReleaseContext(target_hwnd, hImc);
+}
+
+void Win32Window::ApplyImeCursorToWindow(HWND hwnd) {
+  if (applying_ime_cursor_) return;
+  applying_ime_cursor_ = true;
+
+  ApplyImeCursor(child_content_ ? child_content_ : hwnd, ime_cursor_pos_);
   applying_ime_cursor_ = false;
 }
  
-void Win32Window::UpdateImeCursorPosition(int32_t x, int32_t y, int32_t height) {
+void Win32Window::UpdateImeCursorPosition(double x, double y, double width, double height,
+                                          double text_height) {
   ime_cursor_pos_.x = x;
   ime_cursor_pos_.y = y;
+  ime_cursor_pos_.width = (width > 0) ? width : 0;
   ime_cursor_pos_.height = (height > 0) ? height : 16;
- 
+  ime_cursor_pos_.text_height = (text_height > 0) ? text_height : 16;
+  ime_cursor_pos_.valid = true;
+
   if (window_handle_) {
     ApplyImeCursorToWindow(window_handle_);
   }

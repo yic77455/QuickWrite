@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -141,6 +142,13 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 待补偿的额外顶边距变化量
   double? _pendingExtraPaddingDelta;
 
+  /// 上下边距换算所依据的编辑区高度
+  ///
+  /// 上下边距按编辑区高度的百分比换算，而软键盘升降会压缩编辑区高度；
+  /// 若直接采用实时高度，键盘动画期间节点内容会随之上下移动。
+  /// 此处记录键盘收起时的编辑区高度作为基准，键盘弹出期间沿用该基准。
+  double _marginBasisHeight = 0;
+
   // ================= 选区状态 =================
 
   /// 当前选中的节点ID集合（多节点选区）
@@ -194,6 +202,11 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
   /// 是否正在异步加载文件内容
   bool _isLoading = false;
+
+  /// 折叠状态写入任务链
+  ///
+  /// 因内容与结构变化都会刷新折叠状态，多次保存按此链顺序执行，避免并发写同一文件
+  Future<void> _foldStateWriteChain = Future.value();
 
   /// 底部快捷键提示的高度（为滚动列表预留底部内边距，避免末节点被浮动提示遮挡）
   double _bottomHintHeight = 0;
@@ -522,6 +535,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       if (await file.exists()) {
         final text = await file.readAsString();
         parseFromText(text);
+        // 恢复上次退出时的节点折叠状态
+        await _loadFoldState();
       } else {
         // 文件不存在时视为新设定项，初始化默认空节点
         parseFromText('');
@@ -652,10 +667,104 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
         await parentDir.create(recursive: true);
       }
       await file.writeAsString(serializeToText());
+      // 结构变化会改变节点路径，随内容一并刷新折叠状态
+      _saveFoldState();
       return true;
     } catch (e) {
       debugPrint('保存大纲文件失败: $e');
       return false;
+    }
+  }
+
+  /// 折叠状态文件路径
+  ///
+  /// 与大纲文件同目录同名、扩展名替换为 `.fold.json`，
+  /// 独立存放可避免折叠标记混入正文，影响导出与备份的内容。
+  String? get _foldStateFilePath {
+    final String? path = widget.filePath;
+    if (path == null || path.isEmpty) return null;
+    const String extension = GlobalConstants.settingFileExtension;
+    final String base = path.endsWith(extension)
+        ? path.substring(0, path.length - extension.length)
+        : path;
+    return '$base.fold.json';
+  }
+
+  /// 从文件读取折叠状态并应用到当前大纲树
+  Future<void> _loadFoldState() async {
+    final String? path = _foldStateFilePath;
+    if (path == null) return;
+    try {
+      final file = File(path);
+      if (!await file.exists()) return;
+      final dynamic data = jsonDecode(await file.readAsString());
+      if (data is! Map) return;
+      final Set<String>? collapsed =
+          (data['collapsed'] as List?)?.whereType<String>().toSet();
+      if (collapsed == null || collapsed.isEmpty || !mounted) return;
+      setState(() => _applyFoldState(collapsed));
+    } catch (e) {
+      debugPrint('加载大纲折叠状态失败: $e');
+    }
+  }
+
+  /// 保存折叠状态到文件
+  ///
+  /// 连续操作会触发多次保存，写入按任务链串行执行，
+  /// 避免同一文件的并发写使内容交错。
+  void _saveFoldState() {
+    if (widget.readOnly) return;
+    final String? path = _foldStateFilePath;
+    if (path == null) return;
+    _foldStateWriteChain = _foldStateWriteChain.then((_) => _writeFoldStateFile(path));
+  }
+
+  /// 将当前折叠状态写入指定文件
+  Future<void> _writeFoldStateFile(String path) async {
+    try {
+      final file = File(path);
+      final parentDir = file.parent;
+      if (!await parentDir.exists()) {
+        await parentDir.create(recursive: true);
+      }
+      await file.writeAsString(jsonEncode({'collapsed': _collectCollapsedPaths()}));
+    } catch (e) {
+      debugPrint('保存大纲折叠状态失败: $e');
+    }
+  }
+
+  /// 收集全部折叠节点的路径
+  ///
+  /// 节点 ID 每次解析文件都会重新生成，无法跨次加载对应到同一节点，
+  /// 因此改用「自根节点起的层级索引路径」标识节点。
+  List<String> _collectCollapsedPaths() {
+    final paths = <String>[];
+    void walk(OutlineNode node, String path) {
+      if (!node.isExpanded) paths.add(path);
+      for (int i = 0; i < node.children.length; i++) {
+        walk(node.children[i], '$path.$i');
+      }
+    }
+
+    for (int i = 0; i < _roots.length; i++) {
+      walk(_roots[i], '$i');
+    }
+    return paths;
+  }
+
+  /// 按节点路径应用折叠状态
+  ///
+  /// 路径存在于折叠集合中的节点收起子节点，其余节点保持展开。
+  void _applyFoldState(Set<String> collapsedPaths) {
+    void walk(OutlineNode node, String path) {
+      node.isExpanded = !collapsedPaths.contains(path);
+      for (int i = 0; i < node.children.length; i++) {
+        walk(node.children[i], '$path.$i');
+      }
+    }
+
+    for (int i = 0; i < _roots.length; i++) {
+      walk(_roots[i], '$i');
     }
   }
 
@@ -719,6 +828,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   void _endBatchAndNotify({required String description, String? focusNodeId, TextSelection? focusSelection}) {
     _undoManager.endBatch(description: description, focusNodeId: focusNodeId, focusSelection: focusSelection);
     _notifyContentChanged();
+    // 结构变化会改变节点路径，同步刷新折叠状态，避免下次加载对应到错误的节点
+    _saveFoldState();
   }
 
   // ================= 撤销/恢复 =================
@@ -1457,6 +1568,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     setState(() {
       node.isExpanded = !node.isExpanded;
     });
+    _saveFoldState();
   }
 
   /// 添加根节点
@@ -1489,6 +1601,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       walk(root);
     }
     setState(() {});
+    _saveFoldState();
   }
 
   /// 折叠所有节点（仅保留根级节点可见）
@@ -1504,6 +1617,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       walk(root);
     }
     setState(() {});
+    _saveFoldState();
   }
 
   // ================= 选区管理 =================
@@ -3926,6 +4040,16 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       }
     }
 
+    // Tab：缩进全部选中节点；Shift+Tab：提升全部选中节点的层级
+    if (_selectedNodeIds.isNotEmpty && event.logicalKey == LogicalKeyboardKey.tab) {
+      if (isShift) {
+        outdentSelectedNodes();
+      } else {
+        indentSelectedNodes();
+      }
+      return KeyEventResult.handled;
+    }
+
     // Ctrl+A：在主题选区与文档选区间切换
     if (isControl && event.logicalKey == LogicalKeyboardKey.keyA) {
       if (_selectAllLevel == 1) {
@@ -4483,6 +4607,18 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     );
   }
 
+  /// 取上下边距换算所依据的编辑区高度
+  ///
+  /// 键盘收起时以当前可用高度更新基准，键盘弹出期间沿用上一次记录的基准，
+  /// 使上下边距不随键盘动画变化，节点内容在键盘升降过程中保持原位。
+  double _resolveMarginBasisHeight(double availableHeight) {
+    // 高度取自窗口视图的原始内边距：需要区分键盘升降，与应用内边距无关
+    if (View.of(context).viewInsets.bottom <= 0) {
+      _marginBasisHeight = availableHeight;
+    }
+    return _marginBasisHeight > 0 ? _marginBasisHeight : availableHeight;
+  }
+
   /// 构建编辑器主体内容
   Widget _buildEditorBody(BuildContext context) {
     final colorScheme = widget.colorScheme;
@@ -4619,8 +4755,12 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
                                 final horizontalPadding =
                                     horizontalBase * (settings.outlineHorizontalMargin / 100);
                                 // 顶边距和底边距（百分比，相对于编辑器高度）
-                                final topPadding = constraints.maxHeight * (settings.outlineTopMargin / 100);
-                                final bottomPadding = constraints.maxHeight * (settings.outlineBottomMargin / 100);
+                                // 换算基准在键盘升降期间保持不变，避免节点内容随键盘上下移动
+                                final double marginBasisHeight = _resolveMarginBasisHeight(constraints.maxHeight);
+                                final double topPadding =
+                                    marginBasisHeight * (settings.outlineTopMargin / 100);
+                                final double bottomPadding =
+                                    marginBasisHeight * (settings.outlineBottomMargin / 100);
 
                                 // 构建节点列表，每个节点都用右键菜单包装；
                                 // 移动端长按交还系统原生选择行为，不注册长按识别器

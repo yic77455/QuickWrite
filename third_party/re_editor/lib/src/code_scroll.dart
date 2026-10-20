@@ -23,6 +23,14 @@ class CodeScrollController {
     _render?.makePositionVisible(position);
   }
 
+  /// 指定逻辑行底部在外部滚动内容坐标系中的偏移
+  ///
+  /// 供外层滚动容器在 Layout 阶段对齐正文末尾内容使用；
+  /// 编辑器尚未完成排版或索引越界时返回 null。
+  double? contentBottomOfLine(int index) {
+    return _render?.contentBottomOfLine(index);
+  }
+
   void bindEditor(GlobalKey key) {
     _editorKey = key;
   }

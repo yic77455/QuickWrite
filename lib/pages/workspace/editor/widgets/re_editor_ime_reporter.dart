@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:re_editor/re_editor.dart';
@@ -7,10 +6,10 @@ import 'package:re_editor/re_editor.dart';
 /// re_editor 输入法光标上报器
 ///
 /// Windows 端候选框坐标由原生层劫持 IME 消息后覆盖（见 `windows/runner/flutter_window.cpp`），
-/// 该机制与编辑器实现无关，因此这里只需按 re_editor 的光标模型算出光标矩形，
+/// 该机制与编辑器实现无关，因此这里只需按 re_editor 的光标模型算出光标/组合区域矩形，
 /// 再通过 [ImeCursorFixer] 上报相同的通道数据。
 ///
-/// 光标几何直接取自 re_editor 渲染对象提供的屏幕坐标换算结果，避免重复实现文本排版。
+/// 光标几何直接取自 re_editor 渲染对象提供的坐标换算结果，避免重复实现文本排版。
 /// 取值失败时跳过本次上报，由原生层沿用上一次坐标。
 class ReEditorImeReporter extends StatefulWidget {
   const ReEditorImeReporter({
@@ -127,26 +126,45 @@ class _ReEditorImeReporterState extends State<ReEditorImeReporter> with WidgetsB
         ? selection.extent.copyWith(offset: composing.start)
         : selection.extent;
 
-    final Offset? caretBottom;
     try {
-      // 通过渲染对象换算光标底部的屏幕坐标。
+      // 通过渲染对象换算光标在视口局部坐标系下的位置。
       // 方法名与参数类型均为公开成员，仅所属类不对外公开，因此以动态调用接入。
-      caretBottom = (render as dynamic).calculateTextPositionScreenOffset(anchor, true) as Offset?;
+      final dynamic codeFieldRender = render;
+      final double lineHeight = codeFieldRender.lineHeight as double;
+      final Offset? anchorOffset = codeFieldRender.calculateTextPositionViewportOffset(anchor) as Offset?;
+      if (anchorOffset == null) {
+        _recordFailure('光标不在可见区域内');
+        return false;
+      }
+
+      // 组合文本的矩形与 re_editor 上报给引擎的组合区域保持一致，
+      // 无组合文本时退化为纯光标矩形（宽度为 0）
+      final Offset? composingEndOffset = composing.isValid && !composing.isCollapsed
+          ? codeFieldRender.calculateTextPositionViewportOffset(
+              selection.extent.copyWith(offset: composing.end),
+            ) as Offset? : null;
+      final Rect localRect = composingEndOffset != null
+          ? Rect.fromPoints(anchorOffset, composingEndOffset + Offset(0, lineHeight))
+          : Rect.fromLTWH(anchorOffset.dx, anchorOffset.dy, 0, lineHeight);
+
+      _failureCount = 0;
+
+      // 无组合文本时，用真实光标矩形覆盖引擎缓存，避免开始组字时因引擎缓存错误而闪烁
+      if (!composing.isValid || composing.isCollapsed) {
+        ImeCursorFixer.reportCaretRectToEngine(localRect);
+      }
+      // 将绝对矩形上报给原生层输入法窗口定位
+      final globalRect = (render as RenderBox).localToGlobal(localRect.topLeft) & localRect.size;
+
+      // 字号决定文字字形高度，用于把组字窗口锚定在文字行底部
+      final TextStyle textStyle = codeFieldRender.textStyle as TextStyle;
+      final double textHeight = textStyle.fontSize ?? lineHeight * 0.7;
+      ImeCursorFixer.reportRect(globalRect, textHeight: textHeight);
+      return true;
     } catch (e) {
       _recordFailure('光标坐标换算失败: $e');
       return false;
     }
-    if (caretBottom == null) {
-      _recordFailure('光标不在可见区域内');
-      return false;
-    }
-
-    _failureCount = 0;
-    ImeCursorFixer.reportCursorPosition(
-      globalOffset: caretBottom,
-      lineHeight: SettingsService.instance.fontSize,
-    );
-    return true;
   }
 
   /// 记录读取失败并按间隔输出诊断日志

@@ -191,6 +191,29 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 用于记录需要在 Layout 阶段补偿的额外顶边距变化量
   double? _pendingExtraPaddingDelta;
 
+  /// 待对齐末行的标记
+  ///
+  /// 内容在末行增长时置位，由 [SyncScrollPosition.applyContentDimensions]
+  /// 在布局阶段消费，使滚动修正与当帧渲染一并生效，不出现先渲染再滚动的二次跳动。
+  bool _pendingBottomAlignment = false;
+
+  /// 末行与视口底部之间保留的底边距
+  ///
+  /// 由布局过程按设置换算（视口高度 × 底边距百分比），供末行对齐使用。
+  double _resolvedBottomPadding = 0;
+
+  /// 滚动内容在纸张下方留出的空白高度
+  ///
+  /// 用于显露纸张下边缘；末行对齐时需一并计入，否则纸张下边缘会被推进视口之外。
+  double _resolvedBottomGap = 0;
+
+  /// 页边距换算所依据的编辑区高度
+  ///
+  /// 页边距按视口高度的百分比换算，而软键盘升降会压缩编辑区高度；
+  /// 若直接采用实时高度，键盘动画期间正文会随之上下移动。
+  /// 此处记录键盘收起时的编辑区高度作为基准，键盘弹出期间沿用该基准。
+  double _marginBasisHeight = 0;
+
   /// 上一次的高亮摘要
   ///
   /// 查找匹配变化不会改变编辑器属性，需要据此主动请求重绘以刷新高亮。
@@ -455,24 +478,17 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     widget.onEditEvent?.call(type);
   }
 
-  /// 维持底边距这一安全距离
+  /// 标记末行需要在布局阶段对齐底边距
   ///
   /// 光标位于最后一行时，内容增长会把最后一行向下推挤甚至顶出视口；
-  /// 此处把滚动位置推到末尾，使最后一行与容器底边始终保持设定的底边距。
+  /// 置位后由布局阶段把滚动位置调整到「末行底部 + 底边距 与视口底部对齐」处，
+  /// 使最后一行在视口中的位置保持稳定。
   void _keepBottomPaddingVisible() {
     if (widget.controller.selection.extentIndex < widget.controller.codeLines.length - 1) {
       return;
     }
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final ScrollPosition? position = _editorScrollPosition;
-      if (position == null) return;
-      final double targetOffset = position.maxScrollExtent;
-      if (position.pixels < targetOffset - 0.5) {
-        _scrollController.animateTo(targetOffset, duration: const Duration(milliseconds: 150), curve: Curves.easeOut);
-      }
-    });
+    _pendingBottomAlignment = true;
   }
 
   /// 焦点变化时触发
@@ -486,7 +502,10 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     if (mounted) setState(() {});
   }
 
-  /// 在 Layout 阶段补偿额外顶边距变化导致的滚动偏移
+  /// 在 Layout 阶段修正滚动像素
+  ///
+  /// 修正发生在 Paint 之前，因此结果随当帧一并呈现，不会出现先渲染再滚动的二次跳动。
+  /// 一是补偿额外顶边距变化导致的滚动偏移，二是让末行连同底边距对齐视口底部。
   void _onApplyContentDimensions(ScrollPosition position, double minExt, double maxExt) {
     if (_pendingExtraPaddingDelta != null) {
       final double targetOffset = (position.pixels + _pendingExtraPaddingDelta!).clamp(minExt, maxExt);
@@ -494,6 +513,27 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
         position.correctPixels(targetOffset);
       }
       _pendingExtraPaddingDelta = null;
+    }
+    if (_pendingBottomAlignment) {
+      _pendingBottomAlignment = false;
+      _alignLastLineWithBottomPadding(position, minExt, maxExt);
+    }
+  }
+
+  /// 让末行连同其下方的底边距与纸张下留白对齐视口底部
+  ///
+  /// 目标偏移取「末行底部 + 编辑区底边距 + 纸张下留白 − 视口高度」：
+  /// 末行尚未顶到视口底部时该值小于当前偏移，不产生滚动；
+  /// 正文未撑满视口（滚动内容由纸张最小页高撑起）时该值同样不足视口高度，视口不会被推到纸张末尾；
+  /// 正文撑满视口后，滚动内容的下边缘即末行下方的这段留白，
+  /// 该值等于滚动内容的最大偏移，末行、纸张下边缘与其外留白一并对齐视口底部。
+  void _alignLastLineWithBottomPadding(ScrollPosition position, double minExt, double maxExt) {
+    final double? lineBottom = _codeScrollController.contentBottomOfLine(widget.controller.codeLines.length - 1);
+    if (lineBottom == null) return;
+    final double bottomMargin = _resolvedBottomPadding + _resolvedBottomGap;
+    final double targetOffset = (lineBottom + bottomMargin - position.viewportDimension).clamp(minExt, maxExt);
+    if (targetOffset > position.pixels + 0.5) {
+      position.correctPixels(targetOffset);
     }
   }
 
@@ -942,6 +982,18 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     );
   }
 
+  /// 取页边距换算所依据的编辑区高度
+  ///
+  /// 键盘收起时以当前可用高度更新基准，键盘弹出期间沿用上一次记录的基准，
+  /// 使页边距不随键盘动画变化，正文在键盘升降过程中保持原位。
+  double _resolveMarginBasisHeight(double availableHeight) {
+    // 高度取自窗口视图的原始内边距：需要区分键盘升降，与应用内边距无关
+    if (View.of(context).viewInsets.bottom <= 0) {
+      _marginBasisHeight = availableHeight;
+    }
+    return _marginBasisHeight > 0 ? _marginBasisHeight : availableHeight;
+  }
+
   /// 编辑器区域内容：纸张 + 标题 + 编辑器
   ///
   /// 纸张宽度按模式约束（纸张模式为 A4 宽并居中，非纸张模式贴合上级容器），
@@ -961,12 +1013,18 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     final double paperCompensation = pageViewEnabled ? _paperHorizontalCompensation : 0.0;
     // 左右页边距：百分比 × 纸张宽度
     final double horizontalPadding = paperWidth * (settings.horizontalMargin / 100);
+    // 上下页边距的换算基准：键盘升降期间保持不变，避免正文随键盘上下移动
+    final double marginBasisHeight = _resolveMarginBasisHeight(constraints.maxHeight);
     // 顶边距：百分比 × 视口高度，作为章节标题与正文首行之间的间距
-    final double topMargin = constraints.maxHeight * (settings.topMargin / 100);
+    final double topMargin = marginBasisHeight * (settings.topMargin / 100);
     // 底边距：百分比 × 视口高度，作为末行与纸张底边之间的安全距离
-    final double bottomPadding = constraints.maxHeight * (settings.bottomMargin / 100);
+    final double bottomPadding = marginBasisHeight * (settings.bottomMargin / 100);
+    // 记录到实例状态，供布局阶段对齐末行时计算目标滚动偏移
+    _resolvedBottomPadding = bottomPadding;
     // 纸张上下与容器之间留出的空白，用于显露纸张轮廓
     final double paperGap = pageViewEnabled ? GlobalConstants.paperTopMargin : 0.0;
+    // 记录到实例状态，供布局阶段对齐末行时计算目标滚动偏移
+    _resolvedBottomGap = paperGap;
     final double scrollTopPadding = widget.extraTopPadding + paperGap;
     // 标题区域占用的高度（纸张内标题及其顶部间距）
     final double titleAreaHeight = showTitle ? _resolveTitleAreaHeight(settings) : 0.0;

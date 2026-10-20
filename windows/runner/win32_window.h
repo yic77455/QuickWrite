@@ -7,11 +7,25 @@
 #include <memory>
 #include <string>
 
+// IME tracking rect; coordinates and size are in logical pixels relative to
+// the Flutter view client area. Sub-pixel values are preserved so that the
+// physical pixel conversion matches the Flutter engine exactly.
 struct ImeCursorPosition {  
-  int32_t x = 0;  
-  int32_t y = 0;  
-  int32_t height = 16;  
+  double x = 0;         // Left edge of the rect
+  double y = 0;         // Top edge of the rect
+  double width = 0;     // Rect width; zero for a plain caret
+  double height = 16;   // Rect height, i.e. the full text line height
+  double text_height = 16; // Glyph height of the text, used to anchor the
+                           // composition window at the bottom of the line
+  bool valid = false;   // Whether a position has been reported by Dart yet
 };  
+
+// Applies the IME tracking rect to the input context of the target window.
+// The composition window is anchored at the bottom of the text glyphs, while
+// the candidate window sits at the bottom-left corner of the rect and uses the
+// whole rect as its exclusion area. The candidate placement is identical to
+// the Flutter engine's, so the IME window does not jump back and forth.
+void ApplyImeCursor(HWND target_hwnd, const ImeCursorPosition& pos);
 
 // A class abstraction for a high DPI-aware Win32 Window. Intended to be
 // inherited from by classes that wish to specialize with custom
@@ -30,7 +44,8 @@ class Win32Window {
     Size(unsigned int width, unsigned int height)
         : width(width), height(height) {}
   };
-  void UpdateImeCursorPosition(int32_t x, int32_t y, int32_t height); 
+  void UpdateImeCursorPosition(double x, double y, double width, double height,
+                               double text_height); 
 
   Win32Window();
   virtual ~Win32Window();

@@ -1,4 +1,4 @@
-﻿#include "flutter_window.h"
+#include "flutter_window.h"
 
 #include <optional>
 
@@ -10,6 +10,43 @@
 #include <commctrl.h>
 #pragma comment(lib, "comctl32.lib")
 
+// Reads the IME tracking rect from a channel argument map.
+// Both integer and double values are accepted so the payload stays compatible
+// with either encoding.
+static bool ReadImeCursorPosition(const flutter::EncodableMap& args,
+                                  ImeCursorPosition* pos) {
+  auto read = [&args](const char* key, double fallback) -> double {
+    auto it = args.find(flutter::EncodableValue(key));
+    if (it == args.end()) {
+      return fallback;
+    }
+    if (const auto* value = std::get_if<double>(&it->second)) {
+      return *value;
+    }
+    if (const auto* value = std::get_if<int32_t>(&it->second)) {
+      return static_cast<double>(*value);
+    }
+    return fallback;
+  };
+
+  pos->x = read("x", 0);
+  pos->y = read("y", 0);
+  pos->width = read("width", 0);
+  pos->height = read("height", 16);
+  pos->text_height = read("textHeight", 16);
+  if (pos->width < 0) {
+    pos->width = 0;
+  }
+  if (pos->height <= 0) {
+    pos->height = 16;
+  }
+  if (pos->text_height <= 0) {
+    pos->text_height = 16;
+  }
+  pos->valid = true;
+  return true;
+}
+
 struct ImeWindowContext {
   ImeCursorPosition pos;
   bool applying = false;
@@ -19,48 +56,8 @@ struct ImeWindowContext {
     if (applying) return;
     applying = true;
 
-    HIMC hImc = ImmGetContext(target_hwnd);
-    if (!hImc) {
-      applying = false;
-      return;
-    }
-   
-    UINT dpi = 96;
-    using GetDpiForWindowFn = UINT(WINAPI*)(HWND);
-    static auto getDpiForWindow = reinterpret_cast<GetDpiForWindowFn>(
-        GetProcAddress(GetModuleHandle(L"User32.dll"), "GetDpiForWindow"));
-    if (getDpiForWindow) {
-      dpi = getDpiForWindow(target_hwnd);
-    }
-   
-    auto toPhysical = [&](int32_t logical) -> LONG {
-      return static_cast<LONG>(logical * static_cast<double>(dpi) / 96.0 + 0.5);
-    };
-   
-    LONG physX = toPhysical(pos.x);
-    LONG physY = toPhysical(pos.y);
-    LONG physH = toPhysical(pos.height);
-   
-    POINT clientPt = {physX, physY};
+    ApplyImeCursor(target_hwnd, pos);
 
-    COMPOSITIONFORM cf = {};
-    cf.dwStyle = CFS_POINT;
-    cf.ptCurrentPos.x = clientPt.x;
-    cf.ptCurrentPos.y = clientPt.y - physH; 
-    ImmSetCompositionWindow(hImc, &cf);
-   
-    CANDIDATEFORM cdf = {};
-    cdf.dwIndex = 0;
-    cdf.dwStyle = CFS_EXCLUDE;
-    cdf.ptCurrentPos.x = clientPt.x;
-    cdf.ptCurrentPos.y = clientPt.y;
-    cdf.rcArea.left   = clientPt.x;
-    cdf.rcArea.top    = clientPt.y - physH;
-    cdf.rcArea.right  = clientPt.x + toPhysical(2); 
-    cdf.rcArea.bottom = clientPt.y;
-    ImmSetCandidateWindow(hImc, &cdf);
-   
-    ImmReleaseContext(target_hwnd, hImc);
     applying = false;
   }
 };
@@ -93,13 +90,15 @@ static LRESULT CALLBACK MultiWindowSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPa
   return DefSubclassProc(hWnd, uMsg, wParam, lParam);
 }
 
-// 抑制 Windows Alt+key 菜单激活提示音的子类化过程。
-// 挂载到 Flutter 视图（子窗口）上，该窗口拥有焦点时接收键盘消息。
-// Flutter 将 WM_SYSKEYDOWN 与 WM_SYSCHAR 合并以产生 Alt+key 按键事件，
-// 因此 WM_SYSCHAR 不能被阻断。提示音来源于 DefWindowProc 处理 WM_SYSCHAR 时
-// 合成并向本子窗口发送的 WM_SYSCOMMAND(SC_KEYMENU) 消息；无菜单的窗口收到该
-// 消息会触发默认 MessageBeep。在此拦截 SC_KEYMENU 可消除提示音，同时让
-// WM_SYSCHAR 继续流向 Flutter。Alt+Space 予以放行，以保留窗口系统菜单。
+// Subclass procedure that suppresses the Windows Alt+key menu-activation beep.
+// It is attached to the Flutter view (child window), which receives keyboard
+// messages while it has focus. Flutter coalesces WM_SYSKEYDOWN and WM_SYSCHAR
+// to produce Alt+key key events, so WM_SYSCHAR must NOT be blocked. The beep
+// comes from DefWindowProc handling WM_SYSCHAR: it synthesizes and sends
+// WM_SYSCOMMAND(SC_KEYMENU) to this child window, and a window without a menu
+// falls back to the default MessageBeep on that message. Intercepting
+// SC_KEYMENU here removes the beep while WM_SYSCHAR keeps flowing to Flutter.
+// Alt+Space is passed through to preserve the window system menu.
 static LRESULT CALLBACK AltBeepSuppressProc(HWND hWnd, UINT uMsg,
                                             WPARAM wParam, LPARAM lParam,
                                             UINT_PTR uIdSubclass,
@@ -133,22 +132,12 @@ void AttachImeFixerToMultiWindow(flutter::FlutterViewController* controller) {
         if (call.method_name() == "updateCursorPosition") {
           const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
           if (args) {
-            int32_t x = 0, y = 0, height = 16;
-            auto xi = args->find(flutter::EncodableValue("x"));
-            if (xi != args->end()) x = std::get<int32_t>(xi->second);
-            auto yi = args->find(flutter::EncodableValue("y"));
-            if (yi != args->end()) y = std::get<int32_t>(yi->second);
-            auto hi = args->find(flutter::EncodableValue("height"));
-            if (hi != args->end()) height = std::get<int32_t>(hi->second);
-            
-            ctx->pos.x = x;
-            ctx->pos.y = y;
-            ctx->pos.height = (height > 0) ? height : 16;
+            ReadImeCursorPosition(*args, &ctx->pos);
             ctx->Apply(hwnd);
             
             result->Success();
           } else {
-            result->Error("INVALID_ARGS", "Expected map with x, y, height");
+            result->Error("INVALID_ARGS", "Expected map with x, y, width, height");
           }
         } else {
           result->NotImplemented();
@@ -157,7 +146,7 @@ void AttachImeFixerToMultiWindow(flutter::FlutterViewController* controller) {
 
   ctx->channel = std::move(channel);
   SetWindowSubclass(hwnd, MultiWindowSubclassProc, 1, reinterpret_cast<DWORD_PTR>(ctx));
-  // 多窗口的 Flutter 视图同样挂载 Alt+key 提示音抑制器
+  // Also attach the Alt+key beep suppressor to multi-window Flutter views
   SetWindowSubclass(hwnd, AltBeepSuppressProc, 2, 0);
 }
 
@@ -196,20 +185,13 @@ bool FlutterWindow::OnCreate() {
             const auto* args =
                 std::get_if<flutter::EncodableMap>(call.arguments());
             if (args) {
-              int32_t x = 0, y = 0, height = 16;
-              auto xi = args->find(flutter::EncodableValue("x"));
-              if (xi != args->end())
-                x = std::get<int32_t>(xi->second);
-              auto yi = args->find(flutter::EncodableValue("y"));
-              if (yi != args->end())
-                y = std::get<int32_t>(yi->second);
-              auto hi = args->find(flutter::EncodableValue("height"));
-              if (hi != args->end())
-                height = std::get<int32_t>(hi->second);
-              UpdateImeCursorPosition(x, y, height);
+              ImeCursorPosition pos;
+              ReadImeCursorPosition(*args, &pos);
+              UpdateImeCursorPosition(pos.x, pos.y, pos.width, pos.height,
+                                      pos.text_height);
               result->Success();
             } else {
-              result->Error("INVALID_ARGS", "Expected map with x, y, height");
+              result->Error("INVALID_ARGS", "Expected map with x, y, width, height");
             }
           } else {
             result->NotImplemented();
@@ -226,7 +208,8 @@ bool FlutterWindow::OnCreate() {
   });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
-  // 将 Alt+key 提示音抑制器挂载到 Flutter 视图（拥有键盘焦点时接收 WM_SYSCHAR 的子窗口）
+  // Attach the Alt+key beep suppressor to the Flutter view child window,
+  // which receives WM_SYSCHAR when it has keyboard focus
   SetWindowSubclass(flutter_controller_->view()->GetNativeWindow(),
                     AltBeepSuppressProc, 2, 0);
 

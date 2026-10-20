@@ -10,7 +10,8 @@ import 'package:quick_write/core/utils/platform_capabilities.dart';
 /// 这是由于 Flutter 引擎底层对WM_IME_STARTCOMPOSITION 和 WM_IME_COMPOSITION 消息处理存在缺陷导致的。
 ///
 /// 解决原理：
-/// 1. Dart 侧（此类）：精确计算输入框内真实的光标坐标（通过 RenderEditable），并通过 MethodChannel 发送给 C++ 侧。
+/// 1. Dart 侧（此类）：精确计算输入框内真实的光标/组合文本矩形（通过 RenderEditable），
+///    一方面通过 MethodChannel 发送给 C++ 侧，另一方面回填给引擎的光标矩形缓存。
 /// 2. C++ 侧：通过 Win32 Subclass 劫持 Flutter 子窗口的 IME 消息，在 Flutter 引擎设置了错误坐标后，同步覆盖为正确的坐标。
 class ImeCursorFixer {
   ImeCursorFixer._();
@@ -21,20 +22,47 @@ class ImeCursorFixer {
   /// 仅在需要修正输入法候选框位置的平台启用
   static bool get _enabled => PlatformCapabilities.needsImeCursorFix;
 
-  /// 上报当前光标绝对坐标到 C++ 侧缓存
+  /// 上报输入法跟随区域到 C++ 侧缓存
   ///
-  /// [globalOffset] 光标底部的屏幕绝对逻辑坐标
-  /// [lineHeight] 光标的高度（用于计算候选框避让区域，防止遮挡文字）
-  static Future<void> reportCursorPosition({required Offset globalOffset, double lineHeight = 20.0}) async {
+  /// [globalRect] 光标或组合文本在屏幕上的绝对逻辑矩形。
+  /// [textHeight] 文字字形高度（通常取字号），用于把组字窗口锚定在文字行底部，
+  /// 使候选框出现在整行文字下方而不是压在行中间。
+  ///
+  /// 这里保留亚像素精度，不做取整：C++ 侧与引擎使用相同的「先乘 DPI 再截断」
+  /// 换算方式，两者才能得到完全一致的物理像素，避免输入法窗口上下抖动。
+  static Future<void> reportRect(Rect globalRect, {required double textHeight}) async {
     if (!_enabled) return;
     try {
       await _channel.invokeMethod('updateCursorPosition', {
-        'x': globalOffset.dx.round(),
-        'y': globalOffset.dy.round(),
-        'height': lineHeight.round(),
+        'x': globalRect.left,
+        'y': globalRect.top,
+        'width': globalRect.width,
+        'height': globalRect.height,
+        'textHeight': textHeight,
       });
     } catch (e) {
       debugPrint('ImeCursorFixer channel error: $e');
+    }
+  }
+
+  /// 用真实光标矩形覆盖 Flutter 引擎内部记录的光标矩形
+  ///
+  /// 框架在没有组合文本时会把光标矩形按文本起始位置上报，引擎据此定位输入法窗口，
+  /// 导致每次开始组字时候选框先出现在文本开头、再跳到光标处。这里在组字开始前
+  /// 把真实光标矩形回填给引擎，使引擎自身的定位结果始终正确，从根源上消除闪烁。
+  ///
+  /// [localRect] 光标在渲染层局部坐标系下的矩形，与框架上报组合区域时使用的坐标系一致。
+  static Future<void> reportCaretRectToEngine(Rect localRect) async {
+    if (!_enabled || !localRect.isFinite) return;
+    try {
+      await SystemChannels.textInput.invokeMethod<void>('TextInput.setMarkedTextRect', {
+        'x': localRect.left,
+        'y': localRect.top,
+        'width': localRect.width,
+        'height': localRect.height,
+      });
+    } catch (e) {
+      debugPrint('ImeCursorFixer engine channel error: $e');
     }
   }
 }
@@ -158,35 +186,32 @@ class _ImeCursorFixerWrapperState extends State<ImeCursorFixerWrapper> with Widg
     final selection = value.selection;
     if (!selection.isValid) return false;
 
-    TextPosition targetPosition = selection.extent;
+    // 与框架上报组合区域的规则保持一致：存在组合文本时取整段组合文本的矩形，
+    // 否则取当前光标的矩形。组字窗口锚定矩形左上角，因此候选框不会随着
+    // 拼音字符的增加而向右推移，也不会在键起键落时来回震动。
+    final composing = value.composing;
+    final isComposing = composing.isValid && !composing.isCollapsed;
+    Rect? rect;
+    if (isComposing) {
+      rect = renderEditable.getRectForComposingRange(composing);
+    }
+    rect ??= renderEditable.getLocalRectForCaret(
+      isComposing ? TextPosition(offset: composing.start) : selection.extent,
+    );
 
-    // 如果正在进行拼音内嵌输入（composing），将候选框锚定在拼音的起始位置。
-    // 避免打字时候选框跟着拼音不断向右推移，也防止在键起键落时光标状态切换导致的瞬间闪烁和震动。
-    // 解决 RIME(小狼毫) / 微软拼音 等具有内嵌拼音特性输入法的跳动问题。
-    if (value.composing.isValid && !value.composing.isCollapsed) {
-      targetPosition = TextPosition(offset: value.composing.start);
+    // 无组合文本时，框架会把光标矩形按文本起始位置上报给引擎，导致引擎在
+    // 组字开始瞬间把输入法窗口定位到文本开头。这里用真实光标矩形覆盖引擎缓存，
+    // 让引擎自身的定位始终正确，避免候选框先闪到别处再跳回光标处。
+    if (!isComposing) {
+      ImeCursorFixer.reportCaretRectToEngine(rect);
     }
 
-    // 直接从 RenderEditable 获取光标矩形，精度最高。
-    // 这里读取的是 Flutter 内部真实的渲染结果，比使用 TextPainter 模拟计算更准。
-    final caretRect = renderEditable.getLocalRectForCaret(targetPosition);
+    // 光标/组合区域在视图坐标系下的绝对矩形，交由 C++ 侧定位输入法窗口
+    final globalRect = renderEditable.localToGlobal(rect.topLeft) & rect.size;
 
-    // 光标底部的屏幕绝对坐标（输入法候选框应显示在光标下方）。
-    // localToGlobal 在 Flutter Windows 上返回的是相对于 Flutter 客户区的逻辑像素坐标，
-    // C++ 侧接收后乘以 DPI/96 即可得到 Win32 客户区物理像素坐标。
-    final caretBottomGlobal = renderEditable.localToGlobal(caretRect.bottomLeft);
-
-    // 计算字号：用于 C++ 侧配置 CFS_EXCLUDE 属性，划定输入法候选框的避让区域（防止候选框遮挡用户正在输入的文字）
-    double fontSize = 14.0;
-    final textSpan = renderEditable.text;
-    if (textSpan?.style?.fontSize != null) {
-      fontSize = textSpan!.style!.fontSize!;
-    } else {
-      // 兜底：光标高度的 70% 近似于字体的 cap-height
-      fontSize = caretRect.height * 0.7;
-    }
-
-    ImeCursorFixer.reportCursorPosition(globalOffset: caretBottomGlobal, lineHeight: fontSize);
+    // 字号决定文字字形高度；缺少样式信息时按行高的 70% 估算
+    final double textHeight = renderEditable.text?.style?.fontSize ?? rect.height * 0.7;
+    ImeCursorFixer.reportRect(globalRect, textHeight: textHeight);
     return true;
   }
 

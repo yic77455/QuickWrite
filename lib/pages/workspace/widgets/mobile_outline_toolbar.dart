@@ -56,6 +56,15 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
   /// 软键盘高度，大于 0 表示键盘正在显示
   double _keyboardHeight = 0;
 
+  /// 软键盘是否正在收起
+  ///
+  /// 键盘收起时高度逐帧减小，若继续按「高度大于 0」显示，工具栏会跟随键盘
+  /// 一路下滑到屏幕底部才消失；检测到高度减小时据此立即隐藏。
+  bool _keyboardRetracting = false;
+
+  /// 软键盘是否处于弹出状态（收起动画一开始即视为已收起）
+  bool get _keyboardShown => _keyboardHeight > 0 && !_keyboardRetracting;
+
   /// 上一次已知的横竖屏状态，用于识别屏幕旋转；为 null 表示尚未记录
   bool? _isLandscape;
 
@@ -107,16 +116,21 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
     final bool isLandscape = MediaQuery.orientationOf(context) == Orientation.landscape;
     // 屏幕方向变化同样需要重新确定默认面板
     final bool orientationChanged = _isLandscape != null && _isLandscape != isLandscape;
+    final bool wasShown = _keyboardShown;
+    // 从无到有表示键盘重新唤起，此时回到默认面板
+    final bool keyboardOpening = _keyboardHeight <= 0 && height > 0;
+    // 高度减小说明键盘正在收起，立即隐藏工具栏，不等收起动画结束
+    _keyboardRetracting = height > 0 && height < _keyboardHeight;
+    _keyboardHeight = height;
     _isLandscape = isLandscape;
 
-    // 高度与屏幕方向均未变化时无需重建
-    if (height == _keyboardHeight && !orientationChanged) return;
+    // 仅在显隐状态或屏幕方向变化时重建，键盘动画期间的连续高度变化被合并掉
+    if (_keyboardShown == wasShown && !orientationChanged) return;
     setState(() {
       // 键盘重新唤起或屏幕旋转时回到默认面板：竖屏展开快捷输入，横屏收起以保留编辑区高度
-      if ((_keyboardHeight <= 0 && height > 0) || orientationChanged) {
+      if (keyboardOpening || orientationChanged) {
         _panel = isLandscape ? null : OutlineToolbarPanel.quickInput;
       }
-      _keyboardHeight = height;
     });
   }
 
@@ -172,8 +186,9 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
       builder: (context, _) {
         final bool batchMode = state.isBatchSelectionMode;
 
-        // 批量选择模式下工具栏常显；其余情况仅在软键盘弹出且输入焦点位于编辑器时显示
-        if (!batchMode && (_keyboardHeight <= 0 || !state.hasEditorFocus)) {
+        // 批量选择模式下工具栏常显；其余情况仅在软键盘弹出且输入焦点位于编辑器时显示，
+        // 键盘一开始收起即隐藏，避免跟随键盘下滑到屏幕底部
+        if (!batchMode && (!_keyboardShown || !state.hasEditorFocus)) {
           return const SizedBox.shrink();
         }
 

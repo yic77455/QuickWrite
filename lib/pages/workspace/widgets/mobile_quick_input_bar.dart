@@ -29,6 +29,15 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
   /// 软键盘高度，大于 0 表示键盘正在显示
   double _keyboardHeight = 0;
 
+  /// 软键盘是否正在收起
+  ///
+  /// 键盘收起时高度逐帧减小，若继续按「高度大于 0」显示，快捷栏会跟随键盘
+  /// 一路下滑到屏幕底部才消失；检测到高度减小时据此立即隐藏。
+  bool _keyboardRetracting = false;
+
+  /// 软键盘是否处于弹出状态（收起动画一开始即视为已收起）
+  bool get _keyboardShown => _keyboardHeight > 0 && !_keyboardRetracting;
+
   @override
   void initState() {
     super.initState();
@@ -79,8 +88,12 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
   void _syncKeyboardHeight() {
     if (!mounted) return;
     final double height = View.of(context).viewInsets.bottom;
-    if (height == _keyboardHeight) return;
-    setState(() => _keyboardHeight = height);
+    final bool wasShown = _keyboardShown;
+    // 高度减小说明键盘正在收起，立即隐藏快捷栏，不等收起动画结束
+    _keyboardRetracting = height > 0 && height < _keyboardHeight;
+    _keyboardHeight = height;
+    // 仅在显隐状态真正变化时重建，键盘动画期间的连续高度变化被合并掉
+    if (_keyboardShown != wasShown) setState(() {});
   }
 
   /// 当前标签页的正文编辑器状态，无正文编辑器时返回 null
@@ -95,9 +108,10 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
 
   /// 快捷输入栏是否应当显示
   ///
-  /// 仅在移动端键盘弹出、且输入焦点位于正文编辑器时显示。
+  /// 仅在移动端键盘弹出、且输入焦点位于正文编辑器时显示；
+  /// 键盘一开始收起即隐藏，避免跟随键盘下滑到屏幕底部。
   bool get _shouldShow {
-    if (_keyboardHeight <= 0) return false;
+    if (!_keyboardShown) return false;
     if (!SettingsService.instance.quickInputBarEnabled) return false;
     final state = _currentEditorState();
     return state != null && state.hasEditorFocus;
