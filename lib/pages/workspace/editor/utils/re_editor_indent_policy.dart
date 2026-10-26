@@ -5,7 +5,8 @@ import 'package:re_editor/re_editor.dart';
 ///
 /// re_editor 没有 TextInputFormatter 钩子，且其内置的回车行为只沿用行首 ASCII 空格，
 /// 因此这里在控制器层复刻原有的段落格式化规则：
-/// - 回车：在非行首位置换行后，按设置补空行与两个全角空格缩进
+/// - 回车：在非行首位置换行后，按设置补空行；缩进由全角空格实现时补两个全角空格，
+///   否则由编辑器排版绘制视觉缩进，不写入字符
 /// - Tab：插入两个全角空格作为缩进
 /// - 退格：行首的双全角缩进一次性删除，其余情况执行默认退格
 ///
@@ -23,6 +24,7 @@ class ReEditorIndentPolicy {
   ///
   /// 光标位于行首时不触发自动格式化，仅插入换行；
   /// 位于行中或行末时，按设置依次补空行与首行缩进。
+  /// 仅在缩进由全角空格实现时写入缩进字符。
   void handleNewLine() {
     final SettingsService settings = SettingsService.instance;
     final CodeLineSelection selection = controller.selection;
@@ -36,7 +38,7 @@ class ReEditorIndentPolicy {
     if (settings.autoLineBreak) {
       buffer.write('\n');
     }
-    if (settings.isFirstLineIndentEnabled) {
+    if (settings.isFirstLineIndentEnabled && settings.isFullWidthSpaceIndentEnabled) {
       buffer.write(indent);
     }
     controller.replaceSelection(buffer.toString());

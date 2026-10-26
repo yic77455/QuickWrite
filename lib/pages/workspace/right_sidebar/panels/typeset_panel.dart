@@ -54,6 +54,7 @@ class _TypesetPanelState extends State<TypesetPanel> {
     final letterSpacing = settingsService.letterSpacing;
     final lineHeight = settingsService.lineHeight;
     final isFirstLineIndentEnabled = settingsService.isFirstLineIndentEnabled;
+    final isFullWidthSpaceIndentEnabled = settingsService.isFullWidthSpaceIndentEnabled;
     final autoLineBreak = settingsService.autoLineBreak;
     final showLineSeparator = settingsService.showLineSeparator;
     final lineSeparatorStyle = settingsService.lineSeparatorStyle;
@@ -78,7 +79,12 @@ class _TypesetPanelState extends State<TypesetPanel> {
                   const SizedBox(height: 20),
                   
                   // 段落格式设置区块
-                  _buildParagraphFormatSection(context, isFirstLineIndentEnabled, autoLineBreak),
+                  _buildParagraphFormatSection(
+                    context,
+                    isFirstLineIndentEnabled,
+                    isFullWidthSpaceIndentEnabled,
+                    autoLineBreak,
+                  ),
                   
                   const SizedBox(height: 20),
                   
@@ -136,7 +142,12 @@ class _TypesetPanelState extends State<TypesetPanel> {
   }
 
   /// 构建段落格式设置区块
-  Widget _buildParagraphFormatSection(BuildContext context, bool isFirstLineIndentEnabled, bool autoLineBreak) {
+  Widget _buildParagraphFormatSection(
+    BuildContext context,
+    bool isFirstLineIndentEnabled,
+    bool isFullWidthSpaceIndentEnabled,
+    bool autoLineBreak,
+  ) {
     return SettingsSection(
       title: '段落格式',
       icon: Icons.format_align_left_outlined,
@@ -150,7 +161,20 @@ class _TypesetPanelState extends State<TypesetPanel> {
             setState(() {});
           },
         ),
-        
+
+        const SettingDivider(),
+        SwitchSettingItem(
+          icon: Icons.space_bar_rounded,
+          label: '全角空格缩进',
+          // 首行缩进关闭时，缩进方式无意义，禁用该项
+          enabled: isFirstLineIndentEnabled,
+          value: isFullWidthSpaceIndentEnabled,
+          onChanged: (value) {
+            SettingsService.instance.updateIsFullWidthSpaceIndentEnabled(value);
+            setState(() {});
+          },
+        ),
+
         const SettingDivider(),
         SwitchSettingItem(
           icon: MaterialIcons.format_text_wrap,

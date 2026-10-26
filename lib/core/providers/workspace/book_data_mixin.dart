@@ -356,8 +356,10 @@ mixin BookDataMixin on WorkspaceStateBase {
       if (!await parentDir.exists()) {
         await parentDir.create(recursive: true);
       }
-      // 根据首行缩进设置写入初始内容
-      final initialContent = SettingsService.instance.isFirstLineIndentEnabled ? '\u{3000}\u{3000}' : '';
+      // 根据首行缩进设置写入初始内容；缩进由排版实现时不写缩进字符
+      final bool useCharIndent = SettingsService.instance.isFirstLineIndentEnabled &&
+          SettingsService.instance.isFullWidthSpaceIndentEnabled;
+      final initialContent = useCharIndent ? '\u{3000}\u{3000}' : '';
       await file.writeAsString(initialContent);
     } catch (e) {
       debugPrint('创建章节文件失败: $e');

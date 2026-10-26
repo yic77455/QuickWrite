@@ -52,6 +52,9 @@ class _CodeEditable extends StatefulWidget {
   final double viewportContentOffset;
   final double viewportMinHeight;
 
+  /// 视觉首行缩进宽度（像素），为零时不缩进
+  final double firstLineIndent;
+
   const _CodeEditable({
     required this.editorKey,
     this.hint,
@@ -96,6 +99,7 @@ class _CodeEditable extends StatefulWidget {
     required this.viewportScroller,
     required this.viewportContentOffset,
     required this.viewportMinHeight,
+    this.firstLineIndent = 0.0,
   });
 
   @override
@@ -338,6 +342,7 @@ class _CodeEditableState extends State<_CodeEditable> with AutomaticKeepAliveCli
       externalScrollController: widget.viewportScroller,
       externalContentOffset: widget.viewportContentOffset,
       externalMinHeight: widget.viewportMinHeight,
+      firstLineIndent: widget.firstLineIndent,
     );
   }
 

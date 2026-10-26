@@ -36,6 +36,9 @@ class _CodeField extends SingleChildRenderObjectWidget {
   final double externalContentOffset;
   final double externalMinHeight;
 
+  /// 视觉首行缩进宽度（像素），为零时不缩进
+  final double firstLineIndent;
+
   _CodeField({
     super.key,
     required this.verticalViewport,
@@ -68,6 +71,7 @@ class _CodeField extends SingleChildRenderObjectWidget {
     required this.externalScrollController,
     required this.externalContentOffset,
     this.externalMinHeight = 0.0,
+    this.firstLineIndent = 0.0,
   }): assert(codes.isNotEmpty),
       floatingCursorColor = floatingCursorColor ?? cursorColor,
       floatingCursorWidth = floatingCursorWidth ?? cursorWidth;
@@ -105,6 +109,7 @@ class _CodeField extends SingleChildRenderObjectWidget {
     externalScrollController: externalScrollController,
     externalContentOffset: externalContentOffset,
     externalMinHeight: externalMinHeight,
+    firstLineIndent: firstLineIndent,
   );
 
   @override
@@ -139,7 +144,8 @@ class _CodeField extends SingleChildRenderObjectWidget {
       ..endHandleLayerLink = endHandleLayerLink
       ..externalScrollController = externalScrollController
       ..externalContentOffset = externalContentOffset
-      ..externalMinHeight = externalMinHeight;
+      ..externalMinHeight = externalMinHeight
+      ..firstLineIndent = firstLineIndent;
   }
 
 }
@@ -176,6 +182,9 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
   ScrollController? _externalScrollController;
   double _externalContentOffset;
   double _externalMinHeight;
+
+  /// 视觉首行缩进宽度（像素），为零时不缩进
+  double _firstLineIndent = 0.0;
 
   double? _horizontalViewportSize;
   double? _verticalViewportSize;
@@ -233,6 +242,7 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
     ScrollController? externalScrollController,
     double externalContentOffset = 0.0,
     double externalMinHeight = 0.0,
+    double firstLineIndent = 0.0,
   }) : _verticalViewport = verticalViewport,
     _horizontalViewport = horizontalViewport,
     _verticalScrollbarWidth = verticalScrollbarWidth,
@@ -252,6 +262,7 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
     _externalScrollController = externalScrollController,
     _externalContentOffset = externalContentOffset,
     _externalMinHeight = externalMinHeight,
+    _firstLineIndent = firstLineIndent,
     _paint = Paint(),
     _displayParagraphs = [],
     _chunkIndicators = [],
@@ -366,6 +377,18 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
       return;
     }
     _externalMinHeight = value;
+    markNeedsLayout();
+  }
+
+  /// 视觉首行缩进宽度
+  ///
+  /// 缩进会改变每行的排版宽度与行高，因此需要使行高前缀和失效并重新布局。
+  set firstLineIndent(double value) {
+    if (_firstLineIndent == value) {
+      return;
+    }
+    _firstLineIndent = value;
+    _lineTops = null;
     markNeedsLayout();
   }
 
@@ -1727,6 +1750,7 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
       style: _textStyle,
       maxWidth: maxWidth ?? (_horizontalViewport == null ? size.width - padding.horizontal : double.infinity),
       maxLengthSingleLineRendering: _maxLengthSingleLineRendering,
+      firstLineIndent: _firstLineIndent,
     );
   }
 

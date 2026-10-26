@@ -167,6 +167,13 @@ class AppSettings {
   /// 是否开启首行缩进
   final bool isFirstLineIndentEnabled;
 
+  /// 是否用全角空格实现首行缩进
+  ///
+  /// 关闭时首行缩进由编辑器排版实现，正文不写入缩进字符；
+  /// 开启后按原有方式在行首写入两个全角空格。行首已带全角空格的正文
+  /// 仍按字符缩进显示，不会叠加视觉缩进。
+  final bool isFullWidthSpaceIndentEnabled;
+
   /// 是否开启自动空行（段间距）
   final bool autoLineBreak;
   
@@ -299,6 +306,7 @@ class AppSettings {
     this.letterSpacing = 0.7, // 字间距（单位：像素，负值表示紧凑）
     this.lineHeight = 1.8, // 行间距倍数（1.0 = 单倍行距）
     this.isFirstLineIndentEnabled = true, // 是否开启首行缩进
+    this.isFullWidthSpaceIndentEnabled = false, // 是否用全角空格实现首行缩进
     this.autoLineBreak = true, // 是否开启自动空行
     this.showLineSeparator = false, // 是否显示行间线条
     this.lineSeparatorStyle = 'dashed', // 行间线样式（dashed/solid）
@@ -408,6 +416,7 @@ class AppSettings {
       letterSpacing: (typographyJson['letterSpacing'] as num?)?.toDouble() ?? defaults.letterSpacing,
       lineHeight: (typographyJson['lineHeight'] as num?)?.toDouble() ?? defaults.lineHeight,
       isFirstLineIndentEnabled: typographyJson['firstLineIndent'] as bool? ?? defaults.isFirstLineIndentEnabled,
+      isFullWidthSpaceIndentEnabled: typographyJson['fullWidthSpaceIndent'] as bool? ?? defaults.isFullWidthSpaceIndentEnabled,
       autoLineBreak: typographyJson['autoLineBreak'] as bool? ?? defaults.autoLineBreak,
       showLineSeparator: typographyJson['lineSeparator'] as bool? ?? defaults.showLineSeparator,
       lineSeparatorStyle: typographyJson['lineSeparatorStyle'] as String? ?? defaults.lineSeparatorStyle,
@@ -525,6 +534,7 @@ class AppSettings {
           'letterSpacing': letterSpacing,
           'lineHeight': lineHeight,
           'firstLineIndent': isFirstLineIndentEnabled,
+          'fullWidthSpaceIndent': isFullWidthSpaceIndentEnabled,
           'autoLineBreak': autoLineBreak,
           'lineSeparator': showLineSeparator,
           'lineSeparatorStyle': lineSeparatorStyle,
@@ -608,6 +618,7 @@ class AppSettings {
     double? letterSpacing,
     double? lineHeight,
     bool? isFirstLineIndentEnabled,
+    bool? isFullWidthSpaceIndentEnabled,
     bool? autoLineBreak,
     bool? showLineSeparator,
     String? lineSeparatorStyle,
@@ -683,6 +694,7 @@ class AppSettings {
       letterSpacing: letterSpacing ?? this.letterSpacing,
       lineHeight: lineHeight ?? this.lineHeight,
       isFirstLineIndentEnabled: isFirstLineIndentEnabled ?? this.isFirstLineIndentEnabled,
+      isFullWidthSpaceIndentEnabled: isFullWidthSpaceIndentEnabled ?? this.isFullWidthSpaceIndentEnabled,
       autoLineBreak: autoLineBreak ?? this.autoLineBreak,
       showLineSeparator: showLineSeparator ?? this.showLineSeparator,
       lineSeparatorStyle: lineSeparatorStyle ?? this.lineSeparatorStyle,
@@ -793,6 +805,7 @@ class AppSettings {
            other.letterSpacing == letterSpacing &&
            other.lineHeight == lineHeight &&
            other.isFirstLineIndentEnabled == isFirstLineIndentEnabled &&
+           other.isFullWidthSpaceIndentEnabled == isFullWidthSpaceIndentEnabled &&
            other.autoLineBreak == autoLineBreak &&
            other.showLineSeparator == showLineSeparator &&
            other.lineSeparatorStyle == lineSeparatorStyle &&
@@ -875,6 +888,7 @@ class AppSettings {
         letterSpacing,
         lineHeight,
         isFirstLineIndentEnabled,
+        isFullWidthSpaceIndentEnabled,
         autoLineBreak,
         showLineSeparator,
         lineSeparatorStyle,

@@ -246,6 +246,11 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 待执行的视口重绘任务
   Timer? _viewportRepaintTimer;
 
+  /// 视觉首行缩进宽度缓存
+  ///
+  /// 键为字体、字号与字间距的组合，值为对应样式下两个全角空格的实际宽度。
+  static final Map<String, double> _firstLineIndentCache = {};
+
   /// 快捷键覆盖动作缓存
   Map<Type, Action<Intent>>? _shortcutOverrides;
 
@@ -1181,6 +1186,34 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     });
   }
 
+  /// 视觉首行缩进的宽度（像素）
+  ///
+  /// 取当前字体下两个全角空格的实际宽度，保持视觉缩进与字符缩进外观一致；
+  /// 仅在开启首行缩进且缩进不由全角空格实现时返回非零值。
+  double _resolveFirstLineIndentWidth(SettingsService settings) {
+    if (!settings.isFirstLineIndentEnabled || settings.isFullWidthSpaceIndentEnabled) {
+      return 0;
+    }
+    final String cacheKey = '${settings.fontFamily}|${settings.fontSize}|${settings.letterSpacing}';
+    final double? cached = _firstLineIndentCache[cacheKey];
+    if (cached != null) return cached;
+    final TextPainter painter = TextPainter(
+      text: TextSpan(
+        text: ReEditorIndentPolicy.indent,
+        style: TextStyle(
+          fontFamily: settings.fontFamily,
+          fontSize: settings.fontSize,
+          letterSpacing: settings.letterSpacing,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final double width = painter.width;
+    painter.dispose();
+    _firstLineIndentCache[cacheKey] = width;
+    return width;
+  }
+
   /// 构建编辑器本体
   ///
   /// 选区颜色随焦点切换：失焦时使用派生灰显色，保持上一次选区的可见性。
@@ -1236,6 +1269,8 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
               selectionColor: _focusNode.hasFocus ? focusedSelectionColor : unfocusedSelectionColor,
               highlightColor: focusedSelectionColor,
               lineSeparator: lineSeparator,
+              // 视觉首行缩进：首行缩进改由排版实现，正文不再写入全角空格
+              firstLineIndent: _resolveFirstLineIndentWidth(settings),
             ),
             // 小说正文需要自动换行，且不显示行号与代码折叠标记
             wordWrap: true,

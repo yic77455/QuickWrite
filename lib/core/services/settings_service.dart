@@ -549,6 +549,9 @@ class SettingsService extends ChangeNotifier {
   /// 获取是否开启首行缩进
   bool get isFirstLineIndentEnabled => _settings.isFirstLineIndentEnabled;
 
+  /// 获取是否用全角空格实现首行缩进
+  bool get isFullWidthSpaceIndentEnabled => _settings.isFullWidthSpaceIndentEnabled;
+
   /// 获取是否开启自动空行
   bool get autoLineBreak => _settings.autoLineBreak;
   
@@ -736,6 +739,12 @@ class SettingsService extends ChangeNotifier {
     return updateSettings(newSettings);
   }
 
+  /// 更新是否用全角空格实现首行缩进
+  Future<bool> updateIsFullWidthSpaceIndentEnabled(bool value) async {
+    final newSettings = _settings.copyWith(isFullWidthSpaceIndentEnabled: value);
+    return updateSettings(newSettings);
+  }
+
   /// 更新是否开启自动空行
   Future<bool> updateAutoLineBreak(bool value) async {
     final newSettings = _settings.copyWith(autoLineBreak: value);
@@ -903,6 +912,7 @@ class SettingsService extends ChangeNotifier {
       letterSpacing: AppSettings.defaults.letterSpacing,
       lineHeight: AppSettings.defaults.lineHeight,
       isFirstLineIndentEnabled: AppSettings.defaults.isFirstLineIndentEnabled,
+      isFullWidthSpaceIndentEnabled: AppSettings.defaults.isFullWidthSpaceIndentEnabled,
       autoLineBreak: AppSettings.defaults.autoLineBreak,
       showLineSeparator: AppSettings.defaults.showLineSeparator,
       lineSeparatorStyle: AppSettings.defaults.lineSeparatorStyle,

@@ -28,11 +28,15 @@ class ParagraphFormatter {
     
     final List<String> formattedLines = [];
     
+    // 首行缩进是否由字符实现；由排版实现时不写入缩进字符
+    final bool useCharIndent =
+        settings.isFirstLineIndentEnabled && settings.isFullWidthSpaceIndentEnabled;
+    
     for (final line in contentLines) {
       String formattedLine = line;
       
       // 处理首行缩进
-      if (settings.isFirstLineIndentEnabled) {
+      if (useCharIndent) {
         // 开启时：去除行首已有的空白字符，然后添加两个全角空格
         formattedLine = formattedLine.replaceFirst(RegExp(r'^[\u{3000}\s]+'), '');
         formattedLine = '\u{3000}\u{3000}$formattedLine';

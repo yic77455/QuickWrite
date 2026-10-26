@@ -58,6 +58,7 @@ class CodeEditorStyle {
     this.chunkIndicatorColor,
     this.codeTheme,
     this.lineSeparator,
+    this.firstLineIndent = 0.0,
   }) : assert(fontSize == null || fontSize > 0),
     assert(fontHeight == null || fontHeight >= 1.0),
     assert(cursorWidth == null || cursorWidth > 0);
@@ -196,6 +197,12 @@ class CodeEditorStyle {
   ///
   /// 非空时在正文每一个视觉行底部绘制分隔线；为空则不绘制。
   final CodeLineSeparatorStyle? lineSeparator;
+
+  /// 视觉首行缩进宽度（逻辑像素）
+  ///
+  /// 大于零时每个逻辑行的首个视觉行按缩减后的宽度排版并右移绘制，
+  /// 自动换行产生的其余视觉行仍从行首开始；正文中不写入缩进字符。
+  final double firstLineIndent;
 
 }
 
@@ -676,6 +683,7 @@ class _CodeEditorState extends State<CodeEditor> {
       viewportScroller: widget.viewportScroller,
       viewportContentOffset: widget.viewportContentOffset,
       viewportMinHeight: widget.viewportMinHeight,
+      firstLineIndent: widget.style?.firstLineIndent ?? 0,
     );
     final Widget detector = _CodeSelectionGestureDetector(
       controller: _editingController,
