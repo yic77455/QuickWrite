@@ -304,6 +304,20 @@ class SyncRiskAssessment {
   }
 }
 
+/// 同步冲突副本
+///
+/// 描述一次同步中为本机版本另存出的副本及其对应的正式文件。
+/// 处理冲突时既要读取副本内容，也要读回正式文件内容，因此两者成对保留
+class SyncConflictCopy {
+  /// 冲突副本的绝对路径
+  final String copyPath;
+
+  /// 副本对应的正式文件绝对路径
+  final String originalPath;
+
+  const SyncConflictCopy({required this.copyPath, required this.originalPath});
+}
+
 /// 单个计划项的执行结果
 class SyncOutcome {
   /// 逻辑键
@@ -321,8 +335,8 @@ class SyncOutcome {
   /// 是否因服务端请求频率限制而失败
   final bool rateLimited;
 
-  /// 本次执行中另存出的冲突副本路径
-  final List<String> conflictCopyPaths;
+  /// 本次执行中另存出的冲突副本
+  final List<SyncConflictCopy> conflictCopies;
 
   const SyncOutcome({
     required this.key,
@@ -330,7 +344,7 @@ class SyncOutcome {
     required this.success,
     this.message,
     this.rateLimited = false,
-    this.conflictCopyPaths = const [],
+    this.conflictCopies = const [],
   });
 }
 
@@ -396,12 +410,12 @@ class SyncSummary {
       )
       .length;
 
-  /// 另存出的冲突副本路径清单
+  /// 另存出的冲突副本清单
   ///
   /// 包含两端同时修改产生的副本，以及下载归档包补齐缺失章节时为保留本地修改而写出的副本
-  List<String> get conflictCopyPaths => [
+  List<SyncConflictCopy> get conflictCopies => [
     for (final outcome in outcomes)
-      if (outcome.success) ...outcome.conflictCopyPaths,
+      if (outcome.success) ...outcome.conflictCopies,
   ];
 
   /// 是否存在需要处理的项目

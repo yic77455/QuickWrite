@@ -299,7 +299,7 @@ class SyncEngine {
         key: item.key,
         action: item.action,
         success: true,
-        conflictCopyPaths: copies,
+        conflictCopies: copies,
       );
     } catch (e) {
       debugPrint('同步失败 [${item.action.name}] ${item.key}: $e');

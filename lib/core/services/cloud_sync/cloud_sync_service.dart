@@ -79,7 +79,7 @@ class CloudSyncService extends ChangeNotifier {
   /// 同步冲突副本提示回调
   ///
   /// 由应用启动时注入，同步为本机版本另存出冲突副本时用于提醒用户；未注入时不提示
-  void Function(List<String> conflictCopyPaths)? _conflictNoticeHandler;
+  void Function(List<SyncConflictCopy> conflicts)? _conflictNoticeHandler;
 
   /// 启动同步的完成信号（未安排启动同步时为 null）
   ///
@@ -301,7 +301,7 @@ class CloudSyncService extends ChangeNotifier {
   /// 应用启动时注入该回调，用于在同步为本机版本另存出冲突副本时弹出提示；
   /// 传入 null 表示清除，此后不再提示
   void setConflictNoticeHandler(
-    void Function(List<String> conflictCopyPaths)? handler,
+    void Function(List<SyncConflictCopy> conflicts)? handler,
   ) {
     _conflictNoticeHandler = handler;
   }
@@ -387,9 +387,9 @@ class CloudSyncService extends ChangeNotifier {
       _pendingRisk = null;
 
       // 为本机版本另存出冲突副本时立即提醒用户，避免副本只留在磁盘上被忽略
-      final conflictCopyPaths = summary.conflictCopyPaths;
-      if (conflictCopyPaths.isNotEmpty) {
-        _conflictNoticeHandler?.call(conflictCopyPaths);
+      final conflicts = summary.conflictCopies;
+      if (conflicts.isNotEmpty) {
+        _conflictNoticeHandler?.call(conflicts);
       }
 
       // 记录本次同步的完成时间：个别文件处理失败时同样属于已执行过一次同步，

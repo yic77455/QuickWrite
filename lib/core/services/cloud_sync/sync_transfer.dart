@@ -34,8 +34,11 @@ class SyncTransfer {
 
   /// 执行单个计划项
   ///
-  /// 执行失败时抛出异常，由调用方汇总；返回本次另存出的冲突副本路径
-  Future<List<String>> run(SyncPlanItem item, WorkspaceIndex index) async {
+  /// 执行失败时抛出异常，由调用方汇总；返回本次另存出的冲突副本
+  Future<List<SyncConflictCopy>> run(
+    SyncPlanItem item,
+    WorkspaceIndex index,
+  ) async {
     switch (item.action) {
       case SyncAction.upload:
         if (isChapterChunkKey(item.key)) {
@@ -94,8 +97,11 @@ class SyncTransfer {
   /// 处理普通文件的两端同时修改
   ///
   /// 远端版本落到正式路径，本地版本另存为冲突副本，两个版本都不会被丢弃；
-  /// 返回另存出的冲突副本路径
-  Future<List<String>> _keepBothPlain(SyncPlanItem item, WorkspaceIndex index) async {
+  /// 返回另存出的冲突副本
+  Future<List<SyncConflictCopy>> _keepBothPlain(
+    SyncPlanItem item,
+    WorkspaceIndex index,
+  ) async {
     final local = item.local!;
     final targetPath = _requireLocalPath(item.key, index);
     final remote = item.remote!;
@@ -117,8 +123,8 @@ class SyncTransfer {
     }
 
     // 把本地版本另存为冲突副本
-    final conflictPath = _conflictPathOf(targetPath);
-    await File(targetPath).copy(conflictPath);
+    final conflict = _conflictCopyOf(targetPath);
+    await File(targetPath).copy(conflict.copyPath);
 
     final committed = await _commitDownload(targetPath, preparedHash);
     _stateStore.recordSynced(
@@ -128,8 +134,8 @@ class SyncTransfer {
       localModifiedAt: committed.modifiedAt,
       remoteContentId: remote.contentId,
     );
-    debugPrint('同步冲突已保留双份，本地版本另存为: $conflictPath');
-    return [conflictPath];
+    debugPrint('同步冲突已保留双份，本地版本另存为: ${conflict.copyPath}');
+    return [conflict];
   }
 
   // ================= 章节归档包：上传与下载 =================
@@ -150,8 +156,11 @@ class SyncTransfer {
   /// 下载章节归档包并展开到本地
   ///
   /// 本地归档不完整时，包内已存在且与远端不一致的章节会另存为冲突副本；
-  /// 返回另存出的冲突副本路径
-  Future<List<String>> _downloadArchive(SyncPlanItem item, WorkspaceIndex index) async {
+  /// 返回另存出的冲突副本
+  Future<List<SyncConflictCopy>> _downloadArchive(
+    SyncPlanItem item,
+    WorkspaceIndex index,
+  ) async {
     final content = await _fetchArchiveContent(item.key);
     final result = await _writeArchiveChapters(
       key: item.key,
@@ -167,8 +176,11 @@ class SyncTransfer {
   /// 处理章节归档包的两端同时修改
   ///
   /// 远端版本展开到本地，本地发生过修改的章节另存为冲突副本；
-  /// 返回另存出的冲突副本路径
-  Future<List<String>> _keepBothArchive(SyncPlanItem item, WorkspaceIndex index) async {
+  /// 返回另存出的冲突副本
+  Future<List<SyncConflictCopy>> _keepBothArchive(
+    SyncPlanItem item,
+    WorkspaceIndex index,
+  ) async {
     final content = await _fetchArchiveContent(item.key);
     final result = await _writeArchiveChapters(
       key: item.key,
@@ -213,8 +225,8 @@ class SyncTransfer {
   /// 将归档包中的章节写入本地
   ///
   /// [keepLocalConflict] 为 true 时，把与远端不一致的本地版本另存为冲突副本。
-  /// 返回成功写入的章节数量与另存出的冲突副本路径
-  Future<({int written, List<String> copies})> _writeArchiveChapters({
+  /// 返回成功写入的章节数量与另存出的冲突副本
+  Future<({int written, List<SyncConflictCopy> copies})> _writeArchiveChapters({
     required String key,
     required WorkspaceIndex index,
     required ChapterArchiveContent content,
@@ -233,7 +245,7 @@ class SyncTransfer {
         keepLocalConflict || members.any((member) => !member.exists);
 
     var written = 0;
-    final copies = <String>[];
+    final copies = <SyncConflictCopy>[];
     for (final entry in content.manifest.entries) {
       final targetPath = index.chapterPathOf(key, entry.uuid);
       if (targetPath == null) {
@@ -245,9 +257,9 @@ class SyncTransfer {
       if (preserveLocal) {
         final localHash = localHashByUuid[entry.uuid];
         if (localHash != null && localHash != entry.hash) {
-          final conflictPath = _conflictPathOf(targetPath);
-          await File(targetPath).copy(conflictPath);
-          copies.add(conflictPath);
+          final conflict = _conflictCopyOf(targetPath);
+          await File(targetPath).copy(conflict.copyPath);
+          copies.add(conflict);
         }
       }
 
@@ -370,10 +382,10 @@ class SyncTransfer {
     return localPath;
   }
 
-  /// 生成冲突副本的路径
+  /// 生成冲突副本
   ///
-  /// 命名为「原文件名(冲突-设备名-时间).扩展名」，与源文件同目录
-  String _conflictPathOf(String targetPath) {
+  /// 副本命名为「原文件名(冲突-设备名-时间).扩展名」，与源文件同目录
+  SyncConflictCopy _conflictCopyOf(String targetPath) {
     final dotIndex = targetPath.lastIndexOf('.');
     final separatorIndex = targetPath.lastIndexOf(Platform.pathSeparator);
     final hasExtension = dotIndex > separatorIndex;
@@ -383,7 +395,11 @@ class SyncTransfer {
         : targetPath;
     final extension = hasExtension ? targetPath.substring(dotIndex) : '';
 
-    return '$basePath(冲突-${_stateStore.deviceName}-${_timeStampOf(DateTime.now())})$extension';
+    return SyncConflictCopy(
+      copyPath:
+          '$basePath(冲突-${_stateStore.deviceName}-${_timeStampOf(DateTime.now())})$extension',
+      originalPath: targetPath,
+    );
   }
 
   /// 生成日期戳（yyyyMMdd）

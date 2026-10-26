@@ -23,6 +23,7 @@ import 'package:quick_write/core/services/window_service.dart';
 import 'package:quick_write/core/services/cache_services/window_cache_service.dart';
 import 'package:quick_write/core/router/router.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
+import 'package:quick_write/pages/home/cloud_sync/widgets/sync_conflict_dialog.dart';
 import 'package:quick_write/pages/home/cloud_sync/widgets/sync_risk_dialog.dart';
 import 'package:quick_write/shared/widgets/qw_snackbar.dart';
 
@@ -116,7 +117,7 @@ void main(List<String> args) async {
 
   // 注入全局冲突副本提示，使同步为本机版本另存出的冲突副本能立即弹窗告知用户
   CloudSyncService.instance.setConflictNoticeHandler(
-    (paths) => showSyncConflictDialog(appNavigatorKey, paths),
+    (conflicts) => showSyncConflictDialog(appNavigatorKey, conflicts),
   );
 
   // 初始化多窗口通信通道（主窗口负责监听子窗口的消息）

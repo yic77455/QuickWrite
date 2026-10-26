@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/services/cloud_sync/sync_models.dart';
-import 'package:quick_write/core/utils/file_explorer.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 
 /// 展示同步风险确认弹窗
@@ -36,39 +35,4 @@ Future<bool> showSyncRiskDialog(
     // 高风险同步必须由用户明确选择，不允许误触弹窗外部而静默跳过
     barrierDismissible: false,
   );
-}
-
-/// 展示同步冲突副本提示弹窗
-///
-/// 同步过程中为本机版本另存出冲突副本时弹出，说明副本数量与文件名特征，
-/// 并提供在文件管理器中定位副本的入口，使副本不会只停留在磁盘上而被忽略。
-/// [navigatorKey] 应用根导航器的键；界面尚未就绪时无法弹窗，直接跳过提示
-/// [conflictCopyPaths] 本次另存出的冲突副本路径，用于定位查看
-Future<void> showSyncConflictDialog(
-  GlobalKey<NavigatorState> navigatorKey,
-  List<String> conflictCopyPaths,
-) async {
-  final context = navigatorKey.currentContext;
-  if (context == null) return;
-
-  final hasCopies = conflictCopyPaths.isNotEmpty;
-
-  final viewed = await showConfirmDialog(
-    context: context,
-    title: '同步保留了冲突副本',
-    barrierDismissible: false,
-    description:
-        '本次同步有 ${conflictCopyPaths.length} 处内容两端都做过修改，'
-        '已把本机版本另存为冲突副本，正式的稿件内容不受影响。\n'
-        '副本文件名形如「原名(冲突-设备名-时间戳).扩展名」，与原文位于同一目录，'
-        '请前往查看后再自行取舍。',
-    // 存在副本时优先提供定位入口，否则只保留关闭按钮
-    confirmText: hasCopies ? '查看文件' : '知道了',
-    cancelText: hasCopies ? '知道了' : null,
-  );
-
-  // 用户选择查看时，在系统文件管理器中定位全部冲突副本
-  if (viewed && hasCopies) {
-    await FileExplorer.revealAll(conflictCopyPaths);
-  }
 }
