@@ -86,6 +86,13 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
   // 移动端左侧目录抽屉是否打开，用于同步顶部目录入口的选中高亮
   bool _isMobileContentsDrawerOpen = false;
 
+  // 编辑区卡片的缓存实例及构建依据
+  // 键盘弹出动画期间，Scaffold 会逐帧缩小 body 的可用高度并触发 LayoutBuilder 重建，
+  // 复用同一份实例可让框架只重新布局编辑区，而不重建整棵编辑器子树
+  Widget? _cachedEditorCard;
+  bool _cachedEditorCardHideTabBar = false;
+  Color? _cachedEditorCardSurface;
+
   // 移动端左侧目录抽屉占屏幕宽度的比例
   static const double _mobileDrawerWidthFactor = 0.75;
 
@@ -457,11 +464,20 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
   ///
   /// [hideTabBar] 为 true 时收起编辑区内部的标签页栏（移动端横屏沉浸编辑）
   Widget _buildEditorCard(BuildContext context, {bool hideTabBar = false}) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final Color surface = Theme.of(context).colorScheme.surface;
 
-    return Container(
+    // 构建依据未变时复用上一次的实例，使父级因约束变化重建时不连带重建编辑器子树
+    if (_cachedEditorCard != null &&
+        _cachedEditorCardHideTabBar == hideTabBar &&
+        _cachedEditorCardSurface == surface) {
+      return _cachedEditorCard!;
+    }
+    _cachedEditorCardHideTabBar = hideTabBar;
+    _cachedEditorCardSurface = surface;
+
+    return _cachedEditorCard = Container(
       margin: const EdgeInsets.only(left: 2, right: 4, top: 2, bottom: 2),
-      decoration: BoxDecoration(color: colorScheme.surface, borderRadius: BorderRadius.circular(6)),
+      decoration: BoxDecoration(color: surface, borderRadius: BorderRadius.circular(6)),
       // 裁剪子组件，确保圆角生效
       clipBehavior: Clip.antiAlias,
       child: EditorContainer(hideTabBar: hideTabBar),

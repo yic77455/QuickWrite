@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/gestures.dart';
@@ -121,6 +122,9 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 滚动条区域的全局键，用于命中检测判断指针是否落在滚动条上
   final GlobalKey _scrollbarKey = GlobalKey();
 
+  /// 滚动视口的全局键，用于边缘自动滚动时取视口屏幕矩形
+  final GlobalKey _scrollViewKey = GlobalKey();
+
   /// 编辑器级焦点节点（节点选区激活时持有焦点，用于接收键盘事件）
   final FocusNode _editorFocusNode = FocusNode();
 
@@ -148,6 +152,12 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 若直接采用实时高度，键盘动画期间节点内容会随之上下移动。
   /// 此处记录键盘收起时的编辑区高度作为基准，键盘弹出期间沿用该基准。
   double _marginBasisHeight = 0;
+
+  /// 底部内容边距（像素）
+  ///
+  /// 由用户设置的底边距按编辑区高度百分比换算而来，随布局一并更新。
+  /// 节点定位时以该值作为节点底部与视口底部之间应保留的安全间距。
+  double _bottomContentPadding = 0;
 
   // ================= 选区状态 =================
 
@@ -197,6 +207,29 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
   /// 拖拽起始节点ID
   String? _dragStartNodeId;
+
+  // ================= 边缘自动滚动 =================
+
+  /// 指针进入视口上下边缘的触发区高度（像素）
+  ///
+  /// 指针越过该范围后视口开始自动滚动
+  static const double _autoScrollEdgeZone = 24.0;
+
+  /// 自动滚动每帧的最大滚动步长（像素）
+  static const double _autoScrollMaxStep = 14.0;
+
+  /// 自动滚动的定时器
+  Timer? _autoScrollTimer;
+
+  /// 指针最近一次的位置（全局坐标）
+  ///
+  /// 视口自动滚动时指针可能保持不动，需要据此重新刷新选区
+  Offset? _autoScrollPointerPosition;
+
+  /// 自动滚动过程中按指针位置刷新选区的回调
+  ///
+  /// 由各类拖拽/滑选手势在开始时注入，结束或取消时清空
+  void Function(Offset globalPosition)? _autoScrollSelectionUpdater;
 
   // ================= 其他状态 =================
 
@@ -269,6 +302,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _stopEdgeAutoScroll();
     _scrollGuard.dispose();
     SettingsService.instance.removeListener(_onSettingsChanged);
     _undoManager.dispose();
@@ -1013,6 +1047,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       if (selection != null && selection.isValid && controller.selection != selection) {
         controller.selection = selection;
       }
+      // 恢复的焦点节点可能位于视口之外而尚未构建，需在布局完成后滚动使其可见
+      _scrollToNode(focusedId);
     });
   }
 
@@ -1085,7 +1121,15 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   }
 
   /// 聚焦指定节点并设置光标位置
-  void _focusNodeWithSelection(String nodeId, {required bool moveCursorToEnd}) {
+  ///
+  /// [ensureVisible] 为 true 时立即把节点滚动进视口：
+  /// 节点可能位于视口之外而尚未构建，仅请求焦点不会带动视口，
+  /// 因此交由 [_scrollToNode] 滚动并按需重试定位。
+  void _focusNodeWithSelection(
+    String nodeId, {
+    required bool moveCursorToEnd,
+    bool ensureVisible = true,
+  }) {
     final focusNode = _focusNodes[nodeId];
     final controller = _controllers[nodeId];
     if (focusNode == null || controller == null) return;
@@ -1093,6 +1137,10 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     focusNode.requestFocus();
     final offset = moveCursorToEnd ? controller.text.length : 0;
     controller.selection = TextSelection.fromPosition(TextPosition(offset: offset));
+
+    if (ensureVisible) {
+      _scrollToNode(nodeId);
+    }
   }
 
   /// 聚焦指定节点并滚动到视口中可见
@@ -1120,7 +1168,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
         curve: Curves.easeOut,
       ).then((_) {
         if (mounted) {
-          _focusNodeWithSelection(nodeId, moveCursorToEnd: moveCursorToEnd);
+          _focusNodeWithSelection(nodeId, moveCursorToEnd: moveCursorToEnd, ensureVisible: false);
         }
       });
       return;
@@ -1720,6 +1768,11 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     _collapseTextSelections();
     setState(() {});
     _notifyBatchChanged();
+    // 长按后按住不放继续上下拖动时，指针越出视口边缘即持续滚动视口
+    _updateEdgeAutoScroll(
+      globalPosition,
+      selectionUpdater: _onTrailingBarLongPressMove,
+    );
   }
 
   /// 行尾竖条长按拖动：以长按节点为锚点，按指针位置扩展或收缩节点选区
@@ -2057,24 +2110,53 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
   /// 根据全局坐标查找扁平列表中的节点索引
   ///
-  /// 遍历所有可见节点的渲染矩形，返回顶部边在坐标之上的最后一个节点，
-  /// 用于支持从空白处拖拽时定位到最近的节点
+  /// 遍历已构建节点的渲染矩形，返回顶部边在坐标之上的最后一个节点，
+  /// 用于支持从空白处拖拽时定位到最近的节点。
+  /// 节点按需构建，指针拖出已构建范围时改用平均节点高度估算，
+  /// 保证拖拽起始点落在视口外时仍能定位到对应的节点
   int? _findNodeIndexAtPosition(Offset globalPosition) {
     final flatList = _flatten();
     if (flatList.isEmpty) return null;
 
     int? result;
+    int? firstBuiltIndex;
+    int? lastBuiltIndex;
+    Rect? firstBuiltRect;
+    Rect? lastBuiltRect;
+    double builtHeightSum = 0;
+
     for (int i = 0; i < flatList.length; i++) {
       final key = _nodeTileKeys[flatList[i].node.id];
       final renderBox = key?.currentContext?.findRenderObject() as RenderBox?;
       if (renderBox == null || !renderBox.attached) continue;
 
       final rect = MatrixUtils.transformRect(renderBox.getTransformTo(null), Offset.zero & renderBox.size);
+      firstBuiltIndex ??= i;
+      firstBuiltRect ??= rect;
+      lastBuiltIndex = i;
+      lastBuiltRect = rect;
+      builtHeightSum += rect.height;
       // 顶部边在坐标之上的节点都作为候选，取最后一个
       if (globalPosition.dy >= rect.top) {
         result = i;
       } else {
         break;
+      }
+    }
+
+    // 指针位于已构建范围之外：按平均节点高度估算目标索引
+    if (lastBuiltIndex == null) return null;
+    if (result == null || result == lastBuiltIndex) {
+      if (lastBuiltRect!.bottom <= globalPosition.dy) {
+        // 指针在已构建范围之下：命中最后一个节点
+        return flatList.length - 1;
+      }
+      if (globalPosition.dy < firstBuiltRect!.top) {
+        final double averageHeight = builtHeightSum / (lastBuiltIndex - firstBuiltIndex! + 1);
+        if (averageHeight > 0) {
+          final int offset = ((firstBuiltRect.top - globalPosition.dy) / averageHeight).ceil();
+          return (firstBuiltIndex - offset).clamp(0, flatList.length - 1);
+        }
       }
     }
 
@@ -2177,6 +2259,26 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     _dragStartPosition = null;
   }
 
+  /// 批量选择模式下的指针移动
+  ///
+  /// 按指针位置更新竖条滑选的选区；处于滑选状态时，指针进入视口上下边缘
+  /// 的触发区会持续滚动视口。非滑选状态（如拖动列表滚动）不介入，避免与列表自身滚动冲突
+  void _onBatchPointerMove(PointerMoveEvent event) {
+    final updater = _autoScrollSelectionUpdater;
+    if (updater != null) {
+      _updateEdgeAutoScroll(event.position, selectionUpdater: updater);
+    }
+    _batchSelectionController.onPointerMove(event);
+  }
+
+  /// 批量选择模式下的指针抬起或取消
+  ///
+  /// 结束竖条滑选并停止边缘自动滚动
+  void _onBatchPointerUp(PointerEvent event) {
+    _stopEdgeAutoScroll();
+    _batchSelectionController.onPointerUp();
+  }
+
   /// 拖拽开始：记录起始位置和起始节点
   void _onPanStart(DragStartDetails details) {
     // 批量选择模式下禁用拖拽选区与文本选区，节点选中由节点行自身处理
@@ -2196,15 +2298,26 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
   /// 拖拽更新：根据当前位置更新选区
   ///
-  /// 统一选区逻辑：
-  /// - 起始位置在文本内时先做文本选区，离开文本后切换到节点选区
-  /// - 起始位置不在文本内时直接做节点选区
+  /// 指针越出视口上下边缘时同步启动边缘自动滚动
   void _onPanUpdate(DragUpdateDetails details) {
     // 批量选择模式下禁用拖拽选区与文本选区，节点选中由节点行自身处理
     if (_isBatchSelectionMode) return;
 
     final globalPosition = details.globalPosition;
+    // 指针拖出视口上下边缘时持续滚动视口，滚动中指针不动也能继续扩展选区
+    _updateEdgeAutoScroll(
+      globalPosition,
+      selectionUpdater: _updateDragSelection,
+    );
+    _updateDragSelection(globalPosition);
+  }
 
+  /// 按指针位置更新拖拽选区
+  ///
+  /// 统一选区逻辑：
+  /// - 起始位置在文本内时先做文本选区，离开文本后切换到节点选区
+  /// - 起始位置不在文本内时直接做节点选区
+  void _updateDragSelection(Offset globalPosition) {
     // 起始索引尚未确定时，用当前位置确定
     if (_dragStartIndex == null) {
       _dragStartIndex = _findNodeIndexAtPosition(globalPosition);
@@ -2290,6 +2403,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
   /// 拖拽结束：清理拖拽状态
   void _onPanEnd(DragEndDetails details) {
+    _stopEdgeAutoScroll();
     _dragStartPosition = null;
     _dragMode = _DragMode.none;
     _dragTextAnchor = null;
@@ -2299,6 +2413,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
   /// 拖拽取消：清理拖拽状态
   void _onPanCancel() {
+    _stopEdgeAutoScroll();
     _dragStartPosition = null;
     _dragMode = _DragMode.none;
     _dragTextAnchor = null;
@@ -4203,20 +4318,26 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     }
   }
 
-  /// 滚动指定节点到视口中央（不获取焦点）
+  /// 滚动使指定节点在视口内可见（不获取焦点）
   ///
   /// 先展开祖先确保节点可见，再通过估算位置逐步滚动使节点进入构建范围，
-  /// 最终使用 [Scrollable.ensureVisible] 精确滚动到视口中央。
-  void _scrollToNode(String nodeId) {
+  /// 最终精确滚动到节点可见；节点已可见时补足底部 [margin] 的安全间距，
+  /// 默认为用户设置的底边距。
+  void _scrollToNode(String nodeId, {double? margin}) {
     if (!mounted) return;
     _ensureAncestorsExpanded(nodeId);
-    _scrollToNodeWithRetry(nodeId, 0, null);
+    _scrollToNodeWithRetry(nodeId, 0, null, margin: margin ?? _bottomContentPadding);
   }
 
   /// 滚动到节点的重试实现
   ///
   /// 节点未构建时通过估算偏移量跳转，下一帧重试直到节点构建成功或超过最大重试次数。
-  void _scrollToNodeWithRetry(String nodeId, int retryCount, double? lastJumpOffset) {
+  void _scrollToNodeWithRetry(
+    String nodeId,
+    int retryCount,
+    double? lastJumpOffset, {
+    double margin = 0,
+  }) {
     if (!mounted || !_scrollController.hasClients || retryCount >= 30) return;
 
     final key = _nodeTileKeys[nodeId];
@@ -4224,7 +4345,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
     // 节点已构建：确保目标在视口内可见
     if (context != null && context.findRenderObject()?.attached == true) {
-      _ensureNodeVisible(context);
+      _ensureNodeVisible(context, margin: margin);
       return;
     }
 
@@ -4265,37 +4386,152 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     _scrollController.position.jumpTo(jumpTarget);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollToNodeWithRetry(nodeId, retryCount + 1, jumpTarget);
+      _scrollToNodeWithRetry(nodeId, retryCount + 1, jumpTarget, margin: margin);
     });
   }
 
   /// 确保已构建的目标节点在视口内可见
   ///
-  /// 目标完全在视口内时不滚动；否则直接跳转到让目标居中的位置。
-  void _ensureNodeVisible(BuildContext context) {
+  /// 节点不在视口内时滚动到视口中央；已完全可见时若底部间距不足
+  /// [margin]，只补足差额而不整体居中，避免视口跳动。
+  void _ensureNodeVisible(BuildContext context, {double margin = 0}) {
     final renderObject = context.findRenderObject();
     if (renderObject == null || !renderObject.attached) return;
 
     final viewport = RenderAbstractViewport.of(renderObject);
+    final position = _scrollController.position;
     final currentOffset = _scrollController.offset;
 
-    // 让目标顶部对齐视口顶部所需的偏移量
+    // 让目标顶部对齐视口顶部、底部对齐视口底部所需的偏移量
     final revealTop = viewport.getOffsetToReveal(renderObject, 0.0).offset;
-    // 让目标底部对齐视口底部所需的偏移量
     final revealBottom = viewport.getOffsetToReveal(renderObject, 1.0).offset;
 
-    // 当前偏移在 [revealBottom, revealTop] 之间时，目标完全在视口内，无需滚动
+    double target;
+    // 当前偏移在 [revealBottom, revealTop] 之间时，目标完全在视口内
     if (currentOffset >= revealBottom && currentOffset <= revealTop) {
+      // 底部间距已满足要求，无需滚动
+      if (margin <= 0 || currentOffset >= revealBottom + margin) return;
+      // 向下滚动补足底部间距
+      target = revealBottom + margin;
+    } else {
+      // 目标不在视口内，滚转到让目标居中的位置
+      target = viewport.getOffsetToReveal(renderObject, 0.5).offset;
+    }
+
+    position.jumpTo(target.clamp(position.minScrollExtent, position.maxScrollExtent));
+  }
+
+  // ================= 边缘自动滚动 =================
+
+  /// 更新边缘自动滚动状态
+  ///
+  /// 指针进入视口上下边缘的触发区时启动定时滚动，离开触发区后停止；
+  /// [selectionUpdater] 用于在指针不动、仅视口滚动的过程中继续刷新选区。
+  void _updateEdgeAutoScroll(
+    Offset globalPosition, {
+    required void Function(Offset globalPosition) selectionUpdater,
+  }) {
+    _autoScrollPointerPosition = globalPosition;
+    _autoScrollSelectionUpdater = selectionUpdater;
+
+    final Rect? viewportRect = _viewportGlobalRect();
+    if (viewportRect == null) {
+      _stopEdgeAutoScroll();
       return;
     }
 
-    // 目标不在视口内，跳转到让目标居中的位置
-    final revealOffset = viewport.getOffsetToReveal(renderObject, 0.5);
-    final desiredOffset = revealOffset.offset.clamp(
-      _scrollController.position.minScrollExtent,
-      _scrollController.position.maxScrollExtent,
+    if (_edgeScrollOvershoot(viewportRect, globalPosition) == 0) {
+      _stopEdgeAutoScroll(clearUpdater: false);
+      return;
+    }
+
+    _autoScrollTimer ??= Timer.periodic(
+      const Duration(milliseconds: 16),
+      (_) => _onEdgeAutoScrollTick(),
     );
-    _scrollController.position.jumpTo(desiredOffset);
+  }
+
+  /// 停止边缘自动滚动
+  ///
+  /// [clearUpdater] 为 false 时保留选区刷新回调，便于同一次手势内继续使用
+  void _stopEdgeAutoScroll({bool clearUpdater = true}) {
+    _autoScrollTimer?.cancel();
+    _autoScrollTimer = null;
+    if (clearUpdater) {
+      _autoScrollSelectionUpdater = null;
+      _autoScrollPointerPosition = null;
+    }
+  }
+
+  /// 边缘自动滚动的单帧处理
+  ///
+  /// 按指针越出边缘的距离换算滚动步长，滚动后以指针位置重新刷新选区，
+  /// 使指针停住不动时仍可继续扩展选区
+  void _onEdgeAutoScrollTick() {
+    final Offset? pointer = _autoScrollPointerPosition;
+    final Rect? viewportRect = _viewportGlobalRect();
+    if (pointer == null || viewportRect == null) {
+      _stopEdgeAutoScroll();
+      return;
+    }
+    if (!_scrollController.hasClients) return;
+
+    final double overshoot = _edgeScrollOvershoot(viewportRect, pointer);
+    if (overshoot == 0) {
+      _stopEdgeAutoScroll(clearUpdater: false);
+      return;
+    }
+
+    // 越出越远滚动越快，单帧步长不超过上限；正值为向下滚动，负值为向上滚动
+    final double magnitude = _autoScrollStepForOvershoot(overshoot.abs());
+    final double delta = overshoot > 0 ? magnitude : -magnitude;
+
+    final position = _scrollController.position;
+    final double target = (position.pixels + delta).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    // 已到达可滚动边界，滚动不再生效
+    if ((target - position.pixels).abs() < 0.5) return;
+
+    position.jumpTo(target);
+    _autoScrollSelectionUpdater?.call(pointer);
+  }
+
+  /// 计算指针相对视口上下边缘的越出距离
+  ///
+  /// 返回正数表示需要向下滚动，负数表示需要向上滚动，0 表示不在触发区内
+  double _edgeScrollOvershoot(Rect viewportRect, Offset position) {
+    final double distanceToTop = position.dy - viewportRect.top;
+    final double distanceToBottom = viewportRect.bottom - position.dy;
+    // 靠近上边缘：越出距离为负
+    if (distanceToTop < _autoScrollEdgeZone) {
+      return distanceToTop - _autoScrollEdgeZone;
+    }
+    // 靠近下边缘：越出距离为正
+    if (distanceToBottom < _autoScrollEdgeZone) {
+      return _autoScrollEdgeZone - distanceToBottom;
+    }
+    return 0;
+  }
+
+  /// 按指针越出边缘的距离换算单帧滚动步长
+  double _autoScrollStepForOvershoot(double overshoot) {
+    // 越出距离每增加 1 像素步长增加 0.5 像素，并在上限处截断
+    final double step = 2.0 + overshoot * 0.5;
+    return step > _autoScrollMaxStep ? _autoScrollMaxStep : step;
+  }
+
+  /// 取滚动视口在屏幕坐标系中的矩形
+  ///
+  /// 滚动视口未挂载时返回 null，此时不进行边缘自动滚动
+  Rect? _viewportGlobalRect() {
+    final renderObject = _scrollViewKey.currentContext?.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.attached) return null;
+    return MatrixUtils.transformRect(
+      renderObject.getTransformTo(null),
+      Offset.zero & renderObject.size,
+    );
   }
 
   @override
@@ -4712,16 +4948,11 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
                           onPointerUp: enableEditorSelection
                               ? _onPointerUp
                               // 批量选择模式下抬起指针结束竖条滑选
-                              : (_isBatchSelectionMode
-                                    ? (_) => _batchSelectionController.onPointerUp()
-                                    : null),
-                          // 批量选择模式下按住竖条滑动时按指针位置更新选区
-                          onPointerMove: _isBatchSelectionMode
-                              ? _batchSelectionController.onPointerMove
-                              : null,
-                          onPointerCancel: _isBatchSelectionMode
-                              ? (_) => _batchSelectionController.onPointerUp()
-                              : null,
+                              : (_isBatchSelectionMode ? _onBatchPointerUp : null),
+                          // 批量选择模式下按住竖条滑动时按指针位置更新选区，
+                          // 指针越出视口上下边缘时持续滚动视口
+                          onPointerMove: _isBatchSelectionMode ? _onBatchPointerMove : null,
+                          onPointerCancel: _isBatchSelectionMode ? _onBatchPointerUp : null,
                           child: RawGestureDetector(
                             behavior: HitTestBehavior.translucent,
                             // 移动端不注册自定义拖拽识别器，让垂直拖动交由滚动容器处理，
@@ -4744,75 +4975,15 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
                             child: LayoutBuilder(
                               builder: (context, constraints) {
                                 final settings = SettingsService.instance;
-                                final pageViewMode = settings.outlinePageViewMode;
-                                final bool isPaperMode = pageViewMode == 'paper';
-                                // 左右边距：纸张模式下相对于 A4 宽度计算（作为纸张内边距），
-                                // 其他模式相对于编辑器宽度计算；桌面端作为滚动容器内边距，
-                                // 移动端则作用于节点行内容（行尾竖条始终贴边，不随该设置移动）
-                                final double horizontalBase = isPaperMode
-                                    ? GlobalConstants.a4Width
-                                    : constraints.maxWidth;
-                                final horizontalPadding =
-                                    horizontalBase * (settings.outlineHorizontalMargin / 100);
-                                // 顶边距和底边距（百分比，相对于编辑器高度）
-                                // 换算基准在键盘升降期间保持不变，避免节点内容随键盘上下移动
-                                final double marginBasisHeight = _resolveMarginBasisHeight(constraints.maxHeight);
-                                final double topPadding =
-                                    marginBasisHeight * (settings.outlineTopMargin / 100);
-                                final double bottomPadding =
-                                    marginBasisHeight * (settings.outlineBottomMargin / 100);
-
-                                // 构建节点列表，每个节点都用右键菜单包装；
-                                // 移动端长按交还系统原生选择行为，不注册长按识别器
-                                final List<Widget> tiles = [
-                                  for (int i = 0; i < flatList.length; i++)
-                                    ContextMenu(
-                                      getMenuItems: _buildContextMenuItems,
-                                      onSecondaryTapDown: _handleSecondaryTapDown,
-                                      onDismissed: _handleContextMenuDismissed,
-                                      enableMobileLongPress: !PlatformCapabilities.isMobile,
-                                      child: _buildNodeTile(flatList[i], horizontalMargin: horizontalPadding),
-                                    ),
-                                ];
-
-                                // 根据页面视图模式构建内容包装
-                                final Widget content = _buildPageContent(
-                                  pageViewMode: pageViewMode,
-                                  colorScheme: colorScheme,
-                                  paperColor: editorBackgroundColor,
-                                  tiles: tiles,
-                                  horizontalPadding: horizontalPadding,
-                                  topPadding: topPadding,
-                                  bottomPadding: bottomPadding,
-                                );
-
-                                // 纸张模式下，水平/上下边距作为纸张内边距，
-                                // 滚动容器只保留查找替换浮窗的顶边距、纸张顶边距（防止顶部阴影被遮挡）与底部快捷键提示高度
-                                // 移动端不在滚动容器上施加左右内边距，左右边距改由节点行内容承担，
-                                // 使行尾竖条始终贴到编辑区右边缘
-                                final EdgeInsets scrollPadding = isPaperMode
-                                    ? EdgeInsets.only(
-                                        top: widget.extraTopPadding + 10.0,
-                                        bottom: _bottomHintHeight,
-                                      )
-                                    : PlatformCapabilities.isMobile
-                                    ? EdgeInsets.only(
-                                        top: topPadding + widget.extraTopPadding,
-                                        bottom: bottomPadding + _bottomHintHeight,
-                                      )
-                                    : EdgeInsets.only(
-                                        left: horizontalPadding,
-                                        right: horizontalPadding,
-                                        top: topPadding + widget.extraTopPadding,
-                                        bottom: bottomPadding + _bottomHintHeight,
-                                      );
 
                                 final scrollContent = ScrollConfiguration(
                                   behavior: CleanEditorScrollBehavior(),
-                                  child: SingleChildScrollView(
-                                    controller: _scrollController,
-                                    padding: scrollPadding,
-                                    child: content,
+                                  child: _buildEditorScrollView(
+                                    constraints: constraints,
+                                    pageViewMode: settings.outlinePageViewMode,
+                                    colorScheme: colorScheme,
+                                    paperColor: editorBackgroundColor,
+                                    flatList: flatList,
                                   ),
                                 );
 
@@ -4869,77 +5040,134 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     );
   }
 
-  /// 根据页面视图模式构建内容包装
+  /// 构建编辑器的懒加载滚动视图
   ///
   /// 三种模式：
   /// - 'adaptive' 自适应：不约束宽度，不居中，节点区域自适应容器宽度
   /// - 'default' 默认：限制 A4 宽度并居中，不显示纸张样式
-  /// - 'paper' 纸张：在默认基础上显示 A4 纸张背景与投影效果，并施加 A4 最小高度
-  Widget _buildPageContent({
+  /// - 'paper' 纸张：在默认基础上显示 A4 纸张背景与投影效果，内容不足时纸张铺满视口
+  ///
+  /// 节点列表使用 [SliverList] 懒加载，只构建视口及其预取范围内的节点瓦片，
+  /// 避免节点数量较多时一次性构建全部节点带来的移动端卡顿。
+  /// 水平边距在纸张模式下相对于 A4 宽度计算（作为纸张内边距），其他模式相对于编辑器宽度计算；
+  /// 桌面端作为滚动容器内边距，移动端则由节点行内容承担，使行尾竖条始终贴到编辑区右边缘
+  Widget _buildEditorScrollView({
+    required BoxConstraints constraints,
     required String pageViewMode,
     required ColorScheme colorScheme,
     required Color paperColor,
-    required List<Widget> tiles,
-    required double horizontalPadding,
-    required double topPadding,
-    required double bottomPadding,
+    required List<FlatNode> flatList,
   }) {
-    // 自适应模式：取消宽度限制，不居中
-    if (pageViewMode == 'adaptive') {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: tiles,
-      );
-    }
+    final settings = SettingsService.instance;
+    final bool isPaperMode = pageViewMode == 'paper';
+    final double horizontalBase =
+        isPaperMode ? GlobalConstants.a4Width : constraints.maxWidth;
+    final double horizontalPadding =
+        horizontalBase * (settings.outlineHorizontalMargin / 100);
+    // 顶边距和底边距（百分比，相对于编辑器高度）
+    // 换算基准在键盘升降期间保持不变，避免节点内容随键盘上下移动
+    final double marginBasisHeight = _resolveMarginBasisHeight(constraints.maxHeight);
+    final double topPadding = marginBasisHeight * (settings.outlineTopMargin / 100);
+    final double bottomPadding = marginBasisHeight * (settings.outlineBottomMargin / 100);
+    // 记录底边距，供聚焦、定位节点时作为底部安全间距使用
+    _bottomContentPadding = bottomPadding;
 
-    // 纸张模式：约束 A4 宽度并居中，叠加纸张背景色与投影，施加 A4 最小高度；
-    // 用 Padding 将边距作用于纸张内部，使节点与纸张边缘保留距离
-    if (pageViewMode == 'paper') {
-      return Align(
-        alignment: Alignment.topCenter,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(
-            maxWidth: GlobalConstants.a4Width,
-            minHeight: GlobalConstants.a4Height,
-          ),
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              color: paperColor,
-              boxShadow: [
-                BoxShadow(
-                  color: colorScheme.shadow.withValues(alpha: 0.15),
-                  blurRadius: 16,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                horizontalPadding,
-                topPadding,
-                horizontalPadding,
-                bottomPadding,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: tiles,
-              ),
-            ),
-          ),
-        ),
-      );
-    }
+    // 内容按 A4 宽度居中的额外内缩量；宽度不足以容纳 A4 时取 0；
+    // 纸张模式与移动端在整个视口宽度内居中，桌面端非纸张模式先施加左右边距再居中
+    final double viewportCenterRaw = (constraints.maxWidth - GlobalConstants.a4Width) / 2;
+    final double viewportCenterInset = viewportCenterRaw > 0 ? viewportCenterRaw : 0.0;
+    final double paddedCenterRaw =
+        (constraints.maxWidth - 2 * horizontalPadding - GlobalConstants.a4Width) / 2;
+    final double paddedCenterInset = paddedCenterRaw > 0 ? paddedCenterRaw : 0.0;
 
-    // 默认模式：约束 A4 宽度并居中，不显示纸张样式
-    return Align(
-      alignment: Alignment.topCenter,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: GlobalConstants.a4Width),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: tiles,
-        ),
+    // 构建节点列表，每个节点都用右键菜单包装；
+    // 移动端长按交还系统原生选择行为，不注册长按识别器
+    final Widget nodeList = SliverList.builder(
+      itemCount: flatList.length,
+      itemBuilder: (context, index) => ContextMenu(
+        getMenuItems: _buildContextMenuItems,
+        onSecondaryTapDown: _handleSecondaryTapDown,
+        onDismissed: _handleContextMenuDismissed,
+        enableMobileLongPress: !PlatformCapabilities.isMobile,
+        child: _buildNodeTile(flatList[index], horizontalMargin: horizontalPadding),
       ),
+    );
+
+    final List<Widget> slivers;
+    if (isPaperMode) {
+      // 纸张模式：纸张按 A4 宽度居中，水平/上下边距作为纸张内边距；
+      // 滚动容器只保留查找替换浮窗的顶边距、纸张顶边距（防止顶部阴影被遮挡）与底部快捷键提示高度；
+      // 内容不足 A4 高度时在其后补足空白，使纸张始终保持 A4 尺寸
+      slivers = [
+        SliverPadding(
+          padding: EdgeInsets.only(
+            top: widget.extraTopPadding + 10.0,
+            bottom: _bottomHintHeight,
+          ),
+          sliver: SliverPadding(
+            padding: EdgeInsets.symmetric(horizontal: viewportCenterInset),
+            sliver: DecoratedSliver(
+              decoration: BoxDecoration(
+                color: paperColor,
+                boxShadow: [
+                  BoxShadow(
+                    color: colorScheme.shadow.withValues(alpha: 0.15),
+                    blurRadius: 16,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              sliver: SliverPadding(
+                padding: EdgeInsets.fromLTRB(
+                  horizontalPadding,
+                  topPadding,
+                  horizontalPadding,
+                  bottomPadding,
+                ),
+                sliver: SliverMainAxisGroup(
+                  slivers: [
+                    nodeList,
+                    SliverFillRemaining(
+                      hasScrollBody: false,
+                      child: const SizedBox.shrink(),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ];
+    } else {
+      // 自适应模式不限制宽度、不居中，不施加居中内缩量
+      final bool isMobile = PlatformCapabilities.isMobile;
+      final double centerInset = pageViewMode == 'adaptive'
+          ? 0.0
+          : (isMobile ? viewportCenterInset : paddedCenterInset);
+      // 移动端不在滚动容器上施加左右内边距，左右边距改由节点行内容承担，
+      // 使行尾竖条始终贴到编辑区右边缘
+      final EdgeInsets scrollPadding = isMobile
+          ? EdgeInsets.only(
+              left: centerInset,
+              right: centerInset,
+              top: topPadding + widget.extraTopPadding,
+              bottom: bottomPadding + _bottomHintHeight,
+            )
+          : EdgeInsets.only(
+              left: horizontalPadding + centerInset,
+              right: horizontalPadding + centerInset,
+              top: topPadding + widget.extraTopPadding,
+              bottom: bottomPadding + _bottomHintHeight,
+            );
+      slivers = [
+        SliverPadding(padding: scrollPadding, sliver: nodeList),
+      ];
+    }
+
+    return CustomScrollView(
+      key: _scrollViewKey,
+      controller: _scrollController,
+      slivers: slivers,
     );
   }
 
@@ -4970,8 +5198,11 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       onBatchTap: () => toggleNodeSubtreeSelection(flatNode.node.id),
       onTrailingBarLongPress: _onTrailingBarLongPress,
       onTrailingBarLongPressMove: _onTrailingBarLongPressMove,
-      onTrailingBarDragStart: () =>
-          _batchSelectionController.onCheckboxDragStart(flatNode.node.id),
+      onTrailingBarDragStart: () {
+        _batchSelectionController.onCheckboxDragStart(flatNode.node.id);
+        // 按住竖条拖动滑选时同样支持视口边缘自动滚动
+        _autoScrollSelectionUpdater = _batchSelectionController.onPointerMoveTo;
+      },
       onTrailingBarDragEnd: _batchSelectionController.onPointerUp,
       onChanged: (newText) {
         final oldText = flatNode.node.text;

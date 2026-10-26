@@ -196,8 +196,7 @@ class BatchSelectionController {
   void onPointerMove(PointerMoveEvent event) {
     // 复选框区域拖拽：按指针位置命中途经的项并更新选区
     if (_isCheckboxDragging) {
-      final hitId = hitTestId?.call(event.position);
-      if (hitId != null) _updateDragRange(hitId);
+      onPointerMoveTo(event.position);
       return;
     }
 
@@ -209,6 +208,16 @@ class BatchSelectionController {
 
     _isDragging = true;
     _updateDragRange(_dragStartId!);
+  }
+
+  /// 按指针位置更新复选框区域拖拽的选区
+  ///
+  /// 用于指针静止不动、仅由视口自动滚动改变命中位置的场景：
+  /// 此时不会产生新的指针移动事件，需要由调用方驱动刷新。
+  void onPointerMoveTo(Offset globalPosition) {
+    if (!_isCheckboxDragging) return;
+    final hitId = hitTestId?.call(globalPosition);
+    if (hitId != null) _updateDragRange(hitId);
   }
 
   /// 指针进入项区域事件

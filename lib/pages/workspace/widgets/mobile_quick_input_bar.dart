@@ -33,6 +33,7 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
   ///
   /// 键盘收起时高度逐帧减小，若继续按「高度大于 0」显示，快捷栏会跟随键盘
   /// 一路下滑到屏幕底部才消失；检测到高度减小时据此立即隐藏。
+  /// 该状态一旦置位便保持到键盘完全消失，收起动画期间重复的度量通知不会解除它。
   bool _keyboardRetracting = false;
 
   /// 软键盘是否处于弹出状态（收起动画一开始即视为已收起）
@@ -89,8 +90,14 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
     if (!mounted) return;
     final double height = View.of(context).viewInsets.bottom;
     final bool wasShown = _keyboardShown;
-    // 高度减小说明键盘正在收起，立即隐藏快捷栏，不等收起动画结束
-    _keyboardRetracting = height > 0 && height < _keyboardHeight;
+    // 键盘完全消失时结束收起过程；高度减小时进入收起过程，立即隐藏快捷栏，
+    // 不等收起动画结束。收起期间可能连续收到高度相同或短暂回升的度量通知，
+    // 因此只在高度归零时解除，避免快捷栏在屏幕底部反复闪现
+    if (height <= 0) {
+      _keyboardRetracting = false;
+    } else if (height < _keyboardHeight) {
+      _keyboardRetracting = true;
+    }
     _keyboardHeight = height;
     // 仅在显隐状态真正变化时重建，键盘动画期间的连续高度变化被合并掉
     if (_keyboardShown != wasShown) setState(() {});
