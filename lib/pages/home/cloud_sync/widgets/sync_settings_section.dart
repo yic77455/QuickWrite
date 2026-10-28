@@ -8,13 +8,14 @@ import 'package:quick_write/shared/widgets/widgets.dart';
 /// 云同步 - 同步设置分组
 ///
 /// 提供自动同步行为配置：
-/// - 自动同步开关与执行间隔
+/// - 自动同步开关与执行间隔（含实时同步）
 /// - 启动、退出时的自动同步开关
 class SyncSettingsSection extends StatelessWidget {
   const SyncSettingsSection({super.key});
 
-  /// 自动同步间隔选项（分钟）
+  /// 自动同步间隔选项（分钟），0 表示实时同步
   static const List<DropdownItem> _intervalItems = [
+    DropdownItem(displayText: '实时', value: '0'),
     DropdownItem(displayText: '每 10 分钟', value: '10'),
     DropdownItem(displayText: '每 30 分钟', value: '30'),
     DropdownItem(displayText: '每 60 分钟', value: '60'),
@@ -23,12 +24,15 @@ class SyncSettingsSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<CloudSyncProvider>();
+    final realtimeWarning = _buildRealtimeWarningTile(context, provider);
 
     return SettingSectionCard(
       title: '同步设置',
       children: [
         _buildAutoSyncTile(provider),
         _buildIntervalTile(provider),
+        // ignore: use_null_aware_elements
+        if (realtimeWarning != null) realtimeWarning,
         _buildStartupTile(provider),
         _buildExitTile(provider),
       ],
@@ -51,13 +55,16 @@ class SyncSettingsSection extends StatelessWidget {
   /// 同步间隔：自动同步的执行频率，仅在自动同步开启时可用
   Widget _buildIntervalTile(CloudSyncProvider provider) {
     final enabled = provider.autoSyncEnabled;
+    final realtime = provider.isRealtimeSync;
     // 移动端窄屏：下拉框换行到标题下方并占满整行
     final isMobile = PlatformCapabilities.isMobile;
 
     return SettingTile(
       icon: Icons.timer_outlined,
       title: '同步间隔',
-      subtitle: '两次自动同步之间的时间间隔',
+      subtitle: realtime
+          ? '每次保存后立即同步，并自动检测两端改动以避免覆盖'
+          : '两次自动同步之间的时间间隔',
       enabled: enabled,
       trailingBelow: isMobile,
       trailing: Opacity(
@@ -68,10 +75,27 @@ class SyncSettingsSection extends StatelessWidget {
             width: isMobile ? double.infinity : 140,
             value: provider.syncIntervalMinutes.toString(),
             items: _intervalItems,
-            onChanged: (value) => provider.setSyncIntervalMinutes(int.parse(value)),
+            onChanged: (value) =>
+                provider.setSyncIntervalMinutes(int.parse(value)),
           ),
         ),
       ),
+    );
+  }
+
+  /// 实时同步的风险提示：坚果云按时间窗口限制请求次数，实时同步会很快耗尽配额
+  Widget? _buildRealtimeWarningTile(
+    BuildContext context,
+    CloudSyncProvider provider,
+  ) {
+    if (!provider.isRealtimeSync || !provider.isJianguoyun) return null;
+
+    return SettingTile(
+      icon: Icons.report_problem_outlined,
+      title: '请求频率提醒',
+      subtitle: '坚果云限制每 30 分钟内的请求次数，实时同步会迅速耗尽配额，'
+          '建议改用定时同步',
+      accentColor: Theme.of(context).colorScheme.tertiary,
     );
   }
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/services/cloud_sync/cloud_sync_result.dart';
 import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
+import 'package:quick_write/core/services/cloud_sync/remote_storage.dart';
 import 'package:quick_write/core/services/cloud_sync/sync_models.dart';
 
 /// 云同步状态管理 Provider
@@ -35,22 +36,46 @@ class CloudSyncProvider extends ChangeNotifier {
   /// 待用户确认的高风险同步（null 表示没有）
   SyncRiskAssessment? get pendingRisk => _service.pendingRisk;
 
-  /// 已保存的服务器地址
+  /// 存储平台类型
+  RemoteStorageKind get storageKind => _service.storageKind;
+
+  /// 已保存的服务器地址（WebDAV）或服务端点（S3）
   String get serverUrl => _service.serverUrl;
 
-  /// 已保存的登录账号
+  /// 已保存的登录账号（WebDAV）或 Access Key（S3）
   String get username => _service.username;
 
   /// 已保存的远端目录
   String get remoteDir => _service.remoteDir;
+
+  /// 已保存的 S3 区域
+  String get s3Region => _service.s3Region;
+
+  /// 已保存的 S3 存储桶
+  String get s3Bucket => _service.s3Bucket;
+
+  /// 已保存的 S3 路径风格设置
+  bool get s3PathStyle => _service.s3PathStyle;
+
+  /// 章节是否以归档包上传（仅坚果云为 true）
+  bool get chapterPackingEnabled => _service.chapterPackingEnabled;
+
+  /// 当前平台的识别结果
+  String get platformLabel => _service.platformLabel;
+
+  /// 当前是否指向坚果云
+  bool get isJianguoyun => _service.isJianguoyun;
 
   // ================= 同步设置 =================
 
   /// 是否启用自动同步
   bool get autoSyncEnabled => _service.autoSyncEnabled;
 
-  /// 自动同步间隔（分钟）
+  /// 自动同步间隔（分钟），0 表示实时同步
   int get syncIntervalMinutes => _service.syncIntervalMinutes;
+
+  /// 是否启用实时同步
+  bool get isRealtimeSync => _service.isRealtimeSync;
 
   /// 应用启动时自动同步
   bool get syncOnStartup => _service.syncOnStartup;
@@ -61,34 +86,12 @@ class CloudSyncProvider extends ChangeNotifier {
   // ================= 连接操作 =================
 
   /// 测试服务器连接
-  Future<CloudSyncResult> testConnection({
-    required String serverUrl,
-    required String username,
-    required String password,
-    required String remoteDir,
-  }) {
-    return _service.testConnection(
-      serverUrl: serverUrl,
-      username: username,
-      password: password,
-      remoteDir: remoteDir,
-    );
-  }
+  Future<CloudSyncResult> testConnection(CloudConnectionConfig config) =>
+      _service.testConnection(config);
 
   /// 建立连接
-  Future<CloudSyncResult> connect({
-    required String serverUrl,
-    required String username,
-    required String password,
-    required String remoteDir,
-  }) {
-    return _service.connect(
-      serverUrl: serverUrl,
-      username: username,
-      password: password,
-      remoteDir: remoteDir,
-    );
-  }
+  Future<CloudSyncResult> connect(CloudConnectionConfig config) =>
+      _service.connect(config);
 
   /// 断开连接
   Future<void> disconnect() => _service.disconnect();

@@ -2,11 +2,11 @@ import 'package:flutter/foundation.dart';
 import 'package:isar/isar.dart';
 import 'package:quick_write/core/services/database_service.dart';
 import 'package:quick_write/core/services/cloud_sync/metadata_sync.dart';
+import 'package:quick_write/core/services/cloud_sync/remote_storage.dart';
 import 'package:quick_write/core/services/cloud_sync/sync_models.dart';
 import 'package:quick_write/core/services/cloud_sync/sync_planner.dart';
 import 'package:quick_write/core/services/cloud_sync/sync_state_store.dart';
 import 'package:quick_write/core/services/cloud_sync/sync_transfer.dart';
-import 'package:quick_write/core/services/cloud_sync/webdav_client.dart';
 import 'package:quick_write/core/services/cloud_sync/workspace_indexer.dart';
 
 /// 云同步引擎
@@ -15,20 +15,22 @@ import 'package:quick_write/core/services/cloud_sync/workspace_indexer.dart';
 /// 1. 元数据同步：先合并书籍、章节等实体，使本地具备正确的章节结构
 /// 2. 正文同步：再索引本地文件、三方比对生成差异计划并执行传输
 ///
-/// 两个阶段必须按此顺序执行：章节正文按固定的章节顺序分块打包，
-/// 只有两端实体结构一致，分块结果才会一致，正文比对才有意义
+/// 两个阶段必须按此顺序执行：章节正文按固定的章节顺序划分同步单元，
+/// 只有两端实体结构一致，划分结果才会一致，正文比对才有意义
 class SyncEngine {
   SyncEngine({
-    required WebDavClient webdav,
+    required RemoteStorage storage,
     required SyncStateStore stateStore,
     WorkspaceIndexer indexer = const WorkspaceIndexer(),
     SyncPlanner planner = const SyncPlanner(),
-  }) : _webdav = webdav,
+    bool packChapters = true,
+  }) : _storage = storage,
        _stateStore = stateStore,
        _indexer = indexer,
        _planner = planner,
-       _transfer = SyncTransfer(webdav: webdav, stateStore: stateStore),
-       _metadataSync = MetadataSync(webdav: webdav, stateStore: stateStore);
+       _packChapters = packChapters,
+       _transfer = SyncTransfer(storage: storage, stateStore: stateStore),
+       _metadataSync = MetadataSync(storage: storage, stateStore: stateStore);
 
   /// 单次同步允许的最大并发传输数
   ///
@@ -37,7 +39,7 @@ class SyncEngine {
   static const int _maxConcurrency = 3;
 
   /// 远端通信客户端
-  final WebDavClient _webdav;
+  final RemoteStorage _storage;
 
   /// 本机同步状态存储
   final SyncStateStore _stateStore;
@@ -53,6 +55,12 @@ class SyncEngine {
 
   /// 元数据同步器
   final MetadataSync _metadataSync;
+
+  /// 是否把章节合并为归档包传输
+  ///
+  /// 仅坚果云这类限制请求次数的平台开启；其余平台逐章传输，
+  /// 每次同步只上传改动过的章节，节省流量
+  final bool _packChapters;
 
   // ================= 差异比对 =================
 
@@ -171,7 +179,7 @@ class SyncEngine {
 
     for (final id in deletedDictIds) {
       try {
-        await _webdav.deleteFile(_webdav.remotePathOf(dictSyncKeyOf(id)));
+        await _storage.deleteFile(_storage.remotePathOf(dictSyncKeyOf(id)));
       } catch (e) {
         // 单个词典清理失败不影响其余同步，遗留的远端文件会在下次同步重试
         debugPrint('清理远端词典失败: $id，$e');
@@ -188,7 +196,7 @@ class SyncEngine {
 
     for (final id in deletedThemeIds) {
       try {
-        await _webdav.deleteFile(_webdav.remotePathOf(themeSyncKeyOf(id)));
+        await _storage.deleteFile(_storage.remotePathOf(themeSyncKeyOf(id)));
       } catch (e) {
         // 单个主题清理失败不影响其余同步，遗留的远端文件会在下次同步重试
         debugPrint('清理远端主题失败: $id，$e');
@@ -204,15 +212,17 @@ class SyncEngine {
     final index = await _indexer.scan(
       isar: await _requireIsar(),
       baselines: _stateStore.baselines,
+      packChapters: _packChapters,
     );
 
+    // 只更新本地内容特征，保留基线中的远端标识：
+    // 逐章同步时缓存键与逻辑键相同，整条覆盖会让远端标识丢失
     for (final entry in index.chapterHashCache) {
-      _stateStore.putBaseline(
-        entry.key,
-        SyncBaselineRecord()
-          ..localHash = entry.hash
-          ..localSize = entry.size
-          ..localModifiedMs = entry.modifiedAt.millisecondsSinceEpoch,
+      _stateStore.updateLocalHash(
+        key: entry.key,
+        localHash: entry.hash,
+        localSize: entry.size,
+        localModifiedAt: entry.modifiedAt,
       );
     }
     _stateStore.pruneChapterHashCache({
@@ -225,11 +235,11 @@ class SyncEngine {
   /// 结合远端清单生成差异计划
   Future<SyncPlan> _buildPlanFrom(WorkspaceIndex index) async {
     // 确保远端同步目录存在，避免首次同步时列举失败
-    await _webdav.ensureDirectory(_webdav.remoteDir);
+    await _storage.ensureDirectory(_storage.remoteDir);
 
     // 只处理能在本地定位的文件：远端存在但本地数据库尚无对应实体的文件，
     // 需等待元数据同步在本机建立实体后才能落到具体路径
-    final remoteFiles = (await _webdav.listFilesRecursive())
+    final remoteFiles = (await _storage.listFilesRecursive())
         .where((file) => index.localPathOf(file.key) != null)
         .toList();
 
@@ -258,7 +268,7 @@ class SyncEngine {
 
     final List<RemoteSyncFile> remoteFiles;
     try {
-      remoteFiles = await _webdav.listFilesRecursive();
+      remoteFiles = await _storage.listFilesRecursive();
     } catch (e) {
       // 列举失败时不写入基线，下次同步会通过内容比对自动补齐
       debugPrint('回读远端内容标识失败，将在下次同步自动补齐: $e');
@@ -308,7 +318,7 @@ class SyncEngine {
         action: item.action,
         success: false,
         message: e.toString(),
-        rateLimited: WebDavClient.isRateLimitError(e),
+        rateLimited: isRemoteRateLimitError(e),
       );
     }
   }

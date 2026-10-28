@@ -167,7 +167,7 @@ class WorkspaceIndex {
 ///
 /// 将本地数据库记录与磁盘文件映射为「逻辑文件表」，供同步比对使用。
 /// 索引范围包括：
-/// - 书籍的章节正文（按每 [kChapterChunkSize] 章合并为一个归档包）
+/// - 书籍的章节正文（归档包模式下按每 [kChapterChunkSize] 章合并，其余情况逐章）
 /// - 书籍的设定项正文、封面、自定义高亮配置
 /// - 用户自定义的取名词典
 /// - 用户自定义主题
@@ -184,9 +184,14 @@ class WorkspaceIndexer {
   ///
   /// [isar] 应用数据库实例
   /// [baselines] 同步基线，用于复用文件哈希并据此判断文件是否变化
+  /// [packChapters] 是否把章节合并为归档包
+  ///
+  /// 只有坚果云这类限制请求次数的平台才需要归档包：整包上传用一次请求传输上百章；
+  /// 其他平台逐章上传，改动一章只传一章，避免整包重传带来的流量浪费
   Future<WorkspaceIndex> scan({
     required Isar isar,
     required Map<String, SyncBaselineRecord> baselines,
+    bool packChapters = true,
   }) async {
     final files = <LocalSyncFile>[];
     final plainPaths = <String, String>{};
@@ -201,6 +206,7 @@ class WorkspaceIndexer {
       plainPaths: plainPaths,
       archiveMembers: archiveMembers,
       hashCache: hashCache,
+      packChapters: packChapters,
     );
 
     // 用户自定义的取名词典
@@ -250,6 +256,7 @@ class WorkspaceIndexer {
     required Map<String, String> plainPaths,
     required Map<String, List<ChapterArchiveMember>> archiveMembers,
     required List<ChapterHashCacheEntry> hashCache,
+    required bool packChapters,
   }) async {
     final books = await isar.bookModels.where().findAll();
     if (books.isEmpty) return;
@@ -270,16 +277,29 @@ class WorkspaceIndexer {
       if (book.uuid.isEmpty || book.title.isEmpty) continue;
       final bookFolder = _joinPath([worksPath, book.title]);
 
-      // 章节正文：按顺序每 kChapterChunkSize 章合并为一个归档包
-      await _collectChapterChunks(
-        bookUuid: book.uuid,
-        chapters: chaptersByBook[book.uuid] ?? const <ChapterModel>[],
-        bookFolder: bookFolder,
-        baselines: baselines,
-        files: files,
-        archiveMembers: archiveMembers,
-        hashCache: hashCache,
-      );
+      // 章节正文：坚果云等限制请求次数的平台按每 kChapterChunkSize 章合并为一个归档包，
+      // 其余平台逐章作为独立文件同步，改动一章只需传输一章
+      if (packChapters) {
+        await _collectChapterChunks(
+          bookUuid: book.uuid,
+          chapters: chaptersByBook[book.uuid] ?? const <ChapterModel>[],
+          bookFolder: bookFolder,
+          baselines: baselines,
+          files: files,
+          archiveMembers: archiveMembers,
+          hashCache: hashCache,
+        );
+      } else {
+        await _collectChapterFiles(
+          bookUuid: book.uuid,
+          chapters: chaptersByBook[book.uuid] ?? const <ChapterModel>[],
+          bookFolder: bookFolder,
+          baselines: baselines,
+          files: files,
+          plainPaths: plainPaths,
+          hashCache: hashCache,
+        );
+      }
 
       // 设定项正文
       for (final item
@@ -431,6 +451,57 @@ class WorkspaceIndexer {
           size: totalSize,
           modifiedAt: latestModified!,
           contentHash: manifestHashOf(manifest),
+        ),
+      );
+    }
+  }
+
+  /// 逐章收集章节正文
+  ///
+  /// 每章是一个独立的同步单元，逻辑键沿用「书籍/章节」的固定格式，
+  /// 与归档包模式共用同一套哈希缓存，切换平台后无需重建状态
+  Future<void> _collectChapterFiles({
+    required String bookUuid,
+    required List<ChapterModel> chapters,
+    required String bookFolder,
+    required Map<String, SyncBaselineRecord> baselines,
+    required List<LocalSyncFile> files,
+    required Map<String, String> plainPaths,
+    required List<ChapterHashCacheEntry> hashCache,
+  }) async {
+    if (chapters.isEmpty) return;
+
+    final chaptersDirPath = _joinPath([bookFolder, _chaptersDirName]);
+
+    for (final chapter in chapters) {
+      if (chapter.uuid.isEmpty || chapter.filePath.isEmpty) continue;
+
+      final key = chapterCacheKeyOf(bookUuid, chapter.uuid);
+      final localPath = _joinPath([
+        chaptersDirPath,
+        relativePathToPlatform(chapter.filePath),
+      ]);
+      // 无论文件是否存在都登记路径，便于远端新增的同名章节定位落点
+      plainPaths[key] = localPath;
+
+      final resolved = await _resolveFileContent(key, localPath, baselines);
+      if (resolved == null) continue;
+
+      files.add(
+        LocalSyncFile(
+          key: key,
+          localPath: localPath,
+          size: resolved.size,
+          modifiedAt: resolved.modifiedAt,
+          contentHash: resolved.hash,
+        ),
+      );
+      hashCache.add(
+        ChapterHashCacheEntry(
+          key: key,
+          hash: resolved.hash,
+          size: resolved.size,
+          modifiedAt: resolved.modifiedAt,
         ),
       );
     }

@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/services/cloud_sync/cloud_sync_result.dart';
+import 'package:quick_write/core/services/cloud_sync/remote_storage.dart';
+import 'package:quick_write/core/services/cloud_sync/s3_client.dart';
 import 'package:quick_write/core/services/cloud_sync/sync_config_store.dart';
 import 'package:quick_write/core/services/cloud_sync/sync_engine.dart';
 import 'package:quick_write/core/services/cloud_sync/sync_models.dart';
@@ -46,14 +48,20 @@ class CloudSyncService extends ChangeNotifier {
   /// 自动同步调度器
   late final SyncScheduler _scheduler = SyncScheduler(onTrigger: _autoSync);
 
-  /// 当前使用的 WebDAV 客户端（未连接时为 null）
-  WebDavClient? _webdav;
+  /// 当前使用的远端存储客户端（未连接时为 null）
+  RemoteStorage? _storage;
 
   /// 当前使用的同步引擎（未连接时为 null）
   SyncEngine? _engine;
 
   /// 正在执行的同步任务（null 表示当前没有同步在执行）
   Future<CloudSyncResult>? _runningSync;
+
+  /// 同步执行期间是否又发生了本地变更
+  ///
+  /// 实时同步要求「每次保存都同步」，同步进行中的保存不能直接丢弃，
+  /// 需要在其结束后补一次，否则最后一次改动会一直停留在本地
+  bool _localChangePending = false;
 
   /// 待用户确认的高风险同步（null 表示没有）
   SyncRiskAssessment? _pendingRisk;
@@ -124,8 +132,13 @@ class CloudSyncService extends ChangeNotifier {
   /// 是否启用自动同步
   bool get autoSyncEnabled => _config.autoSyncEnabled;
 
-  /// 自动同步间隔（分钟）
+  /// 自动同步间隔（分钟），0 表示实时同步
   int get syncIntervalMinutes => _config.syncIntervalMinutes;
+
+  /// 是否启用实时同步
+  ///
+  /// 实时同步在每次本地保存后立即执行一次同步，不再等待周期定时器
+  bool get isRealtimeSync => _config.isRealtimeSync;
 
   /// 应用启动时自动同步
   bool get syncOnStartup => _config.syncOnStartup;
@@ -133,14 +146,38 @@ class CloudSyncService extends ChangeNotifier {
   /// 应用退出时自动同步
   bool get syncOnExit => _config.syncOnExit;
 
-  /// 服务器地址
+  /// 存储平台类型
+  RemoteStorageKind get storageKind => _config.storageKind;
+
+  /// 服务器地址（WebDAV）或服务端点（S3）
   String get serverUrl => _config.serverUrl;
 
-  /// 登录账号
+  /// 登录账号（WebDAV）或 Access Key（S3）
   String get username => _config.username;
+
+  /// S3 区域
+  String get s3Region => _config.s3Region;
+
+  /// S3 存储桶
+  String get s3Bucket => _config.s3Bucket;
+
+  /// S3 是否使用路径风格访问
+  bool get s3PathStyle => _config.s3PathStyle;
 
   /// 远端目录
   String get remoteDir => _config.remoteDir;
+
+  /// 章节是否以归档包的形式上传
+  ///
+  /// 仅坚果云需要：该平台限制每 30 分钟的请求次数，
+  /// 逐章上传会迅速耗尽配额；其他平台逐章上传以节省单次同步的流量
+  bool get chapterPackingEnabled => _config.connectionConfig.packsChapters;
+
+  /// 当前平台的识别结果，用于界面提示采用的传输策略
+  String get platformLabel => _config.connectionConfig.platformLabel;
+
+  /// 当前是否指向坚果云（无论是否已连接）
+  bool get isJianguoyun => isJianguoyunHost(_config.serverUrl);
 
   // ================= 初始化方法 =================
 
@@ -160,7 +197,7 @@ class CloudSyncService extends ChangeNotifier {
 
     // 处于已连接状态时，提前建立客户端并开启自动同步
     if (_config.isConnected) {
-      _rebuildWebdavClient();
+      _rebuildClient();
       _applySchedulerSettings();
       _scheduleStartupSync();
     }
@@ -168,8 +205,10 @@ class CloudSyncService extends ChangeNotifier {
     // 输出初始化结果，用于确认自动同步的配置是否按预期生效
     debugPrint(
       '云同步初始化完成：已连接=${_config.isConnected}，'
+      '平台=${_config.storageKind.label}，'
       '自动同步=${_config.autoSyncEnabled}，'
-      '同步间隔=${_config.syncIntervalMinutes} 分钟',
+      '同步间隔=${_config.isRealtimeSync ? '实时' : '${_config.syncIntervalMinutes} 分钟'}，'
+      '章节归档=${_config.connectionConfig.packsChapters}',
     );
 
     notifyListeners();
@@ -179,31 +218,23 @@ class CloudSyncService extends ChangeNotifier {
 
   /// 测试服务器连接是否可用
   ///
-  /// 仅校验地址与账号密码的正确性，不会保存配置
-  Future<CloudSyncResult> testConnection({
-    required String serverUrl,
-    required String username,
-    required String password,
-    required String remoteDir,
-  }) async {
-    final invalidMessage = _validateConnection(serverUrl, username, password);
+  /// 仅校验地址与凭据的正确性，不会保存配置
+  Future<CloudSyncResult> testConnection(CloudConnectionConfig config) async {
+    final invalidMessage = _validateConnection(config);
     if (invalidMessage != null) return CloudSyncResult.failure(invalidMessage);
 
     _setBusy(true);
-    final client = WebDavClient(
-      serverUrl: serverUrl.trim(),
-      username: username.trim(),
-      password: password,
-      remoteDir: SyncConfigStore.normalizeRemoteDir(remoteDir),
-    );
+    final client = _createClient(config);
     try {
-      // 验证服务器可达且鉴权通过
+      // 验证服务可达且鉴权通过
       await client.ping();
       // 验证远端目录可用
       await client.ensureDirectory(client.remoteDir);
-      return const CloudSyncResult.success('连接成功，服务器可正常访问');
+      return CloudSyncResult.success(
+        '连接成功，服务器可正常访问（${config.platformLabel}）',
+      );
     } catch (e) {
-      return CloudSyncResult.failure('连接失败：${WebDavClient.describeError(e)}');
+      return CloudSyncResult.failure('连接失败：${describeRemoteError(e)}');
     } finally {
       client.dispose();
       _setBusy(false);
@@ -213,30 +244,32 @@ class CloudSyncService extends ChangeNotifier {
   /// 建立连接
   ///
   /// 连接测试通过后保存配置并标记为已连接状态
-  Future<CloudSyncResult> connect({
-    required String serverUrl,
-    required String username,
-    required String password,
-    required String remoteDir,
-  }) async {
-    final result = await testConnection(
-      serverUrl: serverUrl,
-      username: username,
-      password: password,
-      remoteDir: remoteDir,
-    );
+  Future<CloudSyncResult> connect(CloudConnectionConfig config) async {
+    final result = await testConnection(config);
     if (!result.success) return result;
 
     // 持久化连接配置
-    _config.serverUrl = serverUrl.trim();
-    _config.username = username.trim();
-    _config.remoteDir = SyncConfigStore.normalizeRemoteDir(remoteDir);
-    await _config.savePassword(password);
+    _config.storageKind = config.kind;
+    _config.remoteDir = SyncConfigStore.normalizeRemoteDir(config.remoteDir);
+    if (config.kind == RemoteStorageKind.s3) {
+      _config.serverUrl = config.endpoint.trim();
+      _config.username = config.account.trim();
+      _config.s3Region = config.region.trim().isEmpty
+          ? kS3DefaultRegion
+          : config.region.trim();
+      _config.s3Bucket = config.bucket.trim();
+      _config.s3PathStyle = config.pathStyle;
+      await _config.saveS3SecretKey(config.secret);
+    } else {
+      _config.serverUrl = config.endpoint.trim();
+      _config.username = config.account.trim();
+      await _config.savePassword(config.secret);
+    }
     _config.isConnected = true;
     await _config.saveConfig();
 
     // 重建客户端供后续同步使用
-    _rebuildWebdavClient();
+    _rebuildClient();
     _applySchedulerSettings();
     notifyListeners();
     return const CloudSyncResult.success('已连接云服务');
@@ -247,10 +280,11 @@ class CloudSyncService extends ChangeNotifier {
   /// 释放连接资源并停止同步，本机保留配置以便下次快速连接
   Future<void> disconnect() async {
     _scheduler.stop();
-    _webdav?.dispose();
-    _webdav = null;
+    _storage?.dispose();
+    _storage = null;
     _engine = null;
     _pendingRisk = null;
+    _localChangePending = false;
     _config.isConnected = false;
     await _config.saveConfig();
     notifyListeners();
@@ -272,7 +306,7 @@ class CloudSyncService extends ChangeNotifier {
       final plan = await engine.buildPlan();
       return CloudSyncResult.success(_describePlan(plan));
     } catch (e) {
-      return CloudSyncResult.failure('同步预演失败：${WebDavClient.describeError(e)}');
+      return CloudSyncResult.failure('同步预演失败：${describeRemoteError(e)}');
     } finally {
       _setBusy(false);
     }
@@ -329,9 +363,13 @@ class CloudSyncService extends ChangeNotifier {
       return running;
     }
 
+    _localChangePending = false;
     final future = _executeSync();
     _runningSync = future;
-    return future.whenComplete(() => _runningSync = null);
+    return future.whenComplete(() {
+      _runningSync = null;
+      _scheduleFollowUpSync();
+    });
   }
 
   /// 清空云端同步数据
@@ -339,8 +377,8 @@ class CloudSyncService extends ChangeNotifier {
   /// 删除远端同步目录下的全部内容，本地文件不受影响。
   /// 远端内容清空后同步基线随之失效，下次同步会把本地内容作为全新数据完整推送
   Future<CloudSyncResult> clearRemoteData() async {
-    final webdav = _webdav;
-    if (webdav == null) {
+    final storage = _storage;
+    if (storage == null) {
       return const CloudSyncResult.failure('请先连接云服务');
     }
     if (_runningSync != null) {
@@ -349,9 +387,9 @@ class CloudSyncService extends ChangeNotifier {
 
     _setBusy(true);
     try {
-      await webdav.clearDirectory(webdav.remoteDir);
+      await storage.clearDirectory(storage.remoteDir);
       // 远端目录已清空，清除目录缓存以便下次同步重新创建
-      webdav.resetDirectoryCache();
+      storage.resetDirectoryCache();
       _stateStore.clearSyncBaselines();
       await _stateStore.save();
       _config.lastSyncTime = null;
@@ -360,7 +398,7 @@ class CloudSyncService extends ChangeNotifier {
       return const CloudSyncResult.success('已清空云端同步数据');
     } catch (e) {
       return CloudSyncResult.failure(
-        '清空云端数据失败：${WebDavClient.describeError(e)}',
+        '清空云端数据失败：${describeRemoteError(e)}',
       );
     } finally {
       _setBusy(false);
@@ -370,6 +408,10 @@ class CloudSyncService extends ChangeNotifier {
   /// 执行同步并汇总结果
   Future<CloudSyncResult> _executeSync() async {
     final engine = _engine!;
+
+    // 是否改动了本地数据：实时同步会在每次保存后执行，
+    // 若空转一轮也通知界面刷新，会让书架反复重载
+    var dataChanged = false;
 
     _setBusy(true);
     try {
@@ -381,10 +423,12 @@ class CloudSyncService extends ChangeNotifier {
       // 未获得确认时保留待确认状态，由界面引导用户手动触发
       if (summary.cancelled) {
         _pendingRisk = summary.risk;
+        dataChanged = summary.hasChanges;
         notifyListeners();
         return CloudSyncResult.failure(_describeSummary(summary));
       }
       _pendingRisk = null;
+      dataChanged = summary.hasChanges;
 
       // 为本机版本另存出冲突副本时立即提醒用户，避免副本只留在磁盘上被忽略
       final conflicts = summary.conflictCopies;
@@ -398,10 +442,12 @@ class CloudSyncService extends ChangeNotifier {
       await _config.saveConfig();
       return CloudSyncResult.success(_describeSummary(summary));
     } catch (e) {
-      return CloudSyncResult.failure('同步失败：${WebDavClient.describeError(e)}');
+      // 异常发生前可能已经写入部分元数据，交由界面重新加载以保证显示一致
+      dataChanged = true;
+      return CloudSyncResult.failure('同步失败：${describeRemoteError(e)}');
     } finally {
       _syncProgress = null;
-      _syncRevision++;
+      if (dataChanged) _syncRevision++;
       _setBusy(false);
     }
   }
@@ -422,10 +468,14 @@ class CloudSyncService extends ChangeNotifier {
 
   /// 通知本地内容发生了变化
   ///
-  /// 启用自动同步时，内容静置一段时间后才会推送，
-  /// 避免编辑过程中的连续保存反复触发同步
+  /// 定时模式下内容静置一段时间后才会推送，避免编辑过程中的连续保存反复触发同步；
+  /// 实时模式下每次保存都会安排一次同步，若此时正在同步则记为待补，
+  /// 在本次同步结束后立即再同步一次，保证最后一次保存也能落到云端
   void notifyLocalChange() {
     if (!_canAutoSync) return;
+    if (_config.isRealtimeSync && _runningSync != null) {
+      _localChangePending = true;
+    }
     _scheduler.notifyLocalChange();
   }
 
@@ -453,13 +503,17 @@ class CloudSyncService extends ChangeNotifier {
   /// 不满足条件或已有同步在执行时直接跳过，异常在内部消化，不会抛给调度器
   Future<void> _autoSync() async {
     if (!_canAutoSync) return;
-    if (_runningSync != null) {
-      debugPrint('已有同步任务在执行，跳过本次自动同步');
-      return;
-    }
+
     // 存在待确认的高风险同步时不再反复尝试，避免持续消耗服务端请求配额
     if (_pendingRisk != null) {
       debugPrint('存在待确认的高风险同步，跳过本次自动同步');
+      return;
+    }
+
+    if (_runningSync != null) {
+      // 实时同步下这次保存不能被丢弃，标记为待补，由本轮同步结束时接手
+      if (_config.isRealtimeSync) _localChangePending = true;
+      debugPrint('已有同步任务在执行，跳过本次自动同步');
       return;
     }
 
@@ -476,16 +530,38 @@ class CloudSyncService extends ChangeNotifier {
     _noticeHandler?.call(result.message);
   }
 
+  /// 实时同步：本轮同步期间又发生过保存时，补一次同步
+  ///
+  /// 同步过程中用户仍可能继续编辑并保存，这些改动不在本轮的计划内，
+  /// 若不在结束后立即补一次，最后一次改动会一直停留在本地
+  void _scheduleFollowUpSync() {
+    if (!_config.isRealtimeSync || !_localChangePending) return;
+    // 退出阶段与待确认状态下不再自动发起，避免在不可见时消耗请求配额
+    if (!_canAutoSync || _pendingRisk != null || _suppressRiskPrompt) return;
+
+    _localChangePending = false;
+    debugPrint('实时同步：本轮同步期间有新的保存，安排补同步');
+    _scheduler.notifyLocalChange();
+  }
+
   /// 上报同步进度
   void _onSyncProgress(int done, int total) {
     _syncProgress = SyncProgress(done: done, total: total);
     notifyListeners();
   }
 
-  /// 按当前设置配置周期性的自动同步
+  /// 按当前设置配置自动同步的调度方式
+  ///
+  /// 实时模式不启动周期定时器，同步完全由保存动作驱动
   void _applySchedulerSettings() {
+    if (!_canAutoSync) {
+      _scheduler.applyInterval(null);
+      return;
+    }
+    final realtime = _config.isRealtimeSync;
     _scheduler.applyInterval(
-      _canAutoSync ? Duration(minutes: _config.syncIntervalMinutes) : null,
+      realtime ? null : Duration(minutes: _config.syncIntervalMinutes),
+      realtime: realtime,
     );
   }
 
@@ -554,21 +630,57 @@ class CloudSyncService extends ChangeNotifier {
   // ================= 工具方法 =================
 
   /// 判断本机保存的连接配置是否完整
-  bool get _hasCompleteCredentials =>
-      WebDavClient.isValidServerUrl(_config.serverUrl) &&
-      _config.username.isNotEmpty &&
-      _config.password.isNotEmpty;
+  bool get _hasCompleteCredentials {
+    switch (_config.storageKind) {
+      case RemoteStorageKind.webDav:
+        return WebDavClient.isValidServerUrl(_config.serverUrl) &&
+            _config.username.isNotEmpty &&
+            _config.password.isNotEmpty;
+      case RemoteStorageKind.s3:
+        return S3Client.isValidEndpoint(_config.serverUrl) &&
+            _config.s3Bucket.isNotEmpty &&
+            _config.username.isNotEmpty &&
+            _config.s3SecretKey.isNotEmpty;
+    }
+  }
 
-  /// 创建或重建底层 WebDAV 客户端与同步引擎
-  void _rebuildWebdavClient() {
-    _webdav?.dispose();
-    _webdav = WebDavClient(
-      serverUrl: _config.serverUrl,
-      username: _config.username,
-      password: _config.password,
-      remoteDir: _config.remoteDir,
+  /// 按连接参数创建远端客户端
+  RemoteStorage _createClient(CloudConnectionConfig config) {
+    final remoteDir = SyncConfigStore.normalizeRemoteDir(config.remoteDir);
+    switch (config.kind) {
+      case RemoteStorageKind.webDav:
+        return WebDavClient(
+          serverUrl: config.endpoint.trim(),
+          username: config.account.trim(),
+          password: config.secret,
+          remoteDir: remoteDir,
+        );
+      case RemoteStorageKind.s3:
+        return S3Client(
+          endpoint: config.endpoint,
+          bucket: config.bucket.trim(),
+          region: config.region,
+          accessKey: config.account.trim(),
+          secretKey: config.secret,
+          remoteDir: remoteDir,
+          pathStyle: config.pathStyle,
+        );
+    }
+  }
+
+  /// 创建或重建底层客户端与同步引擎
+  ///
+  /// 章节是否打包由平台决定：只有坚果云这类限制请求次数的平台才使用归档包，
+  /// 其他平台逐章同步，每次只上传改动的章节
+  void _rebuildClient() {
+    final config = _config.connectionConfig;
+    _storage?.dispose();
+    _storage = _createClient(config);
+    _engine = SyncEngine(
+      storage: _storage!,
+      stateStore: _stateStore,
+      packChapters: config.packsChapters,
     );
-    _engine = SyncEngine(webdav: _webdav!, stateStore: _stateStore);
   }
 
   /// 更新忙碌状态并通知界面
@@ -643,17 +755,24 @@ class CloudSyncService extends ChangeNotifier {
   /// 校验连接参数
   ///
   /// 参数合法时返回 null，否则返回对应的错误提示
-  String? _validateConnection(
-    String serverUrl,
-    String username,
-    String password,
-  ) {
-    if (serverUrl.trim().isEmpty) return '请填写服务器地址';
-    if (!WebDavClient.isValidServerUrl(serverUrl)) {
-      return '服务器地址无效，请填写以 https:// 开头的完整地址';
+  String? _validateConnection(CloudConnectionConfig config) {
+    switch (config.kind) {
+      case RemoteStorageKind.webDav:
+        if (config.endpoint.trim().isEmpty) return '请填写服务器地址';
+        if (!WebDavClient.isValidServerUrl(config.endpoint)) {
+          return '服务器地址无效，请填写以 https:// 开头的完整地址';
+        }
+        if (config.account.trim().isEmpty) return '请填写账号';
+        if (config.secret.isEmpty) return '请填写密码';
+      case RemoteStorageKind.s3:
+        if (config.endpoint.trim().isEmpty) return '请填写服务端点';
+        if (!S3Client.isValidEndpoint(config.endpoint)) {
+          return '服务端点无效，请填写以 https:// 开头的完整地址（本地服务可使用 http://）';
+        }
+        if (config.bucket.trim().isEmpty) return '请填写存储桶名称';
+        if (config.account.trim().isEmpty) return '请填写 Access Key';
+        if (config.secret.isEmpty) return '请填写 Secret Key';
     }
-    if (username.trim().isEmpty) return '请填写账号';
-    if (password.isEmpty) return '请填写密码';
     return null;
   }
 }
