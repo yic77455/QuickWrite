@@ -156,6 +156,52 @@ class SyncBaselineRecord {
   };
 }
 
+/// 本地文件内容特征缓存项
+///
+/// 记录扫描时得到的内容哈希及其对应的大小与修改时间，文件未变化时
+/// 可直接复用哈希，避免每次同步都重新读取全部文件内容而被反复计算。
+/// 该缓存独立于同步基线：基线记录「上次同步完成时」的状态，
+/// 扫描结果只能刷新缓存，不能改写基线，否则改动会被误判为已同步
+class LocalHashCacheEntry {
+  /// 文件内容哈希（sha256 十六进制字符串）
+  final String hash;
+
+  /// 文件大小（字节）
+  final int size;
+
+  /// 文件最后修改时间（毫秒时间戳）
+  final int modifiedMs;
+
+  const LocalHashCacheEntry({
+    required this.hash,
+    required this.size,
+    required this.modifiedMs,
+  });
+
+  /// 从 JSON 反序列化
+  LocalHashCacheEntry.fromJson(Map<String, dynamic> json)
+    : hash = json['hash'] as String? ?? '',
+      size = json['size'] as int? ?? 0,
+      modifiedMs = json['modifiedMs'] as int? ?? 0;
+
+  /// 序列化为 JSON
+  Map<String, dynamic> toJson() => {
+    'hash': hash,
+    'size': size,
+    'modifiedMs': modifiedMs,
+  };
+
+  /// 文件最后修改时间
+  DateTime get modifiedAt => DateTime.fromMillisecondsSinceEpoch(modifiedMs);
+
+  /// 判断文件当前的大小与修改时间是否与缓存记录一致
+  ///
+  /// 一致说明内容未被改动，可直接沿用缓存中的哈希
+  bool matches({required int size, required DateTime modifiedAt}) =>
+      this.size == size &&
+      modifiedMs == modifiedAt.millisecondsSinceEpoch;
+}
+
 /// 同步动作
 ///
 /// 描述计划层针对单个逻辑文件给出的处理方式。文件层不做删除决策，

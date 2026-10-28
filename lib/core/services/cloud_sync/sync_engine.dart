@@ -212,22 +212,22 @@ class SyncEngine {
     final index = await _indexer.scan(
       isar: await _requireIsar(),
       baselines: _stateStore.baselines,
+      cachedHashes: _stateStore.hashCache,
       packChapters: _packChapters,
     );
 
-    // 只更新本地内容特征，保留基线中的远端标识：
-    // 逐章同步时缓存键与逻辑键相同，整条覆盖会让远端标识丢失
-    for (final entry in index.chapterHashCache) {
-      _stateStore.updateLocalHash(
+    // 扫描结果只写入独立的哈希缓存，不改动同步基线：
+    // 基线必须保持「上次同步完成时」的状态，否则本地改动会被误判为已同步
+    for (final entry in index.chapterHashCache.entries) {
+      final cached = entry.value;
+      _stateStore.cacheLocalHash(
         key: entry.key,
-        localHash: entry.hash,
-        localSize: entry.size,
-        localModifiedAt: entry.modifiedAt,
+        hash: cached.hash,
+        size: cached.size,
+        modifiedAt: cached.modifiedAt,
       );
     }
-    _stateStore.pruneChapterHashCache({
-      for (final entry in index.chapterHashCache) entry.key,
-    });
+    _stateStore.pruneChapterHashCache(index.chapterHashCache.keys.toSet());
 
     return index;
   }
