@@ -24,7 +24,7 @@ class SyncStateStore {
   static const String _stateFileName = 'state.json';
 
   /// 状态文件结构版本号
-  static const int _schemaVersion = 1;
+  static const int _schemaVersion = 2;
 
   /// 取不到设备名称时使用的替代名称
   static const String _fallbackDeviceName = '未知设备';
@@ -39,6 +39,16 @@ class SyncStateStore {
 
   /// 获取同步基线（只读）
   Map<String, SyncBaselineRecord> get baselines => Map.unmodifiable(_baselines);
+
+  /// 本地文件内容特征缓存：逻辑键 → 内容哈希与文件特征
+  ///
+  /// 仅用于避免重复读取文件内容，与同步基线相互独立：
+  /// 基线必须保留上次同步完成时的状态，缓存则随每次扫描刷新
+  final Map<String, LocalHashCacheEntry> _hashCache = {};
+
+  /// 获取本地文件内容特征缓存（只读）
+  Map<String, LocalHashCacheEntry> get hashCache =>
+      Map.unmodifiable(_hashCache);
 
   /// 元数据实体基线：集合名 → 上次同步完成时的存活实体标识
   ///
@@ -143,11 +153,8 @@ class SyncStateStore {
   ///
   /// 章节被删除后其哈希缓存不再有任何用处，及时清理可避免状态文件无限增长
   void pruneChapterHashCache(Set<String> activeKeys) {
-    _baselines.removeWhere(
-      (key, _) =>
-          key.contains(_chaptersDirSegment) &&
-          key.endsWith(GlobalConstants.chapterFileExtension) &&
-          !activeKeys.contains(key),
+    _hashCache.removeWhere(
+      (key, _) => _isChapterFileKey(key) && !activeKeys.contains(key),
     );
   }
 
@@ -172,21 +179,21 @@ class SyncStateStore {
       ..syncedAt = DateTime.now();
   }
 
-  /// 仅更新本地内容特征，保留基线的其余字段
+  /// 写入一个文件的内容特征缓存
   ///
-  /// 用于扫描阶段回写哈希缓存：章节逐章同步时，缓存键本身就是文件的逻辑键，
-  /// 若直接覆盖整条基线会丢掉远端内容标识，导致下次同步被误判为两端都改动
-  void updateLocalHash({
+  /// 供扫描阶段回写哈希，下次扫描时若文件未变化即可直接复用，
+  /// 无需重新读取文件内容
+  void cacheLocalHash({
     required String key,
-    required String localHash,
-    required int localSize,
-    required DateTime localModifiedAt,
+    required String hash,
+    required int size,
+    required DateTime modifiedAt,
   }) {
-    final record = _baselines[key] ?? SyncBaselineRecord();
-    record.localHash = localHash;
-    record.localSize = localSize;
-    record.localModifiedMs = localModifiedAt.millisecondsSinceEpoch;
-    _baselines[key] = record;
+    _hashCache[key] = LocalHashCacheEntry(
+      hash: hash,
+      size: size,
+      modifiedMs: modifiedAt.millisecondsSinceEpoch,
+    );
   }
 
   // ================= 持久化 =================
@@ -201,12 +208,26 @@ class SyncStateStore {
     try {
       final jsonMap =
           json.decode(await stateFile.readAsString()) as Map<String, dynamic>;
+      final version = jsonMap['version'] as int? ?? 1;
+
       final rawBaselines = jsonMap['baselines'];
       if (rawBaselines is Map) {
         for (final entry in rawBaselines.entries) {
           final value = entry.value;
           if (value is Map<String, dynamic>) {
             _baselines[entry.key as String] = SyncBaselineRecord.fromJson(
+              value,
+            );
+          }
+        }
+      }
+
+      final rawHashCache = jsonMap['hashCache'];
+      if (rawHashCache is Map) {
+        for (final entry in rawHashCache.entries) {
+          final value = entry.value;
+          if (value is Map<String, dynamic>) {
+            _hashCache[entry.key as String] = LocalHashCacheEntry.fromJson(
               value,
             );
           }
@@ -224,10 +245,49 @@ class SyncStateStore {
           }
         }
       }
+
+      // 旧版本把扫描得到的章节哈希写进了基线，需要还原为可正常比对的状态
+      if (version < _schemaVersion) _repairScannedChapterBaselines();
     } catch (e) {
       debugPrint('读取同步状态失败: $e');
     }
   }
+
+  /// 修复基线中由扫描结果写入的章节记录
+  ///
+  /// 章节哈希缓存曾直接写入同步基线，覆盖了记录上次同步结果的本地内容特征，
+  /// 使章节的本地改动无法再被识别。这里清除这些被覆盖的特征，
+  /// 使对应章节在下次同步时重新读取内容并与云端正确比对
+  void _repairScannedChapterBaselines() {
+    for (final entry in _baselines.entries.toList()) {
+      final key = entry.key;
+      if (!_isChapterFileKey(key)) continue;
+
+      final record = entry.value;
+      final syncedAt = record.syncedAt;
+
+      // 从未完成过一次同步的记录只是扫描缓存，不构成可比对的基线
+      if (syncedAt == null) {
+        _baselines.remove(key);
+        continue;
+      }
+
+      // 本地特征产生于上次同步之后，说明它来自扫描而非一次已完成的同步
+      final localModifiedMs = record.localModifiedMs;
+      if (localModifiedMs == null ||
+          localModifiedMs > syncedAt.millisecondsSinceEpoch) {
+        record
+          ..localHash = null
+          ..localSize = null
+          ..localModifiedMs = null;
+      }
+    }
+  }
+
+  /// 判断逻辑键是否为逐章同步中的章节正文文件
+  bool _isChapterFileKey(String key) =>
+      key.contains(_chaptersDirSegment) &&
+      key.endsWith(GlobalConstants.chapterFileExtension);
 
   /// 将同步状态保存到本机
   ///
@@ -242,6 +302,9 @@ class SyncStateStore {
       final jsonMap = <String, dynamic>{
         'version': _schemaVersion,
         'baselines': _baselines.map(
+          (key, value) => MapEntry(key, value.toJson()),
+        ),
+        'hashCache': _hashCache.map(
           (key, value) => MapEntry(key, value.toJson()),
         ),
         'entityBaselines': _entityBaselines.map(

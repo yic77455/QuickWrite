@@ -64,31 +64,6 @@ class ChapterArchiveMember {
   );
 }
 
-/// 章节正文哈希的缓存项
-///
-/// 章节以归档包为单位传输，不再作为独立的同步单元，
-/// 但逐章哈希仍是判断归档包是否变化的基础，因此单独缓存以避免每次同步重读全部章节文件
-class ChapterHashCacheEntry {
-  /// 缓存键
-  final String key;
-
-  /// 章节正文的内容哈希
-  final String hash;
-
-  /// 章节正文的字节数
-  final int size;
-
-  /// 章节正文的最后修改时间
-  final DateTime modifiedAt;
-
-  const ChapterHashCacheEntry({
-    required this.key,
-    required this.hash,
-    required this.size,
-    required this.modifiedAt,
-  });
-}
-
 /// 工作区索引结果
 ///
 /// 既包含当前已存在的本地逻辑文件，也提供「逻辑键 → 本地路径」与
@@ -110,7 +85,7 @@ class WorkspaceIndex {
   final Map<String, String> _dirMappings;
 
   /// 章节正文哈希缓存，供调用方写回状态存储
-  final List<ChapterHashCacheEntry> chapterHashCache;
+  final Map<String, LocalHashCacheEntry> chapterHashCache;
 
   const WorkspaceIndex({
     required this.files,
@@ -173,7 +148,7 @@ class WorkspaceIndex {
 /// - 用户自定义主题
 /// - 应用配置文件
 ///
-/// 为提高性能，文件内容哈希优先复用基线中记录的结果，
+/// 为提高性能，文件内容哈希优先复用哈希缓存或基线中记录的结果，
 /// 仅当文件大小或修改时间发生变化时才重新计算
 class WorkspaceIndexer {
   const WorkspaceIndexer();
@@ -184,6 +159,7 @@ class WorkspaceIndexer {
   ///
   /// [isar] 应用数据库实例
   /// [baselines] 同步基线，用于复用文件哈希并据此判断文件是否变化
+  /// [cachedHashes] 上次扫描记录的章节哈希，文件未变化时直接复用
   /// [packChapters] 是否把章节合并为归档包
   ///
   /// 只有坚果云这类限制请求次数的平台才需要归档包：整包上传用一次请求传输上百章；
@@ -191,21 +167,23 @@ class WorkspaceIndexer {
   Future<WorkspaceIndex> scan({
     required Isar isar,
     required Map<String, SyncBaselineRecord> baselines,
+    required Map<String, LocalHashCacheEntry> cachedHashes,
     bool packChapters = true,
   }) async {
     final files = <LocalSyncFile>[];
     final plainPaths = <String, String>{};
     final archiveMembers = <String, List<ChapterArchiveMember>>{};
     final dirMappings = <String, String>{};
-    final hashCache = <ChapterHashCacheEntry>[];
+    final collectedHashes = <String, LocalHashCacheEntry>{};
 
     await _collectBooks(
       isar: isar,
       baselines: baselines,
+      cachedHashes: cachedHashes,
       files: files,
       plainPaths: plainPaths,
       archiveMembers: archiveMembers,
-      hashCache: hashCache,
+      collectedHashes: collectedHashes,
       packChapters: packChapters,
     );
 
@@ -242,7 +220,7 @@ class WorkspaceIndexer {
       plainPaths: plainPaths,
       archiveMembers: archiveMembers,
       dirMappings: dirMappings,
-      chapterHashCache: hashCache,
+      chapterHashCache: collectedHashes,
     );
   }
 
@@ -252,10 +230,11 @@ class WorkspaceIndexer {
   Future<void> _collectBooks({
     required Isar isar,
     required Map<String, SyncBaselineRecord> baselines,
+    required Map<String, LocalHashCacheEntry> cachedHashes,
     required List<LocalSyncFile> files,
     required Map<String, String> plainPaths,
     required Map<String, List<ChapterArchiveMember>> archiveMembers,
-    required List<ChapterHashCacheEntry> hashCache,
+    required Map<String, LocalHashCacheEntry> collectedHashes,
     required bool packChapters,
   }) async {
     final books = await isar.bookModels.where().findAll();
@@ -285,9 +264,10 @@ class WorkspaceIndexer {
           chapters: chaptersByBook[book.uuid] ?? const <ChapterModel>[],
           bookFolder: bookFolder,
           baselines: baselines,
+          cachedHashes: cachedHashes,
           files: files,
           archiveMembers: archiveMembers,
-          hashCache: hashCache,
+          collectedHashes: collectedHashes,
         );
       } else {
         await _collectChapterFiles(
@@ -295,9 +275,10 @@ class WorkspaceIndexer {
           chapters: chaptersByBook[book.uuid] ?? const <ChapterModel>[],
           bookFolder: bookFolder,
           baselines: baselines,
+          cachedHashes: cachedHashes,
           files: files,
           plainPaths: plainPaths,
-          hashCache: hashCache,
+          collectedHashes: collectedHashes,
         );
       }
 
@@ -352,9 +333,10 @@ class WorkspaceIndexer {
     required List<ChapterModel> chapters,
     required String bookFolder,
     required Map<String, SyncBaselineRecord> baselines,
+    required Map<String, LocalHashCacheEntry> cachedHashes,
     required List<LocalSyncFile> files,
     required Map<String, List<ChapterArchiveMember>> archiveMembers,
-    required List<ChapterHashCacheEntry> hashCache,
+    required Map<String, LocalHashCacheEntry> collectedHashes,
   }) async {
     if (chapters.isEmpty) return;
 
@@ -396,6 +378,7 @@ class WorkspaceIndexer {
           cacheKey,
           localPath,
           baselines,
+          cachedHashes: cachedHashes,
         );
 
         if (resolved == null) {
@@ -419,13 +402,10 @@ class WorkspaceIndexer {
             size: resolved.size,
           ),
         );
-        hashCache.add(
-          ChapterHashCacheEntry(
-            key: cacheKey,
-            hash: resolved.hash,
-            size: resolved.size,
-            modifiedAt: resolved.modifiedAt,
-          ),
+        collectedHashes[cacheKey] = LocalHashCacheEntry(
+          hash: resolved.hash,
+          size: resolved.size,
+          modifiedMs: resolved.modifiedAt.millisecondsSinceEpoch,
         );
 
         totalSize += resolved.size;
@@ -465,9 +445,10 @@ class WorkspaceIndexer {
     required List<ChapterModel> chapters,
     required String bookFolder,
     required Map<String, SyncBaselineRecord> baselines,
+    required Map<String, LocalHashCacheEntry> cachedHashes,
     required List<LocalSyncFile> files,
     required Map<String, String> plainPaths,
-    required List<ChapterHashCacheEntry> hashCache,
+    required Map<String, LocalHashCacheEntry> collectedHashes,
   }) async {
     if (chapters.isEmpty) return;
 
@@ -484,7 +465,12 @@ class WorkspaceIndexer {
       // 无论文件是否存在都登记路径，便于远端新增的同名章节定位落点
       plainPaths[key] = localPath;
 
-      final resolved = await _resolveFileContent(key, localPath, baselines);
+      final resolved = await _resolveFileContent(
+        key,
+        localPath,
+        baselines,
+        cachedHashes: cachedHashes,
+      );
       if (resolved == null) continue;
 
       files.add(
@@ -496,13 +482,10 @@ class WorkspaceIndexer {
           contentHash: resolved.hash,
         ),
       );
-      hashCache.add(
-        ChapterHashCacheEntry(
-          key: key,
-          hash: resolved.hash,
-          size: resolved.size,
-          modifiedAt: resolved.modifiedAt,
-        ),
+      collectedHashes[key] = LocalHashCacheEntry(
+        hash: resolved.hash,
+        size: resolved.size,
+        modifiedMs: resolved.modifiedAt.millisecondsSinceEpoch,
       );
     }
   }
@@ -605,17 +588,30 @@ class WorkspaceIndexer {
 
   /// 解析文件内容特征
   ///
-  /// 文件不存在时返回 null；文件大小与修改时间均与基线一致时，
-  /// 直接复用基线中的哈希，避免重复读取文件内容
+  /// 文件不存在时返回 null；文件大小与修改时间均与哈希缓存或基线一致时，
+  /// 直接复用已记录的哈希，避免重复读取文件内容
   Future<_ResolvedContent?> _resolveFileContent(
     String key,
     String localPath,
-    Map<String, SyncBaselineRecord> baselines,
-  ) async {
+    Map<String, SyncBaselineRecord> baselines, {
+    Map<String, LocalHashCacheEntry> cachedHashes = const {},
+  }) async {
     final file = File(localPath);
     if (!await file.exists()) return null;
 
     final stat = await file.stat();
+
+    // 哈希缓存记录的是最近一次扫描的结果，优先复用
+    final cached = cachedHashes[key];
+    if (cached != null &&
+        cached.matches(size: stat.size, modifiedAt: stat.modified)) {
+      return _ResolvedContent(
+        hash: cached.hash,
+        size: stat.size,
+        modifiedAt: stat.modified,
+      );
+    }
+
     final baseline = baselines[key];
     if (baseline != null &&
         !baseline.deleted &&
