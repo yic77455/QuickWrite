@@ -172,6 +172,23 @@ class SyncStateStore {
       ..syncedAt = DateTime.now();
   }
 
+  /// 仅更新本地内容特征，保留基线的其余字段
+  ///
+  /// 用于扫描阶段回写哈希缓存：章节逐章同步时，缓存键本身就是文件的逻辑键，
+  /// 若直接覆盖整条基线会丢掉远端内容标识，导致下次同步被误判为两端都改动
+  void updateLocalHash({
+    required String key,
+    required String localHash,
+    required int localSize,
+    required DateTime localModifiedAt,
+  }) {
+    final record = _baselines[key] ?? SyncBaselineRecord();
+    record.localHash = localHash;
+    record.localSize = localSize;
+    record.localModifiedMs = localModifiedAt.millisecondsSinceEpoch;
+    _baselines[key] = record;
+  }
+
   // ================= 持久化 =================
 
   /// 从本机加载同步状态

@@ -1609,8 +1609,9 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
   /// 持久化完成回调：统计写入数据库后通知首页/书架刷新
   ///
   /// 由 WritingSessionTracker 在字数或时长落库后触发。
+  /// 这里只是统计数据变化，正文并未改动，因此不触发云同步
   void _onSessionFlushed() {
-    _notifyBookshelfRefresh();
+    _notifyBookshelfRefresh(contentChanged: false);
   }
 
   /// 初始化码字会话追踪器

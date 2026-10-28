@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:quick_write/core/services/cloud_sync/chapter_archive.dart';
 import 'package:quick_write/core/services/cloud_sync/sync_models.dart';
 import 'package:quick_write/core/services/cloud_sync/sync_state_store.dart';
-import 'package:quick_write/core/services/cloud_sync/webdav_client.dart';
+import 'package:quick_write/core/services/cloud_sync/remote_storage.dart';
 import 'package:quick_write/core/services/cloud_sync/workspace_indexer.dart';
 
 /// 云同步传输执行器
@@ -19,13 +19,13 @@ import 'package:quick_write/core/services/cloud_sync/workspace_indexer.dart';
 /// 逻辑文件分为两类：章节归档包与普通文件，两者的落地方式不同
 class SyncTransfer {
   SyncTransfer({
-    required WebDavClient webdav,
+    required RemoteStorage storage,
     required SyncStateStore stateStore,
-  }) : _webdav = webdav,
+  }) : _storage = storage,
        _stateStore = stateStore;
 
   /// 远端通信客户端
-  final WebDavClient _webdav;
+  final RemoteStorage _storage;
 
   /// 本机同步状态存储
   final SyncStateStore _stateStore;
@@ -71,19 +71,28 @@ class SyncTransfer {
   /// 上传后的基线由引擎在回读远端标识后统一写入，
   /// 避免为每个文件额外发起一次属性查询，从而减少请求次数
   Future<void> _uploadPlain(SyncPlanItem item) async {
-    final remotePath = _webdav.remotePathOf(item.key);
+    final remotePath = _storage.remotePathOf(item.key);
     final tempPath = '$remotePath$kSyncTempSuffix';
 
-    await _webdav.uploadFile(item.local!.localPath, tempPath);
-    await _webdav.moveFile(tempPath, remotePath);
+    await _storage.uploadFile(item.local!.localPath, tempPath);
+    await _storage.moveFile(tempPath, remotePath);
   }
 
   /// 下载远端文件覆盖本地
   Future<void> _downloadPlain(SyncPlanItem item, WorkspaceIndex index) async {
     final targetPath = _requireLocalPath(item.key, index);
     final remote = item.remote!;
+    final local = item.local;
 
     final preparedHash = await _prepareDownload(targetPath, remote);
+
+    // 冲突检测：下载期间本地文件可能已被保存动作改写（实时同步下尤其常见），
+    // 此时放弃覆盖并交由下一次同步按「两端都改动」处理，避免丢掉用户最新的内容
+    if (local != null && await _changedSincePlan(targetPath, local)) {
+      await _discardPrepared(targetPath);
+      throw StateError('本地内容在同步期间已更新，本次未覆盖: ${item.key}');
+    }
+
     final committed = await _commitDownload(targetPath, preparedHash);
     _stateStore.recordSynced(
       key: item.key,
@@ -148,9 +157,9 @@ class SyncTransfer {
     final manifest = buildManifest(sources);
     final bytes = await packArchive(manifest, sources);
 
-    final remotePath = _webdav.remotePathOf(item.key);
-    await _webdav.uploadBytes(bytes, '$remotePath$kSyncTempSuffix');
-    await _webdav.moveFile('$remotePath$kSyncTempSuffix', remotePath);
+    final remotePath = _storage.remotePathOf(item.key);
+    await _storage.uploadBytes(bytes, '$remotePath$kSyncTempSuffix');
+    await _storage.moveFile('$remotePath$kSyncTempSuffix', remotePath);
   }
 
   /// 下载章节归档包并展开到本地
@@ -216,7 +225,7 @@ class SyncTransfer {
   ///
   /// 校验在写入本地之前完成，任一章节损坏都不会改动本地文件
   Future<ChapterArchiveContent> _fetchArchiveContent(String key) async {
-    final bytes = await _webdav.downloadBytes(_webdav.remotePathOf(key));
+    final bytes = await _storage.downloadBytes(_storage.remotePathOf(key));
     final content = unpackArchive(bytes);
     verifyArchiveContent(content);
     return content;
@@ -254,13 +263,21 @@ class SyncTransfer {
         continue;
       }
 
-      if (preserveLocal) {
-        final localHash = localHashByUuid[entry.uuid];
-        if (localHash != null && localHash != entry.hash) {
-          final conflict = _conflictCopyOf(targetPath);
-          await File(targetPath).copy(conflict.copyPath);
-          copies.add(conflict);
-        }
+      // 以磁盘上的实际内容为准：同步期间本地可能刚保存过，
+      // 索引中的哈希已经过期，直接覆盖会丢掉用户最新的修改
+      final scannedHash = localHashByUuid[entry.uuid];
+      final currentHash = await _hashOfFile(targetPath) ?? scannedHash;
+      final changedSinceScan =
+          currentHash != null &&
+          scannedHash != null &&
+          currentHash != scannedHash;
+
+      if ((preserveLocal || changedSinceScan) &&
+          currentHash != null &&
+          currentHash != entry.hash) {
+        final conflict = _conflictCopyOf(targetPath);
+        await File(targetPath).copy(conflict.copyPath);
+        copies.add(conflict);
       }
 
       await _writeBytesAtomically(targetPath, content.chapters[entry.uuid]!);
@@ -333,7 +350,7 @@ class SyncTransfer {
       await tempFile.delete();
     }
 
-    await _webdav.downloadFile(_webdav.remotePathOf(remote.key), tempFile.path);
+    await _storage.downloadFile(_storage.remotePathOf(remote.key), tempFile.path);
 
     // 校验下载结果的完整性，服务端未提供大小时跳过该校验
     final downloadedSize = await tempFile.length();
@@ -372,6 +389,27 @@ class SyncTransfer {
   }
 
   // ================= 工具方法 =================
+
+  /// 判断本地文件在生成同步计划之后是否又被改动
+  ///
+  /// 用「大小 + 修改时间」判断，与索引阶段的哈希缓存判据保持一致，
+  /// 命中时无需读取文件内容
+  Future<bool> _changedSincePlan(String targetPath, LocalSyncFile expected) async {
+    final file = File(targetPath);
+    if (!await file.exists()) return false;
+    final stat = await file.stat();
+    return stat.size != expected.size ||
+        stat.modified.millisecondsSinceEpoch !=
+            expected.modifiedAt.millisecondsSinceEpoch;
+  }
+
+  /// 计算本地文件的内容哈希，文件不存在时返回 null
+  Future<String?> _hashOfFile(String path) async {
+    final file = File(path);
+    if (!await file.exists()) return null;
+    final digest = await sha256.bind(file.openRead()).first;
+    return digest.toString();
+  }
 
   /// 获取逻辑键对应的本地路径，无法定位时抛出异常
   String _requireLocalPath(String key, WorkspaceIndex index) {

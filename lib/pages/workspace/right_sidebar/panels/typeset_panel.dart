@@ -165,7 +165,7 @@ class _TypesetPanelState extends State<TypesetPanel> {
         const SettingDivider(),
         SwitchSettingItem(
           icon: Icons.space_bar_rounded,
-          label: '全角空格缩进',
+          label: '使用空格缩进',
           // 首行缩进关闭时，缩进方式无意义，禁用该项
           enabled: isFirstLineIndentEnabled,
           value: isFullWidthSpaceIndentEnabled,

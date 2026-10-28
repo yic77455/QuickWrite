@@ -8,8 +8,8 @@ import 'widgets/widgets.dart';
 
 /// 云同步页面
 ///
-/// 提供 WebDAV 云同步的完整配置界面，包含以下分组：
-/// - 服务连接：服务器地址、账号密码等连接信息
+/// 提供云端同步的完整配置界面，支持 WebDAV 与 S3 两种协议，包含以下分组：
+/// - 服务连接：协议选择与连接参数
 /// - 同步设置：自动同步行为与同步范围
 /// - 数据同步：同步状态展示与手动同步入口
 /// - 云端数据管理：云端数据清理
@@ -64,7 +64,7 @@ class CloudSyncPage extends StatelessWidget {
       ),
     );
     final subtitle = Text(
-      '通过 WebDAV 将书籍和应用数据备份到云端，实现多设备间同步',
+      '通过 WebDAV 或 S3 将书籍和应用数据备份到云端，实现多设备间同步',
       style: context.bodyMedium?.copyWith(
         color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
       ),

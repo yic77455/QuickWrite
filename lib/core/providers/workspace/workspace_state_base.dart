@@ -33,11 +33,14 @@ abstract class WorkspaceStateBase extends ChangeNotifier {
   /// 在书籍内容发生持久化变化（保存章节、删除章节、删除设定项等）后调用，
   /// 既用于刷新书架的最近编辑与字数显示，也让云同步服务按需安排一次同步。
   /// 独立窗口模式下通过 IPC 通知主窗口；同窗口模式下直接调用书架刷新回调。
-  void _notifyBookshelfRefresh() {
+  ///
+  /// [contentChanged] 为 false 表示只是统计数据（码字时长等）落库，
+  /// 正文并未变化：此时仍需刷新书架，但不应触发一次云同步
+  void _notifyBookshelfRefresh({bool contentChanged = true}) {
     if (_isDisposed) return;
 
     // 内容已经落盘，交由云同步服务判断是否需要安排同步
-    CloudSyncService.instance.notifyLocalChange();
+    if (contentChanged) CloudSyncService.instance.notifyLocalChange();
 
     if (_mainWindowId != null) {
       MultiWindowService.instance.notifyBookUpdated(_mainWindowId!);

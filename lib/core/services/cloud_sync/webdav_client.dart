@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:quick_write/core/services/cloud_sync/remote_storage.dart';
 import 'package:quick_write/core/services/cloud_sync/sync_models.dart';
 import 'package:webdav_client/webdav_client.dart' as webdav;
 
@@ -15,7 +16,7 @@ import 'package:webdav_client/webdav_client.dart' as webdav;
 /// - 请求节流与限流退避，避免触发网盘的访问频率限制
 ///
 /// 该类只负责与远端服务器的通信，不感知具体的同步业务逻辑
-class WebDavClient {
+class WebDavClient implements RemoteStorage {
   // ================= 常量定义 =================
 
   /// 建立连接的超时时间（毫秒）
@@ -80,6 +81,7 @@ class WebDavClient {
   final String password;
 
   /// 远端同步根目录（已规范化，无首尾斜杠）
+  @override
   final String remoteDir;
 
   /// 底层 WebDAV 客户端（首次使用时创建）
@@ -108,42 +110,34 @@ class WebDavClient {
   }
 
   /// 判断异常是否由服务端请求频率限制引起
-  static bool isRateLimitError(Object error) {
-    if (error is! DioException) return false;
-    final status = error.response?.statusCode;
-    return status == 429 || status == 503;
-  }
+  ///
+  /// 保留该入口便于调用方以协议无关的方式判断错误类型，
+  /// 具体实现由 [isRemoteRateLimitError] 统一提供
+  static bool isRateLimitError(Object error) => isRemoteRateLimitError(error);
 
   /// 将通信过程中的异常转换为便于用户理解的提示文本
-  static String describeError(Object error) {
-    if (error is DioException) {
-      final status = error.response?.statusCode;
-      if (status == 401 || status == 403) return '账号或密码错误';
-      if (status == 404) return '服务器地址或远端目录不存在';
-      if (status == 429 || status == 503) return '服务端请求过于频繁，请稍后再试';
-      if (status != null) return '服务器返回错误（HTTP $status）';
-      // 未收到响应时通常是网络异常或请求超时
-      return '无法连接到服务器，请检查网络与服务器地址';
-    }
-    return error.toString();
-  }
+  static String describeError(Object error) => describeRemoteError(error);
 
   /// 测试与服务器的连接是否可用
+  @override
   Future<void> ping() => _withRetry(() => _client.ping());
 
   /// 确保远端目录存在（不存在时逐级创建）
+  @override
   Future<void> ensureDirectory(String path) =>
       _withRetry(() => _client.mkdirAll(path));
 
   /// 清除已创建目录的缓存
   ///
   /// 远端目录被整体删除后，缓存中的目录已不存在，需要重新创建
+  @override
   void resetDirectoryCache() => _ensuredDirs.clear();
 
   /// 递归列出远端同步目录下的全部文件
   ///
   /// WebDAV 的单次列举只覆盖一层目录，因此按目录逐层展开。
   /// 返回结果中的逻辑键为相对于同步根目录的路径，内部目录不会进入结果
+  @override
   Future<List<RemoteSyncFile>> listFilesRecursive() async {
     final files = <RemoteSyncFile>[];
     // 待展开的目录队列，元素为相对于同步根目录的目录路径，空字符串表示根目录
@@ -186,6 +180,7 @@ class WebDavClient {
   }
 
   /// 释放底层连接资源
+  @override
   void dispose() {
     _rawClient?.c.close(force: true);
     _rawClient = null;
@@ -195,12 +190,14 @@ class WebDavClient {
   // ================= 文件传输 =================
 
   /// 将逻辑键转换为远端绝对路径
+  @override
   String remotePathOf(String key) => '$remoteDir/$key';
 
   /// 上传本地文件到远端
   ///
   /// 直接发起 PUT，跳过 webdav_client 内部为兼容摘要认证而附加的预检请求，
   /// 从而显著减少请求次数
+  @override
   Future<void> uploadFile(String localPath, String remotePath) async {
     await _ensureParentDirectory(remotePath);
 
@@ -217,6 +214,7 @@ class WebDavClient {
   /// 上传内存中的字节数据到远端
   ///
   /// 用于上传归档包等已在内存中生成的内容
+  @override
   Future<void> uploadBytes(Uint8List bytes, String remotePath) async {
     await _ensureParentDirectory(remotePath);
 
@@ -230,6 +228,7 @@ class WebDavClient {
   }
 
   /// 下载远端文件到内存
+  @override
   Future<Uint8List> downloadBytes(String remotePath) async {
     final response = await _request(
       'GET',
@@ -256,6 +255,7 @@ class WebDavClient {
   }
 
   /// 下载远端文件到内存，文件不存在时返回 null
+  @override
   Future<Uint8List?> downloadBytesIfExists(String remotePath) async {
     try {
       return await downloadBytes(remotePath);
@@ -266,6 +266,7 @@ class WebDavClient {
   }
 
   /// 列出远端指定目录下的直接文件名，目录不存在时返回空列表
+  @override
   Future<List<String>> listFileNames(String remotePath) async {
     final entries = await _listEntries(remotePath);
     return [
@@ -276,6 +277,7 @@ class WebDavClient {
   }
 
   /// 列出远端指定目录下的子目录名，目录不存在时返回空列表
+  @override
   Future<List<String>> listDirectoryNames(String remotePath) async {
     final entries = await _listEntries(remotePath);
     return [
@@ -289,6 +291,7 @@ class WebDavClient {
   ///
   /// 目录内可能包含大量条目，优先请求服务端整目录删除；
   /// 服务端不支持时退化为逐个条目删除
+  @override
   Future<void> deleteDirectoryRecursive(String remotePath) async {
     if (await _tryDeleteCollection(remotePath)) return;
 
@@ -319,6 +322,7 @@ class WebDavClient {
   ///
   /// 只清理目录内的内容并保留目录本身，
   /// 避免因服务端不允许删除该目录而误报失败
+  @override
   Future<void> clearDirectory(String remotePath) async {
     final entries = await _listEntries(remotePath);
     for (final entry in entries) {
@@ -358,6 +362,7 @@ class WebDavClient {
   }
 
   /// 下载远端文件到本地指定路径
+  @override
   Future<void> downloadFile(String remotePath, String localPath) =>
       _withRetry(() => _client.read2File(remotePath, localPath));
 
@@ -366,6 +371,7 @@ class WebDavClient {
   /// 部分服务端不支持 MOVE 覆盖已存在的目标，遇到目标冲突时先删除目标再重试，
   /// 从而在保留 MOVE 原子替换特性的同时兼容这类服务端。
   /// 直接发起 MOVE，跳过内部预检请求
+  @override
   Future<void> moveFile(
     String fromPath,
     String toPath, {
@@ -383,6 +389,7 @@ class WebDavClient {
   /// 删除远端文件
   ///
   /// 文件已不存在时视为删除成功，便于重试
+  @override
   Future<void> deleteFile(String remotePath) async {
     try {
       await _request('DELETE', remotePath);
@@ -416,6 +423,7 @@ class WebDavClient {
   }
 
   /// 读取远端文件属性
+  @override
   Future<RemoteSyncFile> fileInfo(String key) async {
     final file = await _withRetry(() => _client.readProps(remotePathOf(key)));
     return RemoteSyncFile(
@@ -427,6 +435,7 @@ class WebDavClient {
   }
 
   /// 判断远端文件是否存在
+  @override
   Future<bool> exists(String key) async {
     try {
       await _client.readProps(remotePathOf(key));

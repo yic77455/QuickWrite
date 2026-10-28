@@ -13,7 +13,7 @@ import 'package:quick_write/core/services/cloud_sync/metadata_codec.dart';
 import 'package:quick_write/core/services/cloud_sync/metadata_merger.dart';
 import 'package:quick_write/core/services/cloud_sync/metadata_types.dart';
 import 'package:quick_write/core/services/cloud_sync/sync_state_store.dart';
-import 'package:quick_write/core/services/cloud_sync/webdav_client.dart';
+import 'package:quick_write/core/services/cloud_sync/remote_storage.dart';
 import 'package:quick_write/core/services/recycle_item_service.dart';
 import 'package:quick_write/core/utils/relative_path_utils.dart';
 import 'package:uuid/uuid.dart';
@@ -70,15 +70,15 @@ class MetadataSyncResult {
 /// 按章节归档打包时两端才能得到相同的分块结果
 class MetadataSync {
   MetadataSync({
-    required WebDavClient webdav,
+    required RemoteStorage storage,
     required SyncStateStore stateStore,
     MetadataMerger merger = const MetadataMerger(),
-  }) : _webdav = webdav,
+  }) : _storage = storage,
        _stateStore = stateStore,
        _merger = merger;
 
   /// 远端通信客户端
-  final WebDavClient _webdav;
+  final RemoteStorage _storage;
 
   /// 本机同步状态存储
   final SyncStateStore _stateStore;
@@ -135,7 +135,7 @@ class MetadataSync {
     final global = await _readSnapshot(kGlobalMetadataFileName);
     final perBook = <String, MetadataSnapshot>{};
 
-    final fileNames = await _webdav.listFileNames(_booksMetaDirPath);
+    final fileNames = await _storage.listFileNames(_booksMetaDirPath);
     final bookFileNames = [
       for (final fileName in fileNames)
         if (fileName.endsWith('.gz')) fileName,
@@ -172,8 +172,8 @@ class MetadataSync {
 
   /// 读取单个元数据文件，文件不存在时返回 null
   Future<MetadataSnapshot?> _readSnapshot(String relativePath) async {
-    final bytes = await _webdav.downloadBytesIfExists(
-      _webdav.remotePathOf('$kMetadataDirName/$relativePath'),
+    final bytes = await _storage.downloadBytesIfExists(
+      _storage.remotePathOf('$kMetadataDirName/$relativePath'),
     );
     if (bytes == null) return null;
     return MetadataSnapshot.fromBytes(bytes);
@@ -369,9 +369,9 @@ class MetadataSync {
 
     final global = buildGlobalSnapshot(merged);
     if (global.canonicalString() != remote.global.canonicalString()) {
-      await _webdav.uploadBytes(
+      await _storage.uploadBytes(
         global.toBytes(),
-        _webdav.remotePathOf('$kMetadataDirName/$kGlobalMetadataFileName'),
+        _storage.remotePathOf('$kMetadataDirName/$kGlobalMetadataFileName'),
       );
       uploaded++;
     }
@@ -386,8 +386,8 @@ class MetadataSync {
       if (snapshot.isEmpty) {
         // 该书的元数据已全部清理，移除远端残留文件
         if (existing != null) {
-          await _webdav.deleteFile(
-            _webdav.remotePathOf(
+          await _storage.deleteFile(
+            _storage.remotePathOf(
               '$kMetadataDirName/$kBooksMetaSubDirName/$bookUuid.gz',
             ),
           );
@@ -400,9 +400,9 @@ class MetadataSync {
         continue;
       }
 
-      await _webdav.uploadBytes(
+      await _storage.uploadBytes(
         snapshot.toBytes(),
-        _webdav.remotePathOf(
+        _storage.remotePathOf(
           '$kMetadataDirName/$kBooksMetaSubDirName/$bookUuid.gz',
         ),
       );
@@ -423,7 +423,7 @@ class MetadataSync {
   Future<List<String>> findDeletableBookDirs(Set<String> deletedBookUuids) async {
     if (deletedBookUuids.isEmpty) return const [];
 
-    final remoteDirs = await _webdav.listDirectoryNames(_booksContentDirPath);
+    final remoteDirs = await _storage.listDirectoryNames(_booksContentDirPath);
     return [
       for (final dirName in remoteDirs)
         if (deletedBookUuids.contains(dirName)) dirName,
@@ -438,7 +438,7 @@ class MetadataSync {
 
     for (final dirName in dirNames) {
       try {
-        await _webdav.deleteDirectoryRecursive(
+        await _storage.deleteDirectoryRecursive(
           '$_booksContentDirPath/$dirName',
         );
         removedCount++;
@@ -548,10 +548,10 @@ class MetadataSync {
 
   /// 按书籍存放的元数据目录绝对路径
   String get _booksMetaDirPath =>
-      _webdav.remotePathOf('$kMetadataDirName/$kBooksMetaSubDirName');
+      _storage.remotePathOf('$kMetadataDirName/$kBooksMetaSubDirName');
 
   /// 书籍正文目录的绝对路径
-  String get _booksContentDirPath => _webdav.remotePathOf('books');
+  String get _booksContentDirPath => _storage.remotePathOf('books');
 }
 
 /// 远端元数据
