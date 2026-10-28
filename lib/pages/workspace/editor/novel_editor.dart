@@ -47,15 +47,6 @@ class NovelEditor extends StatefulWidget {
   /// 颜色方案
   final ColorScheme colorScheme;
 
-  /// 初始滚动位置
-  final double initialScrollOffset;
-
-  /// 滚动位置变化回调
-  final ValueChanged<double>? onScrollOffsetChanged;
-
-  /// 初始光标位置
-  final TextSelection? initialSelection;
-
   /// 光标位置变化回调（使用扁平偏移量）
   final ValueChanged<TextSelection>? onSelectionChanged;
 
@@ -85,9 +76,6 @@ class NovelEditor extends StatefulWidget {
     this.onEditEvent,
     this.onChapterTitleChanged,
     required this.colorScheme,
-    this.initialScrollOffset = 0.0,
-    this.onScrollOffsetChanged,
-    this.initialSelection,
     this.onSelectionChanged,
     this.initialScrollToCursor = false,
     this.onSave,
@@ -264,7 +252,6 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     _scrollController = SyncScrollController(onApplyContentDimensions: _onApplyContentDimensions);
     _codeScrollController = CodeScrollController(verticalScroller: _scrollController);
     _scrollGuard = EditorScrollGuard(_scrollController);
-    _scrollController.addListener(_onScrollChanged);
     _indentPolicy = ReEditorIndentPolicy(controller: widget.controller);
     _toolbarController = PlatformCapabilities.isMobile
         ? MobileSelectionToolbarController(builder: _buildMobileSelectionToolbar)
@@ -308,7 +295,6 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   void dispose() {
     _viewportRepaintTimer?.cancel();
     _scrollGuard.dispose();
-    _scrollController.removeListener(_onScrollChanged);
     widget.controller.removeListener(_onControllerChanged);
     _focusNode.removeListener(_onFocusChanged);
     SettingsService.instance.removeListener(_onSettingsChanged);
@@ -433,24 +419,6 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) widget.controller.forceRepaint();
     });
-  }
-
-  /// 编辑器当前的滚动位置
-  ///
-  /// 编辑器滚动视图重建的同一帧内，滚动控制器可能短暂挂载新旧两个位置，
-  /// 此时读取偏移会触发断言，因此仅在恰好挂载一个位置时返回。
-  ScrollPosition? get _editorScrollPosition {
-    final List<ScrollPosition> positions = _scrollController.positions.toList();
-    return positions.length == 1 ? positions.first : null;
-  }
-
-  /// 滚动位置变化时通知父组件
-  void _onScrollChanged() {
-    if (widget.onScrollOffsetChanged == null) return;
-    final ScrollPosition? position = _editorScrollPosition;
-    if (position != null) {
-      widget.onScrollOffsetChanged!(position.pixels);
-    }
   }
 
   /// 内容或选区变化时通知父组件

@@ -1272,7 +1272,8 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
   /// 保存当前打开的标签页会话到缓存
   ///
   /// 仅保存可恢复的章节与设定标签页（跳过只读的备份预览标签页），
-  /// 同时记录当前选中的标签页，供下次打开作品时恢复
+  /// 同时记录当前选中的标签页与每个标签页的光标位置，
+  /// 供下次打开作品时回到上次的工作位置
   Future<void> saveTabSession() async {
     if (_currentBook == null) return;
 
@@ -1283,6 +1284,7 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
         id: tab.id,
         title: tab.title,
         type: tab.type.name,
+        cursorOffset: tab.cursorPosition?.baseOffset,
       ));
     }
 
@@ -1303,7 +1305,8 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
   /// 按设置恢复上次退出时打开的标签页
   ///
   /// 在书籍数据加载完成后调用：读取缓存中的标签页会话，
-  /// 过滤掉已被删除的章节/设定后重建标签页，并恢复退出时选中的标签页。
+  /// 过滤掉已被删除的章节/设定后重建标签页，并恢复退出时选中的标签页，
+  /// 同时带入每个标签页退出时的光标位置（滚动位置由编辑器在定位光标时自动跟随）。
   /// 由 [WorkspaceProvider.initialize] 在初始化末尾调用。
   void _restoreTabSessionIfEnabled() {
     if (!SettingsService.instance.restoreTabsOnOpenWork) return;
@@ -1328,6 +1331,7 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
           id: chapter.uuid,
           title: chapter.title,
           type: EditorTabType.chapter,
+          cursorPosition: _restoredCursorPosition(entry),
         ));
       } else if (type == EditorTabType.settings) {
         final item = _settingItems.where((i) => i.uuid == entry.id).firstOrNull;
@@ -1346,6 +1350,23 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
         ? 0
         : _openedTabs.indexWhere((t) => t.id == savedCurrentId);
     if (_currentTabIndex < 0) _currentTabIndex = 0;
+  }
+
+  /// 计算恢复标签页时应带入的光标位置
+  ///
+  /// 优先取会话条目中记录的光标偏移量；旧版本缓存未记录该字段时，
+  /// 回退到章节光标缓存（该缓存在切换、关闭与保存章节时都会写入）。
+  /// 均无记录时返回 null，由「打开章节时」的设置决定定位位置。
+  TextSelection? _restoredCursorPosition(TabSessionEntry entry) {
+    final int? offset = entry.cursorOffset ??
+        ChapterCursorCacheService.instance
+            .getCursorPosition(
+              bookUuid: _currentBook!.uuid,
+              chapterUuid: entry.id,
+            )
+            ?.offset;
+    if (offset == null || offset < 0) return null;
+    return TextSelection.collapsed(offset: offset);
   }
 
   /// 将缓存的标签页类型名称解析为枚举值

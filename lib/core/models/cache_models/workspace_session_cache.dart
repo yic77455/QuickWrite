@@ -92,7 +92,8 @@ class BookTabSession {
 
 /// 标签页会话条目
 ///
-/// 仅记录恢复标签页所需的最小信息：标识、标题与类型
+/// 记录恢复标签页所需的信息：标识、标题、类型，
+/// 以及退出时的光标位置，供再次打开作品时回到上次的工作位置。
 class TabSessionEntry {
   /// 标签页唯一标识（章节ID或设定ID）
   final String id;
@@ -103,10 +104,17 @@ class TabSessionEntry {
   /// 标签页类型（EditorTabType 的枚举名称）
   final String type;
 
+  /// 退出时的光标偏移量（字符位置）
+  ///
+  /// 为 null 表示未记录（如该标签页在退出前从未打开过），
+  /// 恢复时改由章节光标缓存或「打开章节时」设置决定定位位置。
+  final int? cursorOffset;
+
   const TabSessionEntry({
     required this.id,
     required this.title,
     required this.type,
+    this.cursorOffset,
   });
 
   /// 从 JSON Map 创建实例
@@ -115,6 +123,7 @@ class TabSessionEntry {
       id: json['id'] as String? ?? '',
       title: json['title'] as String? ?? '',
       type: json['type'] as String? ?? '',
+      cursorOffset: (json['cursorOffset'] as num?)?.toInt(),
     );
   }
 
@@ -124,6 +133,7 @@ class TabSessionEntry {
       'id': id,
       'title': title,
       'type': type,
+      'cursorOffset': cursorOffset,
     };
   }
 }

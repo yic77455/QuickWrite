@@ -136,10 +136,16 @@ class _EditorContainerState extends State<EditorContainer> {
         });
 
         // 计算初始光标位置：
+        // 恢复标签页会话时按记录的光标位置还原；
         // 备份预览标签页置于开头；其余标签页按用户设置的「打开章节时」模式决定
         int caretOffset;
+        final restoredCursor = tab.cursorPosition;
         if (tab.type == EditorTabType.backupPreview) {
           caretOffset = 0;
+        } else if (restoredCursor != null) {
+          // 会话恢复的标签页优先还原退出时的光标位置，不受「打开章节时」设置影响
+          caretOffset = restoredCursor.baseOffset.clamp(0, content.length);
+          debugPrint('恢复会话光标位置: ${tab.title}, offset: $caretOffset');
         } else {
           final cursorMode = SettingsService.instance.openChapterCursorMode;
           if (cursorMode == 'end') {
@@ -190,6 +196,12 @@ class _EditorContainerState extends State<EditorContainer> {
 
         // 内容加载完成后，如果查找替换栏处于打开状态，刷新查找结果
         provider.refreshFindIfVisible(resetIndex: true);
+
+        // 恢复标签页会话时，内容载入后让视口跟随还原的光标，
+        // 避免长章节中光标落在视口外（编辑器给选区赋值时不会自动滚动）
+        if (restoredCursor != null) {
+          _scrollToRestoredCursor(tab);
+        }
       }
     } catch (e) {
       debugPrint('加载内容失败: $e');
@@ -220,6 +232,20 @@ class _EditorContainerState extends State<EditorContainer> {
     }
   }
   
+  /// 让视口滚动到会话还原的光标位置
+  ///
+  /// 内容与选区是程序化写入的，编辑器不会自动滚动，因此需要显式请求一次；
+  /// 滚动由编辑器在下一帧执行，此时内容已完成排版。
+  void _scrollToRestoredCursor(EditorTab tab) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final state = tab.editorKey.currentState;
+      if (state is NovelEditorState) {
+        state.scrollToCursor();
+      }
+    });
+  }
+
   /// 根据 UUID 查找章节
   ChapterModel? _findChapterByUuid(List<ChapterModel> chapters, String uuid) {
     try {
@@ -445,6 +471,10 @@ class _EditorContainerState extends State<EditorContainer> {
           return const SizedBox.shrink();
         }
 
+        // 会话恢复的标签页在重建时已带入退出时的光标位置，
+        // 载入内容后由视口跟随该光标，不再按「打开章节时」设置跳转
+        final bool restoredFromSession = tab.cursorPosition != null;
+
         return NovelEditor(
           key: tab.editorKey,
           isActive: provider.currentTabIndex == index,
@@ -452,15 +482,13 @@ class _EditorContainerState extends State<EditorContainer> {
           spanBuilder: tab.spanBuilder,
           chapterTitleController: tab.chapterTitleController,
           colorScheme: colorScheme,
-          initialSelection: tab.cursorPosition,
           readOnly: tab.isReadOnly,
-          // 备份预览标签页不需要跳转到光标位置
+          // 备份预览标签页不需要跳转到光标位置；
+          // 会话恢复的标签页已还原光标并在载入后滚动到该处，此处不再重复跳转
           initialScrollToCursor: tab.type != EditorTabType.backupPreview &&
+              !restoredFromSession &&
               (SettingsService.instance.openChapterCursorMode == 'end' ||
               SettingsService.instance.openChapterCursorMode == 'lastEdit'),
-          onScrollOffsetChanged: (offset) {
-            tab.scrollOffset = offset;
-          },
           onSelectionChanged: (selection) {
             tab.cursorPosition = selection;
             // 防抖更新选中字数（通过 ValueNotifier 局部通知，不触发全局 Provider 重建）

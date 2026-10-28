@@ -431,9 +431,6 @@ class EditorTab {
   /// 光标位置（用于切换标签页时恢复光标）
   TextSelection? cursorPosition;
 
-  /// 滚动位置（用于切换标签页时恢复滚动位置）
-  double scrollOffset;
-
   /// 文本编辑控制器（保存光标位置、文本内容）
   ///
   /// 使用 re_editor 的行编辑控制器；对外交互通过扁平偏移量表示的选区进行，
@@ -503,7 +500,7 @@ class EditorTab {
     this.isModified = false,
     this.isPreview = false,
     this.isHovered = false,
-    this.scrollOffset = 0.0,
+    this.cursorPosition,
     this.textController,
     this.chapterTitleController,
     this.spanBuilder,

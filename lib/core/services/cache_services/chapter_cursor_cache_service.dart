@@ -8,7 +8,6 @@ import 'package:quick_write/core/services/cache_services/cache_service.dart';
 /// 
 /// 缓存内容包括：
 /// - 每本书每个章节的光标偏移量
-/// - 每个章节的滚动位置
 /// - 最后更新时间
 ///
 /// 使用方式：
@@ -21,7 +20,6 @@ import 'package:quick_write/core/services/cache_services/cache_service.dart';
 ///   bookUuid: 'book-uuid',
 ///   chapterUuid: 'chapter-uuid',
 ///   offset: 100,
-///   scrollOffset: 50.0,
 /// );
 ///
 /// // 获取光标位置

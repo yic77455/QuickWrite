@@ -65,7 +65,7 @@ class WritingSessionTracker extends ChangeNotifier {
   bool _isDisposed = false;
 
   /// 空闲判定阈值（秒）：超过此时间无编辑活动则视为空闲
-  static const int _idleThresholdSeconds = 60;
+  static const int _idleThresholdSeconds = 30;
 
   // ================= 持久化状态 =================
 
