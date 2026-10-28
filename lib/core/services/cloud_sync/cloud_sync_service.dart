@@ -37,6 +37,12 @@ class CloudSyncService extends ChangeNotifier {
   /// 留出时间让界面与数据库完成初始化，避免同步打断其他初始化流程
   static const Duration _startupSyncDelay = Duration(seconds: 5);
 
+  /// 打开书籍前等待同步完成的最长时间
+  ///
+  /// 同步耗时过长时不再等待，先让用户进入工作台，
+  /// 未处理完的部分会在后续同步中继续完成
+  static const Duration _bookOpenSyncTimeout = Duration(seconds: 3);
+
   // ================= 状态属性 =================
 
   /// 本机配置存储
@@ -590,6 +596,40 @@ class CloudSyncService extends ChangeNotifier {
   /// 当前是否需要处理退出时同步
   bool get willSyncOnExit =>
       _isInitialized && _config.isConnected && _config.syncOnExit;
+
+  /// 打开书籍前是否会执行一次同步
+  ///
+  /// 仅在实时同步模式下执行：该模式要求本机与云端保持最新状态，
+  /// 打开书籍前先拉取一次能避免读到其他设备已更新的旧内容；
+  /// 界面也据此决定是否展示等待提示
+  bool get willSyncBeforeOpeningBook =>
+      _canAutoSync &&
+      _config.isRealtimeSync &&
+      _pendingRisk == null &&
+      !_suppressRiskPrompt;
+
+  /// 打开书籍前同步一次
+  ///
+  /// 让工作台加载到云端的最新内容，避免读到其他设备已经更新过的版本；
+  /// 已有同步任务在执行时直接等待其结束。
+  /// 返回是否在等待时限内同步成功，超时或失败时由调用方提示用户后继续打开
+  Future<bool> syncBeforeOpeningBook() async {
+    if (!willSyncBeforeOpeningBook) return true;
+
+    final sync = _runningSync ?? syncNow();
+    try {
+      final result = await Future.any([
+        sync,
+        Future<CloudSyncResult?>.delayed(_bookOpenSyncTimeout, () => null),
+      ]);
+      // 结果为 null 表示等待超时，同步任务仍在后台继续执行
+      if (result == null) return false;
+      return result.success;
+    } catch (e) {
+      debugPrint('打开书籍前同步失败: $e');
+      return false;
+    }
+  }
 
   // ================= 同步设置更新 =================
 
