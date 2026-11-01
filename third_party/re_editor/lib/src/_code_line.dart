@@ -2107,16 +2107,20 @@ class _CodeLineEditingCache {
 
   /// 回到上一条记录
   ///
-  /// 正文取上一条记录的快照，选区取被撤销这条记录开始前的选区，
-  /// 因此操作前的选中范围能够原样恢复。
+  /// 正文取上一条记录的快照；选区取被撤销这条记录开始前的选区，因此操作前的选中范围能够原样恢复。
+  /// 折叠光标下的删除例外：此时光标应停在恢复出来的文字末尾。
   void undo() {
     final _CodeLineEditingCacheNode node = _node;
     if (node.pre == null) {
       return;
     }
+    final CodeLineEditingValue restored = node.pre!.value;
+    final CodeLineSelection selection = node.collapsedDeletion
+        ? _collapsedCaretAfterRestore(controller.value.codeLines, restored.codeLines)
+        : node.selectionBefore;
     _node = node.pre!;
-    controller.value = node.pre!.value.copyWith(
-      selection: node.selectionBefore,
+    controller.value = restored.copyWith(
+      selection: selection,
       composing: TextRange.empty,
     );
   }
@@ -2131,6 +2135,61 @@ class _CodeLineEditingCache {
     }
     _node = node;
     controller.value = node.value.copyWith(composing: TextRange.empty);
+  }
+
+  /// 计算撤销折叠光标下的删除后光标应停留的折叠位置
+  ///
+  /// 恢复出来的那段文字末尾即删除前的光标所在处，因此把光标放在恢复区域的末端。
+  static CodeLineSelection _collapsedCaretAfterRestore(
+    CodeLines before,
+    CodeLines after,
+  ) {
+    final String beforeText = _flatText(before);
+    final String afterText = _flatText(after);
+    final int limit = min(beforeText.length, afterText.length);
+    // 恢复区域 = [公共前缀, 去掉公共后缀后的结尾)
+    int prefix = 0;
+    while (prefix < limit &&
+        beforeText.codeUnitAt(prefix) == afterText.codeUnitAt(prefix)) {
+      prefix++;
+    }
+    int suffix = 0;
+    while (suffix < limit - prefix &&
+        beforeText.codeUnitAt(beforeText.length - suffix - 1) ==
+            afterText.codeUnitAt(afterText.length - suffix - 1)) {
+      suffix++;
+    }
+    final int endOffset = afterText.length - suffix;
+    if (endOffset <= prefix) {
+      return _selectionAtOffset(after, prefix);
+    }
+    return _selectionAtOffset(after, endOffset);
+  }
+
+  /// 把整段正文中的偏移换算为折叠选区（行号与行内偏移）
+  static CodeLineSelection _selectionAtOffset(CodeLines codeLines, int offset) {
+    int remain = offset;
+    for (int i = 0; i < codeLines.length; i++) {
+      final int length = codeLines[i].length;
+      if (remain <= length) {
+        return CodeLineSelection.collapsed(index: i, offset: remain);
+      }
+      remain -= length + 1;
+    }
+    final int last = codeLines.length - 1;
+    return CodeLineSelection.collapsed(index: last, offset: codeLines[last].length);
+  }
+
+  /// 把整段正文拼接为文本，用于比较撤销前后的正文差异
+  static String _flatText(CodeLines codeLines) {
+    final StringBuffer buffer = StringBuffer();
+    for (int i = 0; i < codeLines.length; i++) {
+      if (i > 0) {
+        buffer.write('\n');
+      }
+      buffer.write(codeLines[i].text);
+    }
+    return buffer.toString();
   }
 
   void clear() {
@@ -2158,12 +2217,18 @@ class _CodeLineEditingCache {
 
   void _onValueChanged() {
     final CodeLineEditingValue value = controller.value;
-    // 仅光标/选区或输入法组合区域变化不改变正文，不算一次编辑：
+    // 正文不变时通常只是光标/选区变化，不算一次编辑：
     // 撤销后移动光标（如右键定位）若追加新节点会截断重做链，
-    // 因此这里只记录当前选区，作为下一次操作撤销时要还原的位置
+    // 因此这里只记录当前选区，作为下一次操作撤销时要还原的位置。
+    // 例外是输入法提交：提交时正文可能不再变化，只清除组合区并更新光标，
+    // 这仍属于同一次输入，需要把光标写回该记录的快照。
     if (identical(_node.value.codeLines, value.codeLines) ||
         _node.value.codeLines.equals(value.codeLines)) {
-      _pendingSelectionBefore = value.selection;
+      if (_node.value.composing.isValid) {
+        _node.value = value;
+      } else {
+        _pendingSelectionBefore = value.selection;
+      }
       return;
     }
     if (_node.isInitial) {
