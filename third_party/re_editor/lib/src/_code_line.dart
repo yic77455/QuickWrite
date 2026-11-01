@@ -2082,9 +2082,19 @@ class _CodeLineEditingCache {
   /// 当前待记录的操作是否是折叠光标下的删除（即非选区删除）
   bool _markCollapsedDeletion = false;
 
-  _CodeLineEditingCache(this.controller) {
+  /// 下一次编辑操作开始前的选区
+  ///
+  /// 仅移动光标或调整选区不产生撤销记录，但会决定下一次操作撤销后要还原的位置，
+  /// 因此每次选区变化都记录在这里，另起记录时写入新节点。
+  CodeLineSelection _pendingSelectionBefore;
+
+  _CodeLineEditingCache(this.controller)
+      : _pendingSelectionBefore = controller.value.selection {
     controller.addListener(_onValueChanged);
-    _node = _CodeLineEditingCacheNode(controller.value);
+    _node = _CodeLineEditingCacheNode(
+      controller.value,
+      selectionBefore: controller.value.selection,
+    );
     _markNewRecord = false;
   }
 
@@ -2095,104 +2105,40 @@ class _CodeLineEditingCache {
   /// 当前撤销记录是否由折叠光标下的删除（即非选区删除）产生
   bool get currentRecordIsCollapsedDeletion => _node.collapsedDeletion;
 
-  void undo() {
-    if (_node.pre == null) {
-      return;
-    }
-    final CodeLines current = controller.value.codeLines;
-    // 被撤销的那条记录是否由非选区删除产生
-    final bool collapsedDeletion = _node.collapsedDeletion;
-    _node = _node.pre!;
-    final CodeLineEditingValue restored = _node.value;
-    controller.value = restored.copyWith(
-      selection: _selectionAfterChange(
-        current,
-        restored.codeLines,
-        collapseRestored: collapsedDeletion,
-      ),
-      composing: TextRange.empty,
-    );
-  }
-
-  void redo() {
-    if (_node.next == null) {
-      return;
-    }
-    final CodeLines current = controller.value.codeLines;
-    _node = _node.next!;
-    final CodeLineEditingValue restored = _node.value;
-    controller.value = restored.copyWith(
-      selection: _selectionAfterChange(current, restored.codeLines),
-      composing: TextRange.empty,
-    );
-  }
-
-  /// 按正文变化量计算撤销/恢复后的选区
+  /// 回到上一条记录
   ///
-  /// 发生变化的那段文字被选中，因此新增文字时光标位于其右边；
-  /// 正文变少时没有可选的文字，只把光标放在消失文字的左边。
-  /// [collapseRestored] 为真时不选中恢复出来的文字，只把光标放在其右边。
-  CodeLineSelection _selectionAfterChange(CodeLines before, CodeLines after,
-      {bool collapseRestored = false}) {
-    final String beforeText = _flatText(before);
-    final String afterText = _flatText(after);
-    final int limit = min(beforeText.length, afterText.length);
-    // 变化区间 = [公共前缀, 去掉公共后缀后的结尾)
-    int prefix = 0;
-    while (prefix < limit && beforeText.codeUnitAt(prefix) == afterText.codeUnitAt(prefix)) {
-      prefix++;
+  /// 正文取上一条记录的快照，选区取被撤销这条记录开始前的选区，
+  /// 因此操作前的选中范围能够原样恢复。
+  void undo() {
+    final _CodeLineEditingCacheNode node = _node;
+    if (node.pre == null) {
+      return;
     }
-    int suffix = 0;
-    while (suffix < limit - prefix &&
-        beforeText.codeUnitAt(beforeText.length - suffix - 1) ==
-            afterText.codeUnitAt(afterText.length - suffix - 1)) {
-      suffix++;
-    }
-    final CodeLineSelection start = _selectionAtOffset(after, prefix);
-    final int endOffset = afterText.length - suffix;
-    if (endOffset <= prefix) {
-      return start;
-    }
-    final CodeLineSelection end = _selectionAtOffset(after, endOffset);
-    if (collapseRestored) {
-      return end;
-    }
-    return CodeLineSelection(
-      baseIndex: start.baseIndex,
-      baseOffset: start.baseOffset,
-      extentIndex: end.baseIndex,
-      extentOffset: end.baseOffset,
+    _node = node.pre!;
+    controller.value = node.pre!.value.copyWith(
+      selection: node.selectionBefore,
+      composing: TextRange.empty,
     );
   }
 
-  /// 把整段正文中的偏移换算为折叠选区（行号与行内偏移）
-  static CodeLineSelection _selectionAtOffset(CodeLines codeLines, int offset) {
-    int remain = offset;
-    for (int i = 0; i < codeLines.length; i++) {
-      final int length = codeLines[i].length;
-      if (remain <= length) {
-        return CodeLineSelection.collapsed(index: i, offset: remain);
-      }
-      remain -= length + 1;
+  /// 前进到下一条记录
+  ///
+  /// 正文和选区都取下一条记录的快照，即该操作完成时的状态。
+  void redo() {
+    final _CodeLineEditingCacheNode? node = _node.next;
+    if (node == null) {
+      return;
     }
-    final int last = codeLines.length - 1;
-    return CodeLineSelection.collapsed(index: last, offset: codeLines[last].length);
-  }
-
-  /// 把整段正文拼接为文本，用于比较撤销/恢复前后的差异
-  static String _flatText(CodeLines codeLines) {
-    final StringBuffer buffer = StringBuffer();
-    for (int i = 0; i < codeLines.length; i++) {
-      if (i > 0) {
-        buffer.write('\n');
-      }
-      buffer.write(codeLines[i].text);
-    }
-    return buffer.toString();
+    _node = node;
+    controller.value = node.value.copyWith(composing: TextRange.empty);
   }
 
   void clear() {
-    _node = _CodeLineEditingCacheNode(controller.value);
+    _node = _CodeLineEditingCacheNode(
+      controller.value,
+      selectionBefore: controller.value.selection,
+    );
+    _pendingSelectionBefore = controller.value.selection;
     _markNewRecord = false;
     _markCollapsedDeletion = false;
   }
@@ -2204,21 +2150,20 @@ class _CodeLineEditingCache {
   /// 标记接下来的正文变化是否另起一条撤销记录
   ///
   /// [collapsedDeletion] 仅在 [flag] 为真时有意义，表示本次变化由
-  /// 折叠光标下的删除（即非选区删除）产生，撤销该记录时恢复的内容不带选区。
+  /// 折叠光标下的删除（即非选区删除）产生，用于判断后续删除能否并入这条记录。
   void markNewRecord(bool flag, {bool collapsedDeletion = false}) {
     _markNewRecord = flag;
     _markCollapsedDeletion = flag && collapsedDeletion;
   }
 
   void _onValueChanged() {
-    if (_node.value == controller.value) {
-      return;
-    }
-    // 仅光标/选区变化不改变正文，不算一次编辑：
-    // 撤销后移动光标（如右键定位）若追加新节点会截断重做链
-    if (identical(_node.value.codeLines, controller.value.codeLines) ||
-        _node.value.codeLines.equals(controller.value.codeLines)) {
-      _node.value = controller.value;
+    final CodeLineEditingValue value = controller.value;
+    // 仅光标/选区或输入法组合区域变化不改变正文，不算一次编辑：
+    // 撤销后移动光标（如右键定位）若追加新节点会截断重做链，
+    // 因此这里只记录当前选区，作为下一次操作撤销时要还原的位置
+    if (identical(_node.value.codeLines, value.codeLines) ||
+        _node.value.codeLines.equals(value.codeLines)) {
+      _pendingSelectionBefore = value.selection;
       return;
     }
     if (_node.isInitial) {
@@ -2234,13 +2179,15 @@ class _CodeLineEditingCache {
       _appendNewNode();
       return;
     }
-    _node.value = controller.value;
+    // 与上一条记录同属一次编辑（如连续键入），直接更新该记录的快照
+    _node.value = value;
   }
 
   void _appendNewNode() {
     final _CodeLineEditingCacheNode newNode = _CodeLineEditingCacheNode(
       controller.value,
       collapsedDeletion: _markCollapsedDeletion,
+      selectionBefore: _pendingSelectionBefore,
     );
     if (_node.next != null) {
       _node.next!.pre = null;
@@ -2249,6 +2196,8 @@ class _CodeLineEditingCache {
     newNode.pre = _node;
     _node = newNode;
     _markCollapsedDeletion = false;
+    // 操作完成后选区通常停在结果末尾，作为下一次操作的默认起始位置
+    _pendingSelectionBefore = controller.value.selection;
   }
 
 }
@@ -2259,10 +2208,17 @@ class _CodeLineEditingCacheNode {
   _CodeLineEditingCacheNode? next;
   CodeLineEditingValue value;
 
-  /// 该节点由折叠光标下的删除（即非选区删除）产生，撤销它时恢复的内容不带选区
+  /// 该节点由折叠光标下的删除（即非选区删除）产生，用于判断后续删除能否并入同一条撤销记录
   final bool collapsedDeletion;
 
-  _CodeLineEditingCacheNode(this.value, {this.collapsedDeletion = false});
+  /// 该节点对应操作开始前的选区，撤销这条记录时还原到该选区
+  final CodeLineSelection selectionBefore;
+
+  _CodeLineEditingCacheNode(
+    this.value, {
+    this.collapsedDeletion = false,
+    CodeLineSelection? selectionBefore,
+  }) : selectionBefore = selectionBefore ?? value.selection;
 
   bool get isRoot => pre == null;
 

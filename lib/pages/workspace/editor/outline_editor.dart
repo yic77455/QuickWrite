@@ -3491,10 +3491,16 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   ///
   /// 在菜单显示中或刚关闭时收到下一次指针按下，立即将光标定位到点击位置
   /// 并聚焦目标节点，覆盖 [_handleContextMenuDismissed] 对旧节点的焦点请求，
-  /// 避免菜单关闭后焦点先回到菜单所在节点造成光标闪烁
+  /// 避免菜单关闭后焦点先回到菜单所在节点造成光标闪烁。
+  /// 点击节点用于关闭菜单表示回到单点编辑，同时取消多节点选区
+  /// （批量选择模式下节点选中由节点行自身切换，不在此清除）
   void _syncCursorAndFocusAfterMenuDismiss(PointerDownEvent event) {
     final nodeIndex = _findNodeIndexAtPosition(event.position);
     if (nodeIndex == null) return;
+
+    if (!_isBatchSelectionMode) {
+      _clearSelection();
+    }
 
     final flatList = _flatten();
     final nodeId = flatList[nodeIndex].node.id;
