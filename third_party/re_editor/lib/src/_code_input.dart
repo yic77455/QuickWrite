@@ -192,15 +192,14 @@ class _CodeInputController extends ChangeNotifier implements DeltaTextInputClien
     TextEditingValue newValue = _remoteEditingValue!;
     bool smartChange = false;
     for (final TextEditingDelta delta in textEditingDeltas) {
+      TextEditingDelta appliedDelta = delta;
       if (_autocompleteSymbols) {
-        TextEditingDelta newDelta = _SmartTextEditingDelta(delta, _autocompletePairs).apply(selection);
-        if (newDelta != delta) {
+        appliedDelta = _SmartTextEditingDelta(delta, _autocompletePairs).apply(selection);
+        if (appliedDelta != delta) {
           smartChange = true;
         }
-        newValue = newDelta.apply(newValue);
-      } else {
-        newValue = delta.apply(newValue);
       }
+      newValue = _applyDelta(newValue, appliedDelta);
     }
     if (newValue == _remoteEditingValue) {
       return;
@@ -211,6 +210,13 @@ class _CodeInputController extends ChangeNotifier implements DeltaTextInputClien
     final int caretMove = newValue.selection.start - _remoteEditingValue!.selection.start;
     if (!smartChange) {
       _remoteEditingValue = newValue;
+    }
+    // 多行选区时镜像只包含选区起始行，正文无法从镜像直接推得：
+    // 不改变镜像文本的更新（如组合开始）只同步组合区，不能交给控制器，
+    // 否则控制器会按整段选区把镜像文本写回正文，造成选区内各行被错误合并替换
+    if (!textChanged && !selection.isSameLine) {
+      composing = newValue.composing;
+      return;
     }
     // print('update text ${newValue.text}');
     // print('update selection ${newValue.selection}');
@@ -229,6 +235,35 @@ class _CodeInputController extends ChangeNotifier implements DeltaTextInputClien
     }
     notifyListeners();
     // _Trace.end('updateEditingValue all');
+  }
+
+  /// 将一条文本增量应用到镜像文本
+  ///
+  /// 增量以输入法侧文本为基准。镜像文本在正文编辑后会立即更新并重新下发，
+  /// 而输入法侧可能尚未接收到新文本，此时增量描述的改动无法映射到镜像上：
+  /// 只同步组合区，不采用其携带的文本与光标，避免旧文本覆盖镜像中已有的内容。
+  /// 输入法开始组合时会先删除镜像中选中的内容，再插入组合文本，
+  /// 但上报的增量只描述了插入动作；此时把落在选区内的插入按替换处理，
+  /// 使镜像文本与输入法内部文本保持一致，避免被选中的内容残留。
+  TextEditingValue _applyDelta(TextEditingValue value, TextEditingDelta delta) {
+    if (delta.oldText != value.text) {
+      return value.copyWith(composing: delta.composing);
+    }
+    if (delta is TextEditingDeltaInsertion &&
+        value.selection.isValid &&
+        !value.selection.isCollapsed) {
+      final TextSelection remoteSelection = value.selection;
+      if (delta.insertionOffset >= remoteSelection.start && delta.insertionOffset <= remoteSelection.end) {
+        return value.copyWith(
+          text: value.text.replaceRange(remoteSelection.start, remoteSelection.end, delta.textInserted),
+          selection: TextSelection.collapsed(
+            offset: remoteSelection.start + delta.textInserted.length
+          ),
+          composing: delta.composing,
+        );
+      }
+    }
+    return delta.apply(value);
   }
 
   /// 处理光标越过镜像两端零宽哨兵的选区变更
