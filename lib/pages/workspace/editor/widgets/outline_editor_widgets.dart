@@ -212,36 +212,90 @@ class OutlineEditorTopBar extends StatelessWidget {
 
 /// 大纲编辑器底部快捷键提示
 ///
-/// 展示常用快捷键及其功能说明
-class OutlineEditorBottomHint extends StatelessWidget {
+/// 展示常用快捷键及其功能说明；鼠标悬停在提示面板上时，面板右上角显示关闭按钮
+class OutlineEditorBottomHint extends StatefulWidget {
   /// 颜色方案
   final ColorScheme colorScheme;
 
-  const OutlineEditorBottomHint({super.key, required this.colorScheme});
+  /// 关闭提示回调
+  final VoidCallback onClose;
+
+  const OutlineEditorBottomHint({
+    super.key,
+    required this.colorScheme,
+    required this.onClose,
+  });
+
+  @override
+  State<OutlineEditorBottomHint> createState() => _OutlineEditorBottomHintState();
+}
+
+class _OutlineEditorBottomHintState extends State<OutlineEditorBottomHint> {
+  /// 鼠标是否位于提示面板内
+  bool _isHovered = false;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        // 将半透明背景色与编辑器背景预混合为不透明颜色，保持视觉颜色不变的同时避免透出下方滚动内容
-        color: Color.alphaBlend(
-          colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
-          colorScheme.surfaceContainerLowest,
-        ),
-        border: Border(top: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.3))),
-      ),
-      child: Wrap(
-        spacing: 16,
-        runSpacing: 4,
+    final colorScheme = widget.colorScheme;
+
+    return MouseRegion(
+      // 面板拦截鼠标事件，避免点击提示面板时误触下方的编辑器
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      // 关闭按钮叠放在提示面板之上，使其贴合面板右上角
+      child: Stack(
+        clipBehavior: Clip.none,
         children: [
-          _buildShortcutHint('Enter', '新建同级', colorScheme),
-          _buildShortcutHint('Tab', '缩进', colorScheme),
-          _buildShortcutHint('Shift+Tab', '反缩进', colorScheme),
-          _buildShortcutHint('Ctrl+Enter', '完成', colorScheme),
-          _buildShortcutHint('↑↓', '切换节点', colorScheme),
-          _buildShortcutHint('Ctrl+A', '全选', colorScheme),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceContainerLow,
+              border: Border(top: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.3))),
+            ),
+            child: Wrap(
+              spacing: 16,
+              runSpacing: 4,
+              children: [
+                _buildShortcutHint('Enter', '新建同级', colorScheme),
+                _buildShortcutHint('Tab', '缩进', colorScheme),
+                _buildShortcutHint('Shift+Tab', '反缩进', colorScheme),
+                _buildShortcutHint('Ctrl+Enter', '完成', colorScheme),
+                _buildShortcutHint('↑↓', '切换节点', colorScheme),
+                _buildShortcutHint('Ctrl+A', '全选', colorScheme),
+              ],
+            ),
+          ),
+          // 关闭按钮：仅悬停时显示并响应点击，叠放在面板右上角
+          Positioned(
+            top: 3,
+            right: 4,
+            child: IgnorePointer(
+              ignoring: !_isHovered,
+              child: AnimatedOpacity(
+                opacity: _isHovered ? 0.8 : 0.0,
+                duration: const Duration(milliseconds: 120),
+                child: _buildCloseButton(),
+              ),
+            ),
+          ),
         ],
+      ),
+    );
+  }
+
+  /// 构建面板右上角的关闭按钮：半透明圆形底衬 + 关闭图标
+  Widget _buildCloseButton() {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: widget.onClose,
+      child: Container(
+        width: 20,
+        height: 20,
+        decoration: BoxDecoration(
+          color: widget.colorScheme.onSurfaceVariant.withValues(alpha: 0.12),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(Icons.close_rounded, size: 14, color: widget.colorScheme.onSurfaceVariant),
       ),
     );
   }

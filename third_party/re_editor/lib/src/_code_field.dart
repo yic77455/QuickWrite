@@ -912,7 +912,10 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
       return;
     }
     // 目标位置换算到外部滚动容器的内容坐标系
-    final double contentTop = paddingTop + tops[position.index] + _externalContentOffset;
+    // 正文自动换行时一个逻辑行会排成多个视觉行，逻辑行顶部不等于光标所在视觉行的顶部，
+    // 需叠加该位置在逻辑行内的纵向偏移，否则段落后半部分滚出视口时不会被判定为不可见
+    final double contentTop =
+        paddingTop + tops[position.index] + _lineVerticalOffsetOf(position) + _externalContentOffset;
     final double contentBottom = contentTop + _preferredLineHeight;
     final double viewportTop = scrollPosition.pixels;
     final double viewportBottom = viewportTop + scrollPosition.viewportDimension;
@@ -942,6 +945,17 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
     if ((target - clamped).abs() > 0.5) {
       _retryRevealInExternalViewport(position, center: center, animated: animated, tryCount: tryCount);
     }
+  }
+
+  /// 指定位置在其所在逻辑行内的纵向偏移
+  ///
+  /// 正文自动换行时一个逻辑行会排成多个视觉行，需由排版结果取得位置所在的视觉行；
+  /// 优先复用已构建的可见段落，行段落尚未构建时按当前排版宽度现场构建。
+  double _lineVerticalOffsetOf(CodeLinePosition position) {
+    final CodeLineRenderParagraph? visible = findDisplayParagraphByLineIndex(position.index);
+    final IParagraph paragraph =
+        visible?.paragraph ?? _buildParagraph(position.index, _lineTopsWidth > 0 ? _lineTopsWidth : null);
+    return paragraph.getOffset(position)?.dy ?? 0;
   }
 
   /// 下一帧重试让指定位置在外部滚动容器中可见

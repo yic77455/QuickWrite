@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
+import 'package:quick_write/shared/widgets/qw_switch.dart';
 import 'package:quick_write/shared/widgets/segmented_control.dart';
 
 /// 大纲编辑器布局设置卡片
@@ -156,7 +157,7 @@ class OutlineEditorSettingsCard extends StatelessWidget {
                   divisions: 20,
                   onChanged: (value) => settings.updateOutlineNodeSpacing(value, debounce: true),
                 ),
-                // 页面视图仅桌面端可用，移动端固定为默认模式
+                // 页面视图与底部快捷键提示仅桌面端可用，移动端固定为默认表现
                 if (!PlatformCapabilities.isMobile) ...[
                   _buildDivider(colorScheme),
                   _buildGroupLabel(context, '页面视图'),
@@ -166,6 +167,16 @@ class OutlineEditorSettingsCard extends StatelessWidget {
                     selectedIndex: selectedIndex,
                     onChanged: (index) =>
                         SettingsService.instance.updateOutlinePageViewMode(_pageViewModes[index]),
+                  ),
+                  _buildDivider(colorScheme),
+                  _buildGroupLabel(context, '显示'),
+                  const SizedBox(height: _labelSpacing),
+                  _buildSwitchRow(
+                    context,
+                    icon: Icons.keyboard_outlined,
+                    label: '底部快捷键提示',
+                    value: settings.outlineBottomHintEnabled,
+                    onChanged: (value) => settings.updateOutlineBottomHintEnabled(value),
                   ),
                 ],
               ],
@@ -269,6 +280,35 @@ class OutlineEditorSettingsCard extends StatelessWidget {
             onChanged: onChanged,
           ),
         ),
+      ],
+    );
+  }
+
+  /// 构建开关设置项
+  ///
+  /// 图标与设置名称居左，开关居右
+  Widget _buildSwitchRow(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: colorScheme.onSurfaceVariant),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            label,
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+          ),
+        ),
+        QwSwitch(value: value, onChanged: onChanged),
       ],
     );
   }

@@ -5209,19 +5209,21 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
                           ),
                         ),
                       ),
-                // 底部快捷键提示：仅桌面端显示
+                // 底部快捷键提示：仅桌面端且设置中开启时显示
                 // 移动端没有物理键盘，隐藏提示，底部预留高度保持为 0
-                if (!PlatformCapabilities.isMobile)
+                if (!PlatformCapabilities.isMobile && SettingsService.instance.outlineBottomHintEnabled)
                   Align(
                     alignment: Alignment.bottomCenter,
-                    child: IgnorePointer(
-                      child: MeasureSize(
-                        onSizeChanged: (size) {
-                          if (mounted && size.height != _bottomHintHeight) {
-                            setState(() => _bottomHintHeight = size.height);
-                          }
-                        },
-                        child: OutlineEditorBottomHint(colorScheme: colorScheme),
+                    child: MeasureSize(
+                      onSizeChanged: (size) {
+                        if (mounted && size.height != _bottomHintHeight) {
+                          setState(() => _bottomHintHeight = size.height);
+                        }
+                      },
+                      child: OutlineEditorBottomHint(
+                        colorScheme: colorScheme,
+                        // 点击关闭按钮时关闭快捷键提示，与设置面板中的开关保持同步
+                        onClose: () => SettingsService.instance.updateOutlineBottomHintEnabled(false),
                       ),
                     ),
                   ),
@@ -5275,6 +5277,9 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     final double bottomPadding = marginBasisHeight * (settings.outlineBottomMargin / 100);
     // 记录底边距，供聚焦、定位节点时作为底部安全间距使用
     _bottomContentPadding = bottomPadding;
+    // 底部快捷键提示的预留高度：提示关闭或移动端不显示时不预留
+    final double bottomHintHeight =
+        (!PlatformCapabilities.isMobile && settings.outlineBottomHintEnabled) ? _bottomHintHeight : 0.0;
 
     // 内容按 A4 宽度居中的额外内缩量；宽度不足以容纳 A4 时取 0；
     // 纸张模式与移动端在整个视口宽度内居中，桌面端非纸张模式先施加左右边距再居中
@@ -5306,7 +5311,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
         SliverPadding(
           padding: EdgeInsets.only(
             top: widget.extraTopPadding + 10.0,
-            bottom: _bottomHintHeight,
+            bottom: bottomHintHeight,
           ),
           sliver: SliverPadding(
             padding: EdgeInsets.symmetric(horizontal: viewportCenterInset),
@@ -5355,13 +5360,13 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
               left: centerInset,
               right: centerInset,
               top: topPadding + widget.extraTopPadding,
-              bottom: bottomPadding + _bottomHintHeight,
+              bottom: bottomPadding + bottomHintHeight,
             )
           : EdgeInsets.only(
               left: horizontalPadding + centerInset,
               right: horizontalPadding + centerInset,
               top: topPadding + widget.extraTopPadding,
-              bottom: bottomPadding + _bottomHintHeight,
+              bottom: bottomPadding + bottomHintHeight,
             );
       slivers = [
         SliverPadding(padding: scrollPadding, sliver: nodeList),
