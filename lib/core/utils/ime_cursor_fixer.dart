@@ -206,7 +206,11 @@ class _ImeCursorFixerWrapperState extends State<ImeCursorFixerWrapper> with Widg
 
     final value = widget.controller.value;
     final selection = value.selection;
-    if (!selection.isValid) return false;
+    // 输入框刚获得焦点且尚未建立 Selection 时（例如空输入框），
+    // 以文本末尾作为光标位置，保证这一次上报不会因为缺少 Selection 而被跳过
+    final caret = selection.isValid
+        ? selection.extent
+        : TextPosition(offset: value.text.length);
 
     // 与框架上报组合区域的规则保持一致：存在组合文本时取整段组合文本的矩形，
     // 否则取当前光标的矩形。组字窗口锚定矩形左上角，因此候选框不会随着
@@ -218,7 +222,16 @@ class _ImeCursorFixerWrapperState extends State<ImeCursorFixerWrapper> with Widg
       rect = renderEditable.getRectForComposingRange(composing);
     }
     rect ??= renderEditable.getLocalRectForCaret(
-      isComposing ? TextPosition(offset: composing.start) : selection.extent,
+      isComposing ? TextPosition(offset: composing.start) : caret,
+    );
+
+    // 先同步当前编辑区的尺寸与坐标变换。引擎换算下面的局部光标矩形时使用的是
+    // 它最近一次收到的变换，焦点刚切换过来时那还是上一个输入框的变换，
+    // 直接上报会让引擎把光标换算到上一个输入框所在的位置。
+    final transform = renderEditable.getTransformTo(null);
+    ImeCursorFixer.reportEditableTransform(
+      size: renderEditable.size,
+      transform: transform.storage,
     );
 
     // 用真实光标矩形覆盖引擎缓存，使引擎自身的定位始终正确：

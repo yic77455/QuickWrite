@@ -48,11 +48,15 @@ struct ImeWindowContext {
   bool applying = false;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel;
 
-  void Apply(HWND target_hwnd) {
+  void Apply(HWND target_hwnd, bool composition_start = false) {
     if (applying) return;
     applying = true;
 
-    ApplyImeCompositionWindow(target_hwnd, pos);
+    if (composition_start) {
+      ApplyImeCompositionStartAnchor(target_hwnd, pos);
+    } else {
+      ApplyImeCompositionWindow(target_hwnd, pos);
+    }
 
     applying = false;
   }
@@ -64,9 +68,18 @@ static LRESULT CALLBACK MultiWindowSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPa
   ImeWindowContext* ctx = reinterpret_cast<ImeWindowContext*>(dwRefData);
   if (ctx) {
     switch (uMsg) {
+      case WM_IME_STARTCOMPOSITION: {
+        LRESULT result = DefSubclassProc(hWnd, uMsg, wParam, lParam);
+        // Re-anchor every IME window from the rect reported by the focused
+        // input, because the embedder may still position the first candidate
+        // from the caret rect cached before the focus or the window size
+        // changed.
+        ctx->Apply(hWnd, /*composition_start=*/true);
+        return result;
+      }
       case WM_IME_COMPOSITION: {
         LRESULT result = DefSubclassProc(hWnd, uMsg, wParam, lParam);
-        ctx->Apply(hWnd);
+        ctx->Apply(hWnd, /*composition_start=*/false);
         return result;
       }
       case WM_IME_NOTIFY: {
@@ -74,7 +87,7 @@ static LRESULT CALLBACK MultiWindowSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPa
         // Some IMEs move the composition window themselves; re-anchor it after
         // they do so the candidate stays below the text line
         if (wParam == 0x000B /* IMN_SETCOMPOSITIONWINDOW */) {
-          ctx->Apply(hWnd);
+          ctx->Apply(hWnd, /*composition_start=*/false);
         }
         return result;
       }

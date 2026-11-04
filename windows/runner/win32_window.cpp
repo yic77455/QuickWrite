@@ -190,7 +190,7 @@ Win32Window::MessageHandler(HWND hwnd,
     }
     case WM_IME_NOTIFY: {
       if (wparam == IMN_SETCOMPOSITIONWINDOW) {
-        ApplyImeCompositionAnchorToView(hwnd);
+        ApplyImeAnchorToView(hwnd, /*composition_start=*/false);
       }
       break;
     }
@@ -275,18 +275,25 @@ ImePhysicalRect ToPhysicalImeRect(HWND target_hwnd,
   return rect;
 }
 
-}  // namespace
-
-void ApplyImeCompositionWindow(HWND target_hwnd, const ImeCursorPosition& pos) {
+// Applies the reported tracking rect to the IME context of the target window.
+//
+// [composition_start] additionally moves the candidate window and the system
+// caret. It is only used when a new composition starts, because that is the
+// moment the IME decides where the first candidate shows up. During the
+// composition itself the candidate is left to the embedder so that it is not
+// moved twice within one keystroke.
+bool ApplyImeAnchor(HWND target_hwnd,
+                    const ImeCursorPosition& pos,
+                    bool composition_start) {
   if (!pos.valid) {
-    return;
+    return false;
   }
 
   HIMC hImc = ImmGetContext(target_hwnd);
   if (!hImc) {
-    return;
+    return false;
   }
- 
+
   const ImePhysicalRect rect = ToPhysicalImeRect(target_hwnd, pos);
 
   // Anchor the composition window at the bottom of the text glyphs. IMEs that
@@ -306,18 +313,56 @@ void ApplyImeCompositionWindow(HWND target_hwnd, const ImeCursorPosition& pos) {
   cf.ptCurrentPos.x = rect.left;
   cf.ptCurrentPos.y = composition_top;
   ImmSetCompositionWindow(hImc, &cf);
- 
+
+  if (composition_start) {
+    // Some IMEs ignore ImmSetCandidateWindow and read GetCaretPos() instead,
+    // so the temporary system caret has to move along with the anchor.
+    ::SetCaretPos(rect.left, rect.bottom);
+
+    // Mirror the candidate placement the embedder applies from its own caret
+    // rect, but with the rect reported by the focused input.
+    CANDIDATEFORM candidate_form = {};
+    candidate_form.dwIndex = 0;
+    candidate_form.dwStyle = CFS_EXCLUDE;
+    candidate_form.ptCurrentPos.x = rect.left;
+    candidate_form.ptCurrentPos.y = rect.bottom;
+    candidate_form.rcArea.left = rect.left;
+    candidate_form.rcArea.top = rect.top;
+    candidate_form.rcArea.right = rect.left;
+    candidate_form.rcArea.bottom = rect.bottom;
+    ImmSetCandidateWindow(hImc, &candidate_form);
+  }
+
   ImmReleaseContext(target_hwnd, hImc);
+  return true;
 }
 
-void Win32Window::ApplyImeCompositionAnchorToView(HWND hwnd) {
+}  // namespace
+
+void ApplyImeCompositionWindow(HWND target_hwnd, const ImeCursorPosition& pos) {
+  ApplyImeAnchor(target_hwnd, pos, /*composition_start=*/false);
+}
+
+void ApplyImeCompositionStartAnchor(HWND target_hwnd,
+                                    const ImeCursorPosition& pos) {
+  ApplyImeAnchor(target_hwnd, pos, /*composition_start=*/true);
+}
+
+void Win32Window::ApplyImeAnchorToView(HWND hwnd, bool composition_start) {
   if (applying_ime_cursor_) return;
   applying_ime_cursor_ = true;
 
-  ApplyImeCompositionWindow(child_content_ ? child_content_ : hwnd, ime_cursor_pos_);
+  // The IME context belongs to the Flutter view child window.
+  HWND target_hwnd = child_content_ ? child_content_ : hwnd;
+  if (composition_start) {
+    ApplyImeCompositionStartAnchor(target_hwnd, ime_cursor_pos_);
+  } else {
+    ApplyImeCompositionWindow(target_hwnd, ime_cursor_pos_);
+  }
+
   applying_ime_cursor_ = false;
 }
- 
+
 void Win32Window::UpdateImeCursorPosition(double x, double y, double height,
                                           double text_height) {
   ime_cursor_pos_.x = x;
@@ -327,7 +372,7 @@ void Win32Window::UpdateImeCursorPosition(double x, double y, double height,
   ime_cursor_pos_.valid = true;
 
   if (window_handle_) {
-    ApplyImeCompositionAnchorToView(window_handle_);
+    ApplyImeAnchorToView(window_handle_, /*composition_start=*/false);
   }
 }
 
@@ -368,11 +413,22 @@ LRESULT CALLBACK Win32Window::ChildSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPa
   Win32Window* that = reinterpret_cast<Win32Window*>(dwRefData);
   if (that) {
     switch (uMsg) {
+      case WM_IME_STARTCOMPOSITION: {
+        // Call the original window proc first so Flutter creates and positions
+        // its IME windows
+        LRESULT result = DefSubclassProc(hWnd, uMsg, wParam, lParam);
+        // Then re-anchor them from the rect reported by the focused input. The
+        // embedder still uses the caret rect cached before the focus moved or
+        // before the window was resized, so the first candidate of a new
+        // composition would otherwise show up at the previous position.
+        that->ApplyImeAnchorToView(hWnd, /*composition_start=*/true);
+        return result;
+      }
       case WM_IME_COMPOSITION: {
         // Call the original window proc first so Flutter does its thing
         LRESULT result = DefSubclassProc(hWnd, uMsg, wParam, lParam);
         // Then anchor the composition window at the bottom of the text line
-        that->ApplyImeCompositionAnchorToView(hWnd);
+        that->ApplyImeAnchorToView(hWnd, /*composition_start=*/false);
         return result;
       }
       case WM_IME_NOTIFY: {
@@ -380,7 +436,7 @@ LRESULT CALLBACK Win32Window::ChildSubclassProc(HWND hWnd, UINT uMsg, WPARAM wPa
         // Some IMEs move the composition window themselves; re-anchor it after
         // they do so the candidate stays below the text line
         if (wParam == 0x000B /* IMN_SETCOMPOSITIONWINDOW */) {
-          that->ApplyImeCompositionAnchorToView(hWnd);
+          that->ApplyImeAnchorToView(hWnd, /*composition_start=*/false);
         }
         return result;
       }

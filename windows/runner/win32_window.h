@@ -23,10 +23,24 @@ struct ImeCursorPosition {
 // glyphs. IMEs which draw the composing string inside their candidate window
 // derive the candidate position from this anchor, so anchoring at the top of
 // the line would make the candidate overlap the upper half of the text line.
-// The candidate window itself is left to the Flutter engine, which positions it
-// from the caret rect fed by the framework: keeping a single placement authority
-// avoids the candidate being moved twice within one keystroke.
+// The candidate window itself is left to the Flutter engine during composition,
+// which positions it from the caret rect fed by the framework: keeping a single
+// placement authority avoids the candidate being moved twice within one
+// keystroke.
 void ApplyImeCompositionWindow(HWND target_hwnd, const ImeCursorPosition& pos);
+
+// Places every IME window of the target window when the system IME starts a new
+// composition: composition window, candidate window and system caret all move to
+// the reported tracking rect.
+//
+// The embedder positions these windows from the caret rect it stored when the
+// focused input last reported it. Right after the focus moved to another input
+// or after the window was resized, that stored rect may still describe the
+// previous location, and the first candidate of the new composition would show
+// up there. Re-anchoring after the embedder handled WM_IME_STARTCOMPOSITION
+// makes the reported rect authoritative before the IME draws the first candidate.
+void ApplyImeCompositionStartAnchor(HWND target_hwnd,
+                                    const ImeCursorPosition& pos);
 
 // A class abstraction for a high DPI-aware Win32 Window. Intended to be
 // inherited from by classes that wish to specialize with custom
@@ -79,7 +93,10 @@ class Win32Window {
   RECT GetClientArea();
 
  protected:
-  void ApplyImeCompositionAnchorToView(HWND hwnd);
+  // Applies the cached IME tracking rect to the Flutter view.
+  // [composition_start] additionally moves the candidate window and the system
+  // caret, and is used when the IME starts a new composition.
+  void ApplyImeAnchorToView(HWND hwnd, bool composition_start);
 
   // Processes and route salient window messages for mouse handling,
   // size change and DPI. Delegates handling of these to member overloads that
