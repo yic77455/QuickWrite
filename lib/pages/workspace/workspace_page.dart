@@ -17,6 +17,7 @@ import 'left_sidebar/left_sidebar.dart';
 import 'right_sidebar/right_sidebar.dart';
 import 'toolbar/workspace_toolbar.dart';
 import 'editor/editor_container.dart';
+import 'widgets/cloud_sync_status_icon.dart';
 import 'widgets/mobile_workspace_app_bar.dart';
 import 'widgets/mobile_quick_input_bar.dart';
 import 'widgets/mobile_outline_toolbar.dart';
@@ -503,8 +504,8 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
       decoration: BoxDecoration(color: colorScheme.surface, borderRadius: BorderRadius.circular(6)),
       child: Row(
         children: [
-          // 左侧：当前文件信息
-          Icon(Icons.article_outlined, size: 14, color: colorScheme.onSurfaceVariant),
+          // 左侧：当前文件信息（实时同步开启时图标反映云同步状态）
+          CloudSyncStatusIcon(size: 14, hasPendingLocalEdits: currentTab?.isModified ?? false),
           const SizedBox(width: 6),
           Text(currentTab?.title ?? '未打开文件', style: context.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant)),
 
@@ -546,7 +547,7 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
 
   /// 构建底部状态栏（移动端）
   ///
-  /// 精简信息以防窄屏溢出：左侧显示作品名，右侧保留主题数与字数统计
+  /// 精简信息以防窄屏溢出：左侧显示当前文件信息，右侧保留主题数与字数统计
   Widget _buildMobileBottomStatusBar(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final workspaceProvider = context.watch<WorkspaceProvider>();
@@ -559,13 +560,21 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
       decoration: BoxDecoration(color: colorScheme.surface, borderRadius: BorderRadius.circular(6)),
       child: Row(
         children: [
-          // 左侧：作品名（过长时省略号截断）
+          // 左侧：当前文件信息（实时同步开启时图标反映云同步状态，过长时省略号截断）
           Expanded(
-            child: Text(
-              '《${workspaceProvider.bookTitle}》',
-              style: context.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            child: Row(
+              children: [
+                CloudSyncStatusIcon(size: 14, hasPendingLocalEdits: currentTab?.isModified ?? false),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    currentTab?.title ?? '未打开文件',
+                    style: context.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
             ),
           ),
 

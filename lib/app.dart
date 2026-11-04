@@ -165,6 +165,21 @@ class _WorkspaceAppState extends State<WorkspaceApp> {
         _themeProvider!.updateAppFontScaleFromMain(scale);
       }
     };
+
+    // 接收主窗口推送的云同步状态，使底栏同步图标与主窗口保持一致
+    MultiWindowService.instance.onSyncStatusChanged =
+        CloudSyncService.instance.applyMirroredStatus;
+
+    // 主动拉取一次当前状态，避免刚打开窗口时停留在默认图标
+    final mainWindowId = widget.mainWindowId;
+    if (mainWindowId != null) {
+      final status = await MultiWindowService.instance.requestSyncStatus(
+        mainWindowId,
+      );
+      if (status != null) {
+        CloudSyncService.instance.applyMirroredStatus(status);
+      }
+    }
   }
 
   @override
@@ -174,6 +189,7 @@ class _WorkspaceAppState extends State<WorkspaceApp> {
     MultiWindowService.instance.onThemeConfigChanged = null;
     MultiWindowService.instance.onAppFontChanged = null;
     MultiWindowService.instance.onAppFontScaleChanged = null;
+    MultiWindowService.instance.onSyncStatusChanged = null;
     super.dispose();
   }
 

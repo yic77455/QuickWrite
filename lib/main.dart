@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:isar/isar.dart';
@@ -123,6 +124,19 @@ void main(List<String> args) async {
   // 初始化多窗口通信通道（主窗口负责监听子窗口的消息）
   if (PlatformCapabilities.supportsMultiWindow && windowController != null) {
     await MultiWindowService.instance.initMethodChannel(windowController);
+
+    // 在主窗口监听云同步状态变化，并广播给所有工作台子窗口，
+    // 使子窗口底栏的同步图标与主窗口保持一致。
+    // 仅在状态快照发生变化时广播，避免同步过程中逐文件进度产生大量通信
+    MultiWindowService.instance.onSyncStatusRequested =
+        () => CloudSyncService.instance.statusSnapshot;
+    var lastSyncStatus = CloudSyncService.instance.statusSnapshot;
+    CloudSyncService.instance.addListener(() {
+      final status = CloudSyncService.instance.statusSnapshot;
+      if (mapEquals(status, lastSyncStatus)) return;
+      lastSyncStatus = status;
+      MultiWindowService.instance.broadcastSyncStatus(status);
+    });
   }
 
   // 初始化系统托盘图标（仅主窗口常驻，用于最小化至托盘与快捷退出）

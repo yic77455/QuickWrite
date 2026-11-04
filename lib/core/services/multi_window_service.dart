@@ -59,6 +59,12 @@ class MultiWindowService {
   /// 请求关闭方法名称（主窗口请求子窗口处理未保存内容并关闭自身）
   static const String _methodRequestClose = 'request_close';
 
+  /// 同步状态变化方法名称（主窗口向子窗口推送云同步状态）
+  static const String _methodSyncStatusChanged = 'sync_status_changed';
+
+  /// 同步状态索取方法名称（子窗口向主窗口请求当前云同步状态）
+  static const String _methodRequestSyncStatus = 'request_sync_status';
+
   // ================= 已打开窗口跟踪 =================
   
   /// 已打开的工作台窗口 bookId 集合（仅在主窗口中维护）
@@ -99,6 +105,12 @@ class MultiWindowService {
   /// 返回 true 表示可以关闭，false 表示用户取消了关闭
   Future<bool> Function()? onRequestClose;
 
+  /// 同步状态变化回调（子窗口设置此回调来响应主窗口推送的同步状态）
+  void Function(Map<String, bool> status)? onSyncStatusChanged;
+
+  /// 同步状态索取回调（主窗口设置此回调来返回当前的同步状态快照）
+  Map<String, bool> Function()? onSyncStatusRequested;
+
   // ================= 窗口创建方法 =================
 
   /// 初始化方法通道监听（主窗口调用）
@@ -126,6 +138,9 @@ class MultiWindowService {
         // 收到子窗口的就绪通知，触发回调关闭加载弹窗
         debugPrint('收到工作台就绪事件');
         onWorkspaceReady?.call();
+      } else if (call.method == _methodRequestSyncStatus) {
+        // 子窗口索取云同步状态，返回当前快照以完成它的首次状态同步
+        return onSyncStatusRequested?.call();
       }
       return null;
     });
@@ -174,6 +189,10 @@ class MultiWindowService {
           await windowManager.close();
         }
         return canClose;
+      } else if (call.method == _methodSyncStatusChanged) {
+        // 收到主窗口推送的云同步状态，交由界面刷新同步图标
+        final status = _parseSyncStatus(call.arguments);
+        if (status != null) onSyncStatusChanged?.call(status);
       }
       return null;
     });
@@ -381,6 +400,48 @@ class MultiWindowService {
       }
     }
     debugPrint('已广播界面字号变化到 ${_workspaceWindowControllers.length} 个子窗口');
+  }
+
+  /// 广播云同步状态到所有子窗口（主窗口调用）
+  ///
+  /// [status] 同步状态快照，包含实时同步是否生效、是否正在同步与是否存在未同步改动
+  Future<void> broadcastSyncStatus(Map<String, bool> status) async {
+    for (final controller in _workspaceWindowControllers.values) {
+      try {
+        await controller.invokeMethod(_methodSyncStatusChanged, status);
+      } catch (e) {
+        debugPrint('广播云同步状态失败: $e');
+      }
+    }
+  }
+
+  /// 向主窗口索取当前的云同步状态（子窗口调用）
+  ///
+  /// [mainWindowId] 主窗口的ID
+  /// 返回 null 表示主窗口已关闭或未返回有效状态
+  Future<Map<String, bool>?> requestSyncStatus(String mainWindowId) async {
+    try {
+      final mainWindowController = WindowController.fromWindowId(mainWindowId);
+      final result = await mainWindowController.invokeMethod(
+        _methodRequestSyncStatus,
+        null,
+      );
+      return _parseSyncStatus(result);
+    } catch (e) {
+      // 主窗口可能已关闭，忽略错误
+      debugPrint('请求云同步状态失败（主窗口可能已关闭）: $e');
+      return null;
+    }
+  }
+
+  /// 将平台通道返回的参数解析为同步状态快照
+  ///
+  /// 通道传递的 Map 键值类型不确定，这里统一转换为 bool
+  Map<String, bool>? _parseSyncStatus(Object? arguments) {
+    if (arguments is! Map) return null;
+    return arguments.map(
+      (key, value) => MapEntry(key.toString(), value == true),
+    );
   }
 
   /// 检查指定书籍的窗口是否已打开
