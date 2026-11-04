@@ -423,8 +423,12 @@ class _EditorContainerState extends State<EditorContainer> {
             filePath: provider.getTabFilePath(tab),
             // 查找替换栏可见时为编辑器预留顶边距，避免内容被遮挡
             extraTopPadding: provider.findReplaceBarPadding,
-            // 大纲内容异步加载完成后，若查找替换栏处于打开状态则刷新查找结果
-            onContentLoaded: () => provider.refreshFindIfVisible(resetIndex: true),
+            // 大纲内容异步加载完成后，若查找替换栏处于打开状态则刷新查找结果，
+            // 并通知等待内容就绪的调用方（如全文搜索跳转）
+            onContentLoaded: () {
+              provider.refreshFindIfVisible(resetIndex: true);
+              provider.notifyTabContentLoaded(tab.id);
+            },
             onContentChanged: () {
               // 编辑预览模式下内容时，退出预览模式
               if (tab.isPreview) {

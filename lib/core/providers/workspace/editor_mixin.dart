@@ -41,6 +41,9 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
   /// 全文搜索是否大小写敏感
   bool _globalSearchCaseSensitive = false;
 
+  /// 全文搜索是否同时搜索大纲文件
+  bool _globalSearchIncludeOutlines = false;
+
   /// 全文搜索结果列表
   List<GlobalSearchResult> _globalSearchResults = [];
 
@@ -97,6 +100,7 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
   int get currentMatchIndex => _currentMatchIndex;
   String get globalSearchQuery => _globalSearchQuery;
   bool get globalSearchCaseSensitive => _globalSearchCaseSensitive;
+  bool get globalSearchIncludeOutlines => _globalSearchIncludeOutlines;
   List<GlobalSearchResult> get globalSearchResults =>
       List.unmodifiable(_globalSearchResults);
   bool get isGlobalSearching => _isGlobalSearching;
@@ -583,12 +587,24 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
     }
   }
 
+  /// 设置全文搜索是否同时搜索大纲文件
+  Future<void> setGlobalSearchIncludeOutlines(bool value) async {
+    _globalSearchIncludeOutlines = value;
+    if (_globalSearchQuery.isNotEmpty) {
+      await _performGlobalSearch();
+    } else {
+      // 无关键词时仅切换搜索范围，直接通知 UI 刷新复选框状态
+      notifyListeners();
+    }
+  }
+
   /// 执行全文搜索
-  /// 遍历当前书籍的所有章节文件，搜索关键词
+  /// 遍历当前书籍的所有章节文件，以及可选的大纲文件，搜索关键词
+  /// 勾选包含大纲时，大纲文件的搜索结果排在正文之前
   ///
   /// 支持使用 "&&" 连接多个关键词进行交集搜索：
-  /// 章节级筛选要求同时包含所有关键词，行级匹配则展示任意关键词的命中位置，
-  /// 便于用户在通过交集筛选的章节内查看每个关键词的具体出现位置。
+  /// 文件级筛选要求同时包含所有关键词，行级匹配则展示任意关键词的命中位置，
+  /// 便于用户在通过交集筛选的文件内查看每个关键词的具体出现位置。
   Future<void> _performGlobalSearch() async {
     if (_globalSearchQuery.isEmpty || _currentBook == null) return;
 
@@ -606,54 +622,41 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
 
     final results = <GlobalSearchResult>[];
 
+    // 搜索大纲文件（设定项），结果显示在正文之前
+    if (_globalSearchIncludeOutlines) {
+      for (final item in _settingItems) {
+        try {
+          final content = await readSettingItemContent(item);
+          // 大纲文件为 Markdown 序列化文本，转为节点纯文本行后再匹配，
+          // 使行内容与偏移量与大纲编辑器中的文本保持一致，便于跳转定位
+          final result = _matchGlobalSearchContent(
+            content: OutlineMarkdownCodec.parseContentLines(content).join('\n'),
+            keywords: keywords,
+            targetUuid: item.uuid,
+            title: item.title,
+            groupName: getSettingGroupName(item.groupUuid),
+            isOutline: true,
+          );
+          if (result != null) results.add(result);
+        } catch (e) {
+          debugPrint('全文搜索读取大纲文件失败: ${item.title}, $e');
+        }
+      }
+    }
+
+    // 搜索正文文件（章节）
     for (final chapter in _chapters) {
       try {
         final content = await readChapterContent(chapter);
-        if (content.isEmpty) continue;
-
-        // 章节级交集过滤：必须同时包含所有关键词
-        if (!SearchQueryParser.containsAll(
-          content,
-          keywords,
-          caseSensitive: _globalSearchCaseSensitive,
-        )) {
-          continue;
-        }
-
-        // 收集行级匹配（任意关键词命中即记录该行）
-        final matchLines = <GlobalSearchMatchLine>[];
-        final lines = content.split('\n');
-        int lineStartOffset = 0;
-
-        for (int lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-          final line = lines[lineIndex];
-          final matchCountInLine = SearchQueryParser.countMatches(
-            line,
-            keywords,
-            caseSensitive: _globalSearchCaseSensitive,
-          );
-
-          if (matchCountInLine > 0) {
-            matchLines.add(GlobalSearchMatchLine(
-              lineNumber: lineIndex + 1,
-              lineContent: line,
-              matchCount: matchCountInLine,
-              startOffset: lineStartOffset,
-            ));
-          }
-
-          lineStartOffset += line.length + 1;
-        }
-
-        if (matchLines.isNotEmpty) {
-          results.add(GlobalSearchResult(
-            chapterUuid: chapter.uuid,
-            chapterTitle: chapter.title,
-            volumeName: getVolumeName(chapter.volumeUuid),
-            totalMatches: matchLines.fold<int>(0, (sum, m) => sum + m.matchCount),
-            matchLines: matchLines,
-          ));
-        }
+        final result = _matchGlobalSearchContent(
+          content: content,
+          keywords: keywords,
+          targetUuid: chapter.uuid,
+          title: chapter.title,
+          groupName: getVolumeName(chapter.volumeUuid),
+          isOutline: false,
+        );
+        if (result != null) results.add(result);
       } catch (e) {
         debugPrint('全文搜索读取章节失败: ${chapter.title}, $e');
       }
@@ -664,75 +667,186 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
     notifyListeners();
   }
 
-  /// 点击全文搜索结果，打开对应章节并定位
-  Future<void> navigateToGlobalSearchResult(
-      GlobalSearchResult result, GlobalSearchMatchLine matchLine) async {
-    // 打开对应章节的标签页
-    final existingIndex =
-        _openedTabs.indexWhere((t) => t.id == result.chapterUuid);
-    if (existingIndex != -1) {
-      _currentTabIndex = existingIndex;
-    } else {
-      // 查找章节模型
-      final chapter =
-          _chapters.where((c) => c.uuid == result.chapterUuid).firstOrNull;
-      if (chapter == null) return;
+  /// 在单个文件内容中匹配关键词
+  ///
+  /// 先做文件级交集过滤（必须同时包含所有关键词），再收集行级命中；
+  /// 无匹配时返回 null。[content] 的行结构需与目标编辑器中的文本保持一致，
+  /// 以便按行偏移量跳转定位。
+  GlobalSearchResult? _matchGlobalSearchContent({
+    required String content,
+    required List<String> keywords,
+    required String targetUuid,
+    required String title,
+    required String groupName,
+    required bool isOutline,
+  }) {
+    if (content.isEmpty) return null;
 
-      // 新标签页的内容由编辑器异步读取，注册完成信号，
-      // 待内容就绪后再依据搜索记录的偏移量定位，避免在内容未加载时计算匹配位置
-      final completer = Completer<void>();
-      _contentLoadWaiters[chapter.uuid] = completer;
-
-      openTab(
-        EditorTab(
-          id: chapter.uuid,
-          title: chapter.title,
-          type: EditorTabType.chapter,
-          isPreview: true,
-        ),
-        isPreview: true,
-      );
-
-      // 等待内容加载完成；超时兜底，避免标签页被中途切换导致永久等待
-      try {
-        await completer.future.timeout(const Duration(seconds: 2));
-      } on TimeoutException {
-        _contentLoadWaiters.remove(chapter.uuid);
-      }
+    // 文件级交集过滤：必须同时包含所有关键词
+    if (!SearchQueryParser.containsAll(
+      content,
+      keywords,
+      caseSensitive: _globalSearchCaseSensitive,
+    )) {
+      return null;
     }
 
-    // 定位到匹配行的起始偏移量
-    final tab =
-        _openedTabs.where((t) => t.id == result.chapterUuid).firstOrNull;
-    if (tab?.textController != null) {
-      final controller = tab!.textController!;
-      final keywords = SearchQueryParser.parse(_globalSearchQuery);
-      final sourceText = _globalSearchCaseSensitive
-          ? controller.text
-          : controller.text.toLowerCase();
+    // 收集行级匹配（任意关键词命中即记录该行）
+    final matchLines = <GlobalSearchMatchLine>[];
+    final lines = content.split('\n');
+    int lineStartOffset = 0;
 
-      // 在匹配行范围内查找最早出现的关键词位置
-      final lineStart = matchLine.startOffset;
-      final lineEnd = lineStart + matchLine.lineContent.length;
-
-      final match = SearchQueryParser.findFirstMatch(
-        sourceText,
+    for (int lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+      final line = lines[lineIndex];
+      final matchCountInLine = SearchQueryParser.countMatches(
+        line,
         keywords,
-        start: lineStart,
         caseSensitive: _globalSearchCaseSensitive,
       );
-      if (match != null && match.start < lineEnd) {
-        controller.selection = CodeLineSelectionUtils.selectionFromFlat(
-          controller.text,
-          match.start,
-          match.start + match.length,
-        );
-        // 通知小说编辑器滚动到新选区位置（编辑器尚未挂载时延后至挂载完成）
-        _scrollToSelectionWhenReady(tab, 10);
+
+      if (matchCountInLine > 0) {
+        matchLines.add(GlobalSearchMatchLine(
+          lineNumber: lineIndex + 1,
+          lineContent: line,
+          matchCount: matchCountInLine,
+          startOffset: lineStartOffset,
+        ));
       }
+
+      lineStartOffset += line.length + 1;
     }
 
+    if (matchLines.isEmpty) return null;
+
+    return GlobalSearchResult(
+      targetUuid: targetUuid,
+      title: title,
+      groupName: groupName,
+      isOutline: isOutline,
+      totalMatches: matchLines.fold<int>(0, (sum, m) => sum + m.matchCount),
+      matchLines: matchLines,
+    );
+  }
+
+  /// 点击全文搜索结果，打开对应文件并定位
+  Future<void> navigateToGlobalSearchResult(
+      GlobalSearchResult result, GlobalSearchMatchLine matchLine) async {
+    final existingIndex =
+        _openedTabs.indexWhere((t) => t.id == result.targetUuid);
+
+    if (existingIndex != -1) {
+      // 目标文件已打开，直接切换标签页
+      _currentTabIndex = existingIndex;
+    } else {
+      // 查找搜索结果对应的章节或设定项；目标已不存在时不跳转
+      final EditorTab? tab;
+      if (result.isOutline) {
+        final item =
+            _settingItems.where((i) => i.uuid == result.targetUuid).firstOrNull;
+        tab = item == null
+            ? null
+            : EditorTab(
+                id: item.uuid,
+                title: item.title,
+                type: EditorTabType.settings,
+                isPreview: true,
+              );
+      } else {
+        final chapter =
+            _chapters.where((c) => c.uuid == result.targetUuid).firstOrNull;
+        tab = chapter == null
+            ? null
+            : EditorTab(
+                id: chapter.uuid,
+                title: chapter.title,
+                type: EditorTabType.chapter,
+                isPreview: true,
+              );
+      }
+      if (tab == null) return;
+
+      await _openSearchResultTab(tab);
+    }
+
+    _locateSearchMatchInTab(result, matchLine);
     notifyListeners();
+  }
+
+  /// 打开搜索结果的标签页，并等待其内容加载完成
+  ///
+  /// 新标签页的内容由编辑器异步读取，注册完成信号后等待内容就绪，
+  /// 以便随后依据搜索记录的偏移量定位；超时兜底，避免标签页被中途切换导致永久等待。
+  Future<void> _openSearchResultTab(EditorTab tab) async {
+    final completer = Completer<void>();
+    _contentLoadWaiters[tab.id] = completer;
+
+    openTab(tab, isPreview: true);
+
+    try {
+      await completer.future.timeout(const Duration(seconds: 2));
+    } on TimeoutException {
+      _contentLoadWaiters.remove(tab.id);
+    }
+  }
+
+  /// 在已打开的标签页中定位搜索匹配行
+  ///
+  /// 章节标签页通过文本控制器设置选区，大纲标签页通过大纲编辑器设置选区，
+  /// 两者使用相同的全局偏移量（所有文本行以换行拼接后的位置）。
+  void _locateSearchMatchInTab(
+      GlobalSearchResult result, GlobalSearchMatchLine matchLine) {
+    final tab =
+        _openedTabs.where((t) => t.id == result.targetUuid).firstOrNull;
+    if (tab == null) return;
+
+    final text = _searchableTextOf(tab);
+    if (text == null) return;
+
+    final keywords = SearchQueryParser.parse(_globalSearchQuery);
+    final sourceText = _globalSearchCaseSensitive ? text : text.toLowerCase();
+
+    // 在匹配行范围内查找最早出现的关键词位置
+    final lineStart = matchLine.startOffset;
+    final lineEnd = lineStart + matchLine.lineContent.length;
+    final match = SearchQueryParser.findFirstMatch(
+      sourceText,
+      keywords,
+      start: lineStart,
+      caseSensitive: _globalSearchCaseSensitive,
+    );
+    if (match == null || match.start >= lineEnd) return;
+
+    // 按编辑器类型写入选区
+    final controller = tab.textController;
+    final editorState = tab.editorKey.currentState;
+    if (controller != null) {
+      controller.selection = CodeLineSelectionUtils.selectionFromFlat(
+        controller.text,
+        match.start,
+        match.start + match.length,
+      );
+    } else if (editorState is OutlineEditorState) {
+      editorState.selection = TextSelection(
+        baseOffset: match.start,
+        extentOffset: match.start + match.length,
+      );
+    }
+
+    // 通知编辑器滚动到新选区位置（编辑器尚未挂载时延后至挂载完成）
+    _scrollToSelectionWhenReady(tab, 10);
+  }
+
+  /// 取标签页编辑器可搜索的完整文本
+  ///
+  /// 章节标签页取文本控制器内容；大纲标签页取所有节点文本按换行拼接的结果。
+  /// 编辑器尚未加载完成时返回 null。
+  String? _searchableTextOf(EditorTab tab) {
+    final controller = tab.textController;
+    if (controller != null) return controller.text;
+
+    final editorState = tab.editorKey.currentState;
+    if (editorState is OutlineEditorState) return editorState.text;
+    return null;
   }
 
   /// 在编辑器挂载完成后滚动到当前选区
@@ -744,6 +858,10 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
     final editorState = tab.editorKey.currentState;
     if (editorState is NovelEditorState) {
       editorState.scrollToCursor();
+      return;
+    }
+    if (editorState is OutlineEditorState) {
+      editorState.scrollToSelection();
       return;
     }
     if (maxFrames <= 0 || !_openedTabs.contains(tab)) return;

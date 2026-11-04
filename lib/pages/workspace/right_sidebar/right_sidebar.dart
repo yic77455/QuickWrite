@@ -433,7 +433,7 @@ class _RightSidebarState extends State<RightSidebar>
         // 备份设置面板：移动端「备份设置」入口进入，仅展示备份设置区块
         return const OtherPanel(scope: OtherPanelScope.backup);
       case RightSidebarType.search:
-        // 全文搜索面板：跨章节搜索关键词
+        // 全文搜索面板：搜索章节及可选的大纲文件中的关键词
         return const SearchPanel();
       case RightSidebarType.history:
         // 历史版本面板：查看、删除和恢复章节备份

@@ -5,11 +5,13 @@ import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/search_query_parser.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
+import 'package:quick_write/shared/widgets/qw_tooltip.dart';
 
 /// 全文搜索面板
 ///
 /// 在右侧边栏中提供全文搜索功能，支持跨章节搜索关键词，
-/// 显示匹配结果列表，点击可跳转到对应章节的匹配位置
+/// 并可选择同时搜索大纲文件，显示匹配结果列表，
+/// 点击可跳转到对应文件的匹配位置
 class SearchPanel extends StatefulWidget {
   const SearchPanel({super.key});
 
@@ -101,7 +103,7 @@ class _SearchPanelState extends State<SearchPanel> {
               onChanged: _onSearchChanged,
               style: context.bodyMedium,
               decoration: InputDecoration(
-                hintText: '搜索全部章节...',
+                hintText: provider.globalSearchIncludeOutlines ? '搜索全部章节与大纲...' : '搜索全部章节...',
                 hintStyle: context.bodyMedium?.copyWith(
                   color: colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
                   height: 1.8,
@@ -114,7 +116,7 @@ class _SearchPanelState extends State<SearchPanel> {
                     Padding(
                       padding: const EdgeInsets.only(right: 4),
                       child: Tooltip(
-                        message: '可用 && 连接多个关键词进行交集搜索\n例如：张三 && 李四\n表示搜索同时包含"张三"和"李四"的章节',
+                        message: '可用 && 连接多个关键词进行交集搜索\n例如：张三 && 李四\n表示搜索同时包含"张三"和"李四"的文件',
                         child: Icon(
                           Icons.info_outline_rounded,
                           size: 16,
@@ -160,12 +162,76 @@ class _SearchPanelState extends State<SearchPanel> {
             ),
           ),
           const SizedBox(height: 8),
-          // 结果统计
-          Padding(
-            padding: const EdgeInsets.only(right: 6),
-            child: _buildResultSummary(context, provider),
+          // 底部行：左侧为搜索范围复选开关，右侧为结果统计
+          Row(
+            children: [
+              _buildIncludeOutlinesCheckbox(context, provider),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: _buildResultSummary(context, provider),
+                ),
+              ),
+            ],
           ),
         ],
+      ),
+    );
+  }
+
+  /// 构建搜索范围复选框（是否包含大纲文件）
+  ///
+  /// 勾选后全文搜索会同时搜索大纲文件（设定项），取消勾选则只搜索正文文件。
+  Widget _buildIncludeOutlinesCheckbox(
+    BuildContext context,
+    WorkspaceProvider provider,
+  ) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final checked = provider.globalSearchIncludeOutlines;
+
+    return CursorTooltipTarget(
+      tooltipContent: const Text('同时搜索大纲文件'),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => provider.setGlobalSearchIncludeOutlines(!checked),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 复选框图标：选中显示实心圆勾，未选中显示空心圆圈
+            Padding(
+              padding: const EdgeInsets.only(right: 1),
+              child: SizedBox(
+                width: 24,
+                height: 24,
+                child: Material(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(24),
+                  child: InkWell(
+                    onTap: () => provider.setGlobalSearchIncludeOutlines(!checked),
+                    hoverColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.08),
+                    highlightColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.12),
+                    splashColor: Colors.transparent,
+                    borderRadius: BorderRadius.circular(24),
+                    child: Center(
+                      child: Icon(
+                        checked ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+                        size: 16,
+                        color: checked
+                            ? colorScheme.primary
+                            : colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Text(
+              '大纲',
+              style: context.labelSmall?.copyWith(color: colorScheme.onSurfaceVariant),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -174,10 +240,13 @@ class _SearchPanelState extends State<SearchPanel> {
   Widget _buildResultSummary(BuildContext context, WorkspaceProvider provider) {
     final colorScheme = Theme.of(context).colorScheme;
     final totalMatches = provider.globalSearchResults.fold<int>(0, (sum, r) => sum + r.totalMatches);
-    final chapterCount = provider.globalSearchResults.length;
+    final fileCount = provider.globalSearchResults.length;
 
     return Text(
-      '共搜索到 $chapterCount 章 / $totalMatches 处',
+      '共搜索到 $fileCount 个文件 / $totalMatches 处',
+      textAlign: TextAlign.right,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
       style: context.labelSmall?.copyWith(color: colorScheme.onSurfaceVariant),
     );
   }
@@ -206,7 +275,7 @@ class _SearchPanelState extends State<SearchPanel> {
 
     // 未输入关键词
     if (provider.globalSearchQuery.isEmpty) {
-      return _buildEmptyState(context, icon: Icons.search_rounded, text: '输入关键词搜索全部章节');
+      return _buildEmptyState(context, icon: Icons.search_rounded, text: '输入关键词开始搜索');
     }
 
     // 无匹配结果
@@ -245,13 +314,13 @@ class _SearchPanelState extends State<SearchPanel> {
       itemCount: provider.globalSearchResults.length,
       itemBuilder: (context, index) {
         final result = provider.globalSearchResults[index];
-        return _buildChapterResultItem(context, result, keywords, colorScheme, provider);
+        return _buildFileResultItem(context, result, keywords, colorScheme, provider);
       },
     );
   }
 
-  /// 构建单个章节的搜索结果项
-  Widget _buildChapterResultItem(
+  /// 构建单个文件的搜索结果项
+  Widget _buildFileResultItem(
     BuildContext context,
     GlobalSearchResult result,
     List<String> keywords,
@@ -261,10 +330,10 @@ class _SearchPanelState extends State<SearchPanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 章节标题行
+        // 文件标题行
         GestureDetector(
           onTap: () {
-            // 点击章节标题，跳转到第一个匹配行
+            // 点击文件标题，跳转到第一个匹配行
             if (result.matchLines.isNotEmpty) {
               provider.navigateToGlobalSearchResult(result, result.matchLines.first);
             }
@@ -280,20 +349,24 @@ class _SearchPanelState extends State<SearchPanel> {
               ),
               child: Row(
                 children: [
-                  // 章节图标
-                  Icon(Icons.article_outlined, size: 14, color: colorScheme.primary),
+                  // 文件图标（章节或大纲文件）
+                  Icon(
+                    result.isOutline ? Icons.account_tree_outlined : Icons.description_outlined,
+                    size: 14,
+                    color: colorScheme.primary,
+                  ),
                   const SizedBox(width: 6),
-                  // 卷名（如有）
-                  if (result.volumeName.isNotEmpty) ...[
+                  // 卷名或设定分组名（如有）
+                  if (result.groupName.isNotEmpty) ...[
                     Text(
-                      '${result.volumeName} · ',
+                      '${result.groupName} · ',
                       style: context.labelSmall?.copyWith(color: colorScheme.onSurfaceVariant),
                     ),
                   ],
-                  // 章节标题
+                  // 文件标题
                   Expanded(
                     child: Text(
-                      result.chapterTitle,
+                      result.title,
                       style: context.titleSmall?.copyWith(color: colorScheme.onSurface, fontWeight: FontWeight.w600),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,

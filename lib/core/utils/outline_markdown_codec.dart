@@ -72,6 +72,34 @@ class OutlineMarkdownCodec {
     return result;
   }
 
+  /// 将大纲文件内容解析为节点纯文本行
+  ///
+  /// 大纲文件按行存储节点，行首缩进表示层级、行内使用 Markdown 标记；
+  /// 此处逐行去除缩进并反序列化，得到与大纲编辑器中节点文本顺序一致的纯文本行，
+  /// 供全文搜索按行匹配并按偏移量定位。
+  static List<String> parseContentLines(String content) {
+    final lines = <String>[];
+    for (final rawLine in content.split('\n')) {
+      // 跳过空行（末尾换行产生的空行不参与序列化）
+      if (rawLine.isEmpty) continue;
+
+      // 去除行首缩进（每级一个制表符或 4 个空格）
+      var line = rawLine;
+      while (true) {
+        if (line.startsWith('\t')) {
+          line = line.substring(1);
+        } else if (line.startsWith('    ')) {
+          line = line.substring(4);
+        } else {
+          break;
+        }
+      }
+
+      lines.add(deserialize(line).text);
+    }
+    return lines;
+  }
+
   /// 从 Markdown 行反序列化节点属性
   ///
   /// 返回解析得到的纯文本、标题级别和样式区间列表。

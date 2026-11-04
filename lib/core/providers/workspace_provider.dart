@@ -29,6 +29,7 @@ import 'package:quick_write/core/services/workspace/custom_highlight_service.dar
 import 'package:quick_write/core/services/workspace/volume_migration_service.dart';
 import 'package:quick_write/core/utils/code_line_selection_utils.dart';
 import 'package:quick_write/core/utils/find_replace_target.dart';
+import 'package:quick_write/core/utils/outline_markdown_codec.dart';
 import 'package:quick_write/core/utils/re_editor_span_builder.dart';
 import 'package:quick_write/core/utils/relative_path_utils.dart';
 import 'package:quick_write/core/utils/search_query_parser.dart';
@@ -612,27 +613,33 @@ class GlobalSearchMatchLine {
   });
 }
 
-/// 全文搜索结果（按章节分组）
+/// 全文搜索结果（按文件分组）
+///
+/// 一个结果对应一个章节或一个大纲文件（设定项）
 class GlobalSearchResult {
-  /// 章节 UUID
-  final String chapterUuid;
+  /// 目标文件 UUID（章节 UUID 或设定项 UUID）
+  final String targetUuid;
 
-  /// 章节标题
-  final String chapterTitle;
+  /// 目标文件标题
+  final String title;
 
-  /// 卷名
-  final String volumeName;
+  /// 卷名（章节所属分卷）或分组名（大纲所属设定分组）
+  final String groupName;
 
-  /// 该章节中的总匹配数
+  /// 是否为大纲文件的搜索结果
+  final bool isOutline;
+
+  /// 该文件中的总匹配数
   final int totalMatches;
 
   /// 匹配行列表
   final List<GlobalSearchMatchLine> matchLines;
 
   const GlobalSearchResult({
-    required this.chapterUuid,
-    required this.chapterTitle,
-    required this.volumeName,
+    required this.targetUuid,
+    required this.title,
+    required this.groupName,
+    required this.isOutline,
     required this.totalMatches,
     required this.matchLines,
   });
