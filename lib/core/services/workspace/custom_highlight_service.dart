@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:quick_write/core/models/custom_highlight.dart';
+import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 
 /// 自定义高亮配置文件名（保存在书籍根目录下）
 const String kCustomHighlightFileName = 'custom_highlights.json';
@@ -67,6 +68,8 @@ class CustomHighlightService extends ChangeNotifier {
       }
       final jsonContent = const JsonEncoder.withIndent('  ').convert(_config.toJson());
       await file.writeAsString(jsonContent);
+      // 高亮配置已落盘，交由云同步服务安排一次同步
+      CloudSyncService.instance.notifyLocalChange();
       return true;
     } catch (e) {
       debugPrint('保存自定义高亮配置失败: $e');

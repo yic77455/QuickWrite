@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:quick_write/core/models/app_settings.dart';
 import 'package:quick_write/core/theme/custom_theme.dart';
 import 'package:quick_write/core/theme/theme_store.dart';
+import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'app_paths.dart';
 import 'font_service.dart';
@@ -251,6 +252,10 @@ class SettingsService extends ChangeNotifier {
     final success = await _themeStore.syncAll(themes);
     _customThemes = themes;
     notifyListeners();
+    if (success) {
+      // 主题文件已更新，交由云同步服务安排一次同步
+      CloudSyncService.instance.notifyLocalChange();
+    }
     return success;
   }
 
@@ -991,6 +996,8 @@ class SettingsService extends ChangeNotifier {
 
     if (success) {
       notifyListeners();
+      // 配置文件已更新，交由云同步服务安排一次同步
+      CloudSyncService.instance.notifyLocalChange();
     }
 
     return success;
@@ -1002,9 +1009,13 @@ class SettingsService extends ChangeNotifier {
     _saveDebounceTimer?.cancel();
     _saveDebounceTimer = Timer(
       const Duration(milliseconds: _saveDebounceDelay),
-      () {
+      () async {
         _saveDebounceTimer = null;
-        _saveSettings();
+        final success = await _saveSettings();
+        if (success) {
+          // 配置文件已更新，交由云同步服务安排一次同步
+          CloudSyncService.instance.notifyLocalChange();
+        }
       },
     );
   }

@@ -281,6 +281,9 @@ class BookshelfProvider extends ChangeNotifier {
 
     // 通知 UI 重绘
     notifyListeners();
+
+    // 排序结果已落盘，交由云同步服务安排一次同步
+    CloudSyncService.instance.notifyLocalChange();
   }
 
   /// 新建一本书
@@ -330,7 +333,10 @@ class BookshelfProvider extends ChangeNotifier {
     // 更新内存数据并通知 UI 重绘
     _allBooks.insert(0, newBook);
     notifyListeners();
-    
+
+    // 新书已落盘，交由云同步服务安排一次同步
+    CloudSyncService.instance.notifyLocalChange();
+
     return 0;
   }
 
@@ -404,7 +410,10 @@ class BookshelfProvider extends ChangeNotifier {
     // 更新内存数据
     _allBooks.insert(0, newBook);
     notifyListeners();
-    
+
+    // 导入的书籍已落盘，交由云同步服务安排一次同步
+    CloudSyncService.instance.notifyLocalChange();
+
     return newBook;
   }
 
@@ -456,6 +465,9 @@ class BookshelfProvider extends ChangeNotifier {
     });
 
     notifyListeners();
+
+    // 删除结果已落盘，交由云同步服务安排一次同步
+    CloudSyncService.instance.notifyLocalChange();
   }
 
   /// 批量删除书籍（移入回收站）
@@ -520,6 +532,9 @@ class BookshelfProvider extends ChangeNotifier {
     });
 
     notifyListeners();
+
+    // 删除结果已落盘，交由云同步服务安排一次同步
+    CloudSyncService.instance.notifyLocalChange();
   }
 
   /// 从回收站恢复书籍
@@ -578,7 +593,10 @@ class BookshelfProvider extends ChangeNotifier {
       // 更新内存数据
       _allBooks.insert(0, restoredBook);
       notifyListeners();
-      
+
+      // 恢复结果已落盘，交由云同步服务安排一次同步
+      CloudSyncService.instance.notifyLocalChange();
+
       return true;
     } catch (e) {
       debugPrint('恢复书籍失败: $e');
@@ -615,6 +633,9 @@ class BookshelfProvider extends ChangeNotifier {
 
     _allGroups.add(newGroup);
     notifyListeners();
+
+    // 分组已落盘，交由云同步服务安排一次同步
+    CloudSyncService.instance.notifyLocalChange();
     return 0;
   }
 
@@ -645,6 +666,9 @@ class BookshelfProvider extends ChangeNotifier {
     });
 
     notifyListeners();
+
+    // 分组变更已落盘，交由云同步服务安排一次同步
+    CloudSyncService.instance.notifyLocalChange();
     return 0;
   }
 
@@ -689,6 +713,9 @@ class BookshelfProvider extends ChangeNotifier {
     });
 
     notifyListeners();
+
+    // 分组变更已落盘，交由云同步服务安排一次同步
+    CloudSyncService.instance.notifyLocalChange();
   }
 
   /// 将书籍移动到指定分组
@@ -712,6 +739,9 @@ class BookshelfProvider extends ChangeNotifier {
     });
 
     notifyListeners();
+
+    // 分组变更已落盘，交由云同步服务安排一次同步
+    CloudSyncService.instance.notifyLocalChange();
   }
 
   /// 更新书籍信息
@@ -757,6 +787,9 @@ class BookshelfProvider extends ChangeNotifier {
     });
 
     notifyListeners();
+
+    // 书籍信息已落盘，交由云同步服务安排一次同步
+    CloudSyncService.instance.notifyLocalChange();
   }
 
   /// 重排分组顺序
@@ -773,5 +806,8 @@ class BookshelfProvider extends ChangeNotifier {
 
     _allGroups = newOrderedGroups;
     notifyListeners();
+
+    // 排序结果已落盘，交由云同步服务安排一次同步
+    CloudSyncService.instance.notifyLocalChange();
   }
 }

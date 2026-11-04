@@ -3,6 +3,7 @@ import 'package:quick_write/core/models/cache_models/name_gen_cache.dart';
 import 'package:quick_write/core/models/name_gen/name_dictionary.dart';
 import 'package:quick_write/core/models/name_gen/name_gen_options.dart';
 import 'package:quick_write/core/services/cache_services/cache_service.dart';
+import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 import 'package:quick_write/core/services/name_gen/name_dictionary_store.dart';
 
 /// 随机取名缓存服务
@@ -123,6 +124,8 @@ class NameGenCacheService extends CacheService<NameGenCacheData> {
 
     if (!await _store.saveDictionary(saved)) return false;
     _dictionaries = dictionaries;
+    // 词典文件已更新，交由云同步服务安排一次同步
+    CloudSyncService.instance.notifyLocalChange();
     return true;
   }
 
@@ -149,6 +152,8 @@ class NameGenCacheService extends CacheService<NameGenCacheData> {
     if (!await _store.deleteDictionary(id)) return false;
     final dictionaries = List<NameDictionary>.from(_dictionaries)..removeAt(index);
     _dictionaries = dictionaries;
+    // 词典文件已删除，交由云同步服务安排一次同步
+    CloudSyncService.instance.notifyLocalChange();
     return true;
   }
 

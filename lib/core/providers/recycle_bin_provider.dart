@@ -12,6 +12,7 @@ import 'package:quick_write/core/services/database_service.dart';
 import 'package:quick_write/core/services/backup_service.dart';
 import 'package:quick_write/core/services/cache_services/chapter_cursor_cache_service.dart';
 import 'package:quick_write/core/services/cache_services/misc_cache_service.dart';
+import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 import 'package:quick_write/core/services/recycle_item_service.dart';
 import 'package:isar/isar.dart';
 import 'package:uuid/uuid.dart';
@@ -486,6 +487,8 @@ class RecycleBinProvider extends ChangeNotifier {
       // 更新内存数据
       _allRecycledItems.removeWhere((i) => i.uuid == item.uuid);
       notifyListeners();
+      // 章节已重新落盘，交由云同步服务安排一次同步
+      CloudSyncService.instance.notifyLocalChange();
     }
 
     return restoredChapter;
@@ -519,6 +522,8 @@ class RecycleBinProvider extends ChangeNotifier {
       // 更新内存数据
       _allRecycledItems.removeWhere((i) => i.uuid == item.uuid);
       notifyListeners();
+      // 设定项已重新落盘，交由云同步服务安排一次同步
+      CloudSyncService.instance.notifyLocalChange();
     }
 
     return restoredItem;
@@ -551,6 +556,8 @@ class RecycleBinProvider extends ChangeNotifier {
       final restoredUuids = items.map((i) => i.uuid).toSet();
       _allRecycledItems.removeWhere((i) => restoredUuids.contains(i.uuid));
       notifyListeners();
+      // 恢复的章节已重新落盘，交由云同步服务安排一次同步
+      CloudSyncService.instance.notifyLocalChange();
     }
 
     return result;
@@ -583,6 +590,8 @@ class RecycleBinProvider extends ChangeNotifier {
       final restoredUuids = items.map((i) => i.uuid).toSet();
       _allRecycledItems.removeWhere((i) => restoredUuids.contains(i.uuid));
       notifyListeners();
+      // 恢复的设定项已重新落盘，交由云同步服务安排一次同步
+      CloudSyncService.instance.notifyLocalChange();
     }
 
     return result;

@@ -299,6 +299,9 @@ mixin BookDataMixin on WorkspaceStateBase {
     // 刷新章节列表
     await _loadChapters();
 
+    // 章节改名已落盘，交由云同步服务安排一次同步
+    _notifyBookshelfRefresh();
+
     return true;
   }
 
@@ -708,6 +711,9 @@ mixin BookDataMixin on WorkspaceStateBase {
     await _rebuildGlobalOrderIndex();
     notifyListeners();
 
+    // 章节移动已落盘，交由云同步服务安排一次同步
+    _notifyBookshelfRefresh();
+
     return chaptersToMove.length;
   }
 
@@ -881,6 +887,9 @@ mixin BookDataMixin on WorkspaceStateBase {
     await _rebuildGlobalOrderIndex();
 
     notifyListeners();
+
+    // 章节移动已落盘，交由云同步服务安排一次同步
+    _notifyBookshelfRefresh();
     return true;
   }
 
@@ -945,6 +954,9 @@ mixin BookDataMixin on WorkspaceStateBase {
     await _loadVolumes();
 
     notifyListeners();
+
+    // 新建分卷已落盘，交由云同步服务安排一次同步
+    _notifyBookshelfRefresh();
     return volume.uuid;
   }
 
@@ -973,15 +985,20 @@ mixin BookDataMixin on WorkspaceStateBase {
     final chapter = volumeChapters.removeAt(oldIndex);
     volumeChapters.insert(newIndex, chapter);
 
-    // 更新卷内序号
+    // 更新卷内序号与修改时间，修改时间保证排序变化参与同步合并
+    final now = DateTime.now();
     for (int i = 0; i < volumeChapters.length; i++) {
       volumeChapters[i].volumeOrderIndex = i;
+      volumeChapters[i].updatedAt = now;
     }
 
     // 重建全局 orderIndex 并写入数据库
     await _rebuildGlobalOrderIndex();
 
     notifyListeners();
+
+    // 章节排序已落盘，交由云同步服务安排一次同步
+    _notifyBookshelfRefresh();
   }
 
   /// 重建所有章节的全局 orderIndex
@@ -1151,6 +1168,9 @@ mixin BookDataMixin on WorkspaceStateBase {
     }
 
     notifyListeners();
+
+    // 分卷改名已落盘，交由云同步服务安排一次同步
+    _notifyBookshelfRefresh();
     return true;
   }
 
@@ -1378,6 +1398,9 @@ mixin BookDataMixin on WorkspaceStateBase {
     await _loadSettingGroups();
     notifyListeners();
 
+    // 新建分组已落盘，交由云同步服务安排一次同步
+    _notifyBookshelfRefresh();
+
     return group;
   }
 
@@ -1454,6 +1477,9 @@ mixin BookDataMixin on WorkspaceStateBase {
     await _loadSettingItems();
     notifyListeners();
 
+    // 新建设定项已落盘，交由云同步服务安排一次同步
+    _notifyBookshelfRefresh();
+
     return item;
   }
 
@@ -1522,6 +1548,9 @@ mixin BookDataMixin on WorkspaceStateBase {
     await _loadSettingItems();
 
     notifyListeners();
+
+    // 分组改名已落盘，交由云同步服务安排一次同步
+    _notifyBookshelfRefresh();
     return true;
   }
 
@@ -1604,6 +1633,9 @@ mixin BookDataMixin on WorkspaceStateBase {
     }
 
     notifyListeners();
+
+    // 设定项改名已落盘，交由云同步服务安排一次同步
+    _notifyBookshelfRefresh();
     return true;
   }
 
@@ -1769,15 +1801,20 @@ mixin BookDataMixin on WorkspaceStateBase {
     final item = groupItems.removeAt(oldIndex);
     groupItems.insert(newIndex, item);
 
-    // 更新所有的 groupOrderIndex
+    // 更新组内序号与修改时间，修改时间保证排序变化参与同步合并
+    final now = DateTime.now();
     for (int i = 0; i < groupItems.length; i++) {
       groupItems[i].groupOrderIndex = i;
+      groupItems[i].updatedAt = now;
     }
 
     // 重建全局 orderIndex 并写入数据库
     await _rebuildGlobalSettingOrderIndex();
 
     notifyListeners();
+
+    // 设定项排序已落盘，交由云同步服务安排一次同步
+    _notifyBookshelfRefresh();
   }
 
   /// 重建所有设定项的全局 orderIndex
@@ -1902,6 +1939,9 @@ mixin BookDataMixin on WorkspaceStateBase {
     // 重建全局 orderIndex 并刷新设定项列表
     await _rebuildGlobalSettingOrderIndex();
     notifyListeners();
+
+    // 设定项移动已落盘，交由云同步服务安排一次同步
+    _notifyBookshelfRefresh();
     return true;
   }
 
@@ -2041,6 +2081,9 @@ mixin BookDataMixin on WorkspaceStateBase {
     // 重建全局 orderIndex 并刷新设定项列表
     await _rebuildGlobalSettingOrderIndex();
     notifyListeners();
+
+    // 设定项移动已落盘，交由云同步服务安排一次同步
+    _notifyBookshelfRefresh();
 
     return itemsToMove.length;
   }
