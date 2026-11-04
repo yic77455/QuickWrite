@@ -183,6 +183,13 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 最近获得焦点的节点ID（用于取消选区后恢复焦点）
   String? _lastFocusedNodeId;
 
+  /// 上下箭头垂直移动光标时记录的目标横向坐标
+  ///
+  /// 该坐标相对节点文本内容左边缘，连续垂直移动时沿用同一值，
+  /// 避免经过较短的可视行或切换节点后光标列发生漂移；
+  /// 用其他按键或用鼠标、手指重新定位光标时清除。
+  double? _preferredCaretX;
+
   /// 批量选择模式下的滑选交互控制器
   ///
   /// 复用列表批量多选的统一逻辑，按住行尾竖条滑动时按区间连续选中或取消途经节点
@@ -1105,19 +1112,142 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
   // ================= 焦点与滚动 =================
 
-  /// 在节点间移动焦点
+  /// 上下箭头垂直移动光标
   ///
-  /// [forward] 为 true 向下移动，false 向上移动
-  void _moveFocus(String nodeId, bool forward) {
+  /// 优先在当前节点内的可视行之间移动，位于首行（向上）或末行（向下）时切换到相邻节点；
+  /// [forward] 为 true 向下移动，false 向上移动。
+  /// 连续的垂直移动沿用同一横向坐标，避免经过较短的可视行或切换节点后光标列发生漂移。
+  void _moveCaretVertically(String nodeId, {required bool forward}) {
+    final controller = _controllers[nodeId];
+    if (controller == null) return;
+
+    final selection = controller.selection;
+    // 存在文字选区时按方向折叠到选区一端，不产生跨行移动
+    if (!selection.isCollapsed) {
+      controller.selection = TextSelection.collapsed(offset: forward ? selection.end : selection.start);
+      _preferredCaretX = null;
+      return;
+    }
+
+    // 保留光标原有的亲和性，使自动换行处的光标落在正确的可视行上
+    final TextPosition caretPosition = TextPosition(
+      offset: selection.isValid ? selection.extentOffset.clamp(0, controller.text.length) : controller.text.length,
+      affinity: selection.affinity,
+    );
+    final renderEditable = _findRenderEditable(nodeId);
+    if (renderEditable == null || !renderEditable.attached) {
+      // 节点尚未完成排版，无法换算可视行：退化为按节点整体跳转
+      final double goalX = _preferredCaretX ?? 0.0;
+      _preferredCaretX = _moveFocusToNeighbor(nodeId, forward: forward, caretX: goalX) ? goalX : null;
+      return;
+    }
+
+    final Rect caretRect = renderEditable.getLocalRectForCaret(caretPosition);
+    // 光标高度即当前行的行高，用于把探测点落到相邻行的垂直中心
+    final double lineHeight = caretRect.height;
+    // 首次垂直移动时记录当前横向坐标，连续移动沿用该值
+    final double goalX = _preferredCaretX ?? caretRect.left;
+
+    // 从当前行向上/下偏移一行得到探测点，再换算成该点处的文字位置
+    final TextPosition probePosition = renderEditable.getPositionForPoint(
+      renderEditable.localToGlobal(
+        Offset(goalX, caretRect.center.dy + (forward ? lineHeight : -lineHeight)),
+      ),
+    );
+    final Rect probeCaretRect = renderEditable.getLocalRectForCaret(probePosition);
+
+    // 探测点仍落在当前行，说明已是首行/末行，切换到相邻节点
+    if ((probeCaretRect.center.dy - caretRect.center.dy).abs() < lineHeight / 2) {
+      _preferredCaretX = _moveFocusToNeighbor(nodeId, forward: forward, caretX: goalX) ? goalX : null;
+      return;
+    }
+
+    // 探测点落在相邻行：把光标移到该行的对应横向位置
+    _preferredCaretX = goalX;
+    controller.selection = TextSelection.fromPosition(probePosition);
+    _ensureCaretVisibleInViewport(nodeId);
+  }
+
+  /// 左右箭头在节点边界处切换相邻节点
+  ///
+  /// 光标位于节点文本开头时按左键切到上一节点并置于文本末尾，
+  /// 位于文本末尾时按右键切到下一节点并置于文本开头。
+  /// 返回 true 表示已切换节点；光标不在边界或已到达文档首/尾时返回 false。
+  bool _moveCaretAcrossNodeBoundary(String nodeId, {required bool forward}) {
+    final controller = _controllers[nodeId];
+    if (controller == null) return false;
+
+    final selection = controller.selection;
+    if (!selection.isValid || !selection.isCollapsed) return false;
+
+    // 光标未处于文本首/末位置时属于节点内部的横向移动，不切换节点
+    final int textLength = controller.text.length;
+    if (forward ? selection.extentOffset < textLength : selection.extentOffset > 0) return false;
+
     final flatList = _flatten();
     final currentIndex = flatList.indexWhere((f) => f.node.id == nodeId);
-    if (currentIndex == -1) return;
+    if (currentIndex == -1) return false;
 
     final targetIndex = forward ? currentIndex + 1 : currentIndex - 1;
-    if (targetIndex < 0 || targetIndex >= flatList.length) return;
+    if (targetIndex < 0 || targetIndex >= flatList.length) return false;
 
-    final targetId = flatList[targetIndex].node.id;
-    _focusNodeWithSelection(targetId, moveCursorToEnd: !forward);
+    // 向右切换置于下一节点开头，向左切换置于上一节点末尾
+    _focusNodeWithSelection(flatList[targetIndex].node.id, moveCursorToEnd: !forward);
+    return true;
+  }
+
+  /// 把光标焦点切换到相邻节点，并把光标定位到指定横向坐标处
+  ///
+  /// 返回 true 表示成功切换；已到达文档首/尾时返回 false。
+  bool _moveFocusToNeighbor(String nodeId, {required bool forward, required double caretX}) {
+    final flatList = _flatten();
+    final currentIndex = flatList.indexWhere((f) => f.node.id == nodeId);
+    if (currentIndex == -1) return false;
+
+    final targetIndex = forward ? currentIndex + 1 : currentIndex - 1;
+    if (targetIndex < 0 || targetIndex >= flatList.length) return false;
+
+    // 向下切换定位到目标节点首行，向上切换定位到末行，保持光标在视觉上的连续
+    _focusNodeAtCaretX(flatList[targetIndex].node.id, caretX, lastLine: !forward);
+    return true;
+  }
+
+  /// 聚焦指定节点，并把光标定位到首行或末行的指定横向坐标处
+  ///
+  /// 节点尚未构建或排版未完成时，先聚焦并滚动，待下一帧排版完成后再定位。
+  void _focusNodeAtCaretX(String nodeId, double caretX, {required bool lastLine}) {
+    final focusNode = _focusNodes[nodeId];
+    final controller = _controllers[nodeId];
+    if (focusNode == null || controller == null) return;
+
+    focusNode.requestFocus();
+    _scrollToNode(nodeId);
+    if (_applyCaretX(nodeId, caretX, lastLine: lastLine)) return;
+
+    // 节点排版完成后重新定位，避免切换时目标节点尚未构建而丢失横向坐标
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _applyCaretX(nodeId, caretX, lastLine: lastLine);
+    });
+  }
+
+  /// 按横向坐标定位节点光标（横向坐标相对文本内容左边缘）
+  ///
+  /// 返回 false 表示节点尚未排版（如节点还未构建进视口）。
+  bool _applyCaretX(String nodeId, double caretX, {required bool lastLine}) {
+    final controller = _controllers[nodeId];
+    final renderEditable = _findRenderEditable(nodeId);
+    if (controller == null || renderEditable == null || !renderEditable.attached) return false;
+
+    // 向下切换定位到首行，向上切换定位到末行
+    final TextPosition anchor =
+        lastLine ? TextPosition(offset: controller.text.length) : const TextPosition(offset: 0);
+    final Rect lineRect = renderEditable.getLocalRectForCaret(anchor);
+    final TextPosition position = renderEditable.getPositionForPoint(
+      renderEditable.localToGlobal(Offset(caretX, lineRect.center.dy)),
+    );
+    controller.selection = TextSelection.fromPosition(position);
+    return true;
   }
 
   /// 聚焦指定节点并设置光标位置
@@ -1727,6 +1857,13 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     return ids;
   }
 
+  /// 清除指定节点的文本选区，光标停在选区尾部
+  void _collapseNodeTextSelection(String nodeId) {
+    final controller = _controllers[nodeId];
+    if (controller == null || controller.selection.isCollapsed) return;
+    controller.selection = TextSelection.collapsed(offset: controller.selection.extentOffset);
+  }
+
   /// 清除所有输入框的文本选区，避免文本选区与节点选区同时显示
   void _collapseTextSelections() {
     for (final controller in _controllers.values) {
@@ -2203,6 +2340,9 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 指针按下：记录起始位置用于后续判断是否为点击
   void _onPointerDown(PointerDownEvent event) {
     if (event.buttons != kPrimaryButton) return;
+
+    // 指针按下会重新定位光标，之前按方向键记录的横向坐标不再适用
+    _preferredCaretX = null;
 
     // 指针位于滚动条区域时跳过编辑器自身的指针处理，让滚动条正常响应点击与拖拽
     if (_isPositionOnScrollbar(event.position)) {
@@ -3492,7 +3632,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 在菜单显示中或刚关闭时收到下一次指针按下，立即将光标定位到点击位置
   /// 并聚焦目标节点，覆盖 [_handleContextMenuDismissed] 对旧节点的焦点请求，
   /// 避免菜单关闭后焦点先回到菜单所在节点造成光标闪烁。
-  /// 点击节点用于关闭菜单表示回到单点编辑，同时取消多节点选区
+  /// 点击节点用于关闭菜单表示回到单点编辑，同时取消多节点选区与菜单目标节点残留的文本选区
   /// （批量选择模式下节点选中由节点行自身切换，不在此清除）
   void _syncCursorAndFocusAfterMenuDismiss(PointerDownEvent event) {
     final nodeIndex = _findNodeIndexAtPosition(event.position);
@@ -3504,6 +3644,14 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
     final flatList = _flatten();
     final nodeId = flatList[nodeIndex].node.id;
+
+    // 菜单显示期间菜单自身持有焦点，菜单目标节点失焦后仍保留文本选区以维持高亮；
+    // 点击其他节点关闭菜单时该节点不会再重新获得焦点，需在此清除其选区，避免高亮残留
+    final menuNodeId = _contextMenuNodeId;
+    if (menuNodeId != null && menuNodeId != nodeId) {
+      _collapseNodeTextSelection(menuNodeId);
+    }
+
     final controller = _controllers[nodeId];
     final focusNode = _focusNodes[nodeId];
     final renderEditable = _findRenderEditable(nodeId);
@@ -3806,6 +3954,13 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
   // ================= 键盘事件 =================
 
+  /// 判断按键是否为方向键
+  static bool _isArrowKey(LogicalKeyboardKey key) =>
+      key == LogicalKeyboardKey.arrowUp ||
+      key == LogicalKeyboardKey.arrowDown ||
+      key == LogicalKeyboardKey.arrowLeft ||
+      key == LogicalKeyboardKey.arrowRight;
+
   /// 节点级键盘事件处理
   ///
   /// 拦截特定按键并执行对应的节点操作，返回 handled 阻止 TextField 默认行为
@@ -3830,6 +3985,39 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
         return KeyEventResult.handled;
       }
     }
+
+    // 方向键：上下键在节点内的可视行之间移动、位于首行/末行时切换相邻节点；
+    // 左右键在节点文本首/末位置时切换相邻节点，其余情况交由输入框默认处理。
+    // 长按方向键产生的重复事件按同样规则处理，保证连续步进一致
+    if (_isArrowKey(event.logicalKey)) {
+      if (event is KeyDownEvent || event is KeyRepeatEvent) {
+        // 带修饰键的方向键交由输入框默认行为处理（扩展选区、按词/段跳转等）
+        final bool plain = !HardwareKeyboard.instance.isShiftPressed &&
+            !HardwareKeyboard.instance.isControlPressed &&
+            !HardwareKeyboard.instance.isAltPressed;
+        if (plain) {
+          if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+            _moveCaretVertically(nodeId, forward: false);
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+            _moveCaretVertically(nodeId, forward: true);
+            return KeyEventResult.handled;
+          }
+          // 左右移动属于横向移动，放弃垂直移动记录的目标列
+          _preferredCaretX = null;
+          final bool moved = _moveCaretAcrossNodeBoundary(
+            nodeId,
+            forward: event.logicalKey == LogicalKeyboardKey.arrowRight,
+          );
+          if (moved) return KeyEventResult.handled;
+        }
+      }
+      return KeyEventResult.ignored;
+    }
+
+    // 除方向键外的按键都会重新定位光标，之前记录的横向坐标不再适用
+    _preferredCaretX = null;
 
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
@@ -3863,19 +4051,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     }
 
     // 只读模式下仅允许导航，禁用所有修改操作
-    if (widget.readOnly) {
-      // 上箭头：导航到上一节点
-      if (event.logicalKey == LogicalKeyboardKey.arrowUp && !isShift) {
-        _moveFocus(nodeId, false);
-        return KeyEventResult.handled;
-      }
-      // 下箭头：导航到下一节点
-      if (event.logicalKey == LogicalKeyboardKey.arrowDown && !isShift) {
-        _moveFocus(nodeId, true);
-        return KeyEventResult.handled;
-      }
-      return KeyEventResult.ignored;
-    }
+    if (widget.readOnly) return KeyEventResult.ignored;
 
     // Ctrl+Z：撤销；Ctrl+Shift+Z 或 Ctrl+Y：重做
     if (isControl && event.logicalKey == LogicalKeyboardKey.keyZ) {
@@ -3979,18 +4155,6 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
           }
         }
       }
-    }
-
-    // 上箭头：导航到上一节点
-    if (event.logicalKey == LogicalKeyboardKey.arrowUp && !isShift) {
-      _moveFocus(nodeId, false);
-      return KeyEventResult.handled;
-    }
-
-    // 下箭头：导航到下一节点
-    if (event.logicalKey == LogicalKeyboardKey.arrowDown && !isShift) {
-      _moveFocus(nodeId, true);
-      return KeyEventResult.handled;
     }
 
     // Ctrl+A：全选当前主题，再次按下全选整个文档
@@ -4425,6 +4589,40 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     }
 
     position.jumpTo(target.clamp(position.minScrollExtent, position.maxScrollExtent));
+  }
+
+  /// 保证节点光标所在行在编辑区视口内可见
+  ///
+  /// 节点内文字换行较多时，光标会随可视行移动而移出视口，
+  /// 需要同步滚动外层列表，使光标行始终可见。
+  void _ensureCaretVisibleInViewport(String nodeId) {
+    if (!_scrollController.hasClients) return;
+
+    final controller = _controllers[nodeId];
+    final renderEditable = _findRenderEditable(nodeId);
+    final viewportRect = _viewportGlobalRect();
+    if (controller == null || renderEditable == null || !renderEditable.attached || viewportRect == null) {
+      return;
+    }
+
+    final Rect caretRect = renderEditable.getLocalRectForCaret(controller.selection.extent);
+    final Rect caretGlobalRect = MatrixUtils.transformRect(renderEditable.getTransformTo(null), caretRect);
+    // 光标与视口边缘保留一行高度的间距，避免光标贴边而难以看清
+    final double margin = caretRect.height > 8.0 ? caretRect.height : 8.0;
+
+    final double currentOffset = _scrollController.offset;
+    double? target;
+    if (caretGlobalRect.bottom > viewportRect.bottom - margin) {
+      // 光标行位于视口下方：向下滚动使光标行回到视口内
+      target = currentOffset + caretGlobalRect.bottom - viewportRect.bottom + margin;
+    } else if (caretGlobalRect.top < viewportRect.top + margin) {
+      // 光标行位于视口上方：向上滚动使光标行回到视口内
+      target = currentOffset + caretGlobalRect.top - viewportRect.top - margin;
+    }
+    if (target == null) return;
+
+    final position = _scrollController.position;
+    _scrollController.jumpTo(target.clamp(position.minScrollExtent, position.maxScrollExtent));
   }
 
   // ================= 边缘自动滚动 =================
