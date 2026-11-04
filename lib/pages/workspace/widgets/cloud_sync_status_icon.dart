@@ -72,29 +72,79 @@ class _CloudSyncStatusIconState extends State<CloudSyncStatusIcon>
   /// 工作台子窗口则跟随主窗口推送的状态
   bool get _realtimeSyncActive => _service.isRealtimeSyncActive;
 
+  /// 构建状态图标
+  ///
+  /// [rotating] 控制图标是否随同步旋转
+  Widget _buildStatusIcon(IconData icon, {bool rotating = false}) {
+    final color = Theme.of(context).colorScheme.onSurfaceVariant;
+    Widget child = Icon(icon, size: widget.size, color: color);
+    if (rotating) {
+      child = RotationTransition(turns: _rotationController, child: child);
+    }
+    return child;
+  }
+
   @override
   Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.onSurfaceVariant;
-
     // 未开启实时同步：保持普通文件图标
     if (!_realtimeSyncActive) {
-      return Icon(Icons.article_outlined, size: widget.size, color: color);
+      return _buildStatusIcon(Icons.article_outlined);
     }
 
     // 正在同步：旋转的云同步图标
     if (_service.isSyncing) {
-      return RotationTransition(
-        turns: _rotationController,
-        child: Icon(Icons.cloud_sync_outlined, size: widget.size, color: color),
-      );
+      return _buildStatusIcon(Icons.cloud_sync_outlined, rotating: true);
     }
 
     // 已同步：本地内容已落盘且不存在待推送的改动
     if (!widget.hasPendingLocalEdits && !_service.hasUnsyncedChanges) {
-      return Icon(Icons.cloud_done_outlined, size: widget.size, color: color);
+      return _buildStatusIcon(Icons.cloud_done_outlined);
     }
 
     // 未同步：存在未保存的编辑内容，或仍有改动尚未推送
-    return Icon(Icons.cloud_off_outlined, size: widget.size, color: color);
+    return _buildStatusIcon(Icons.cloud_outlined);
   }
+}
+
+/// 云同步状态的悬停提示
+///
+/// 包裹状态图标与其后的文件名，使整块当前文件信息都能展示同步状态说明
+class CloudSyncStatusTooltip extends StatelessWidget {
+  /// 当前文件是否还有未保存到本地的编辑内容
+  final bool hasPendingLocalEdits;
+
+  /// 需要被提示包裹的内容
+  final Widget child;
+
+  const CloudSyncStatusTooltip({
+    super.key,
+    required this.child,
+    this.hasPendingLocalEdits = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: CloudSyncService.instance,
+      builder: (context, _) => Tooltip(
+        message: _describeSyncStatus(
+          CloudSyncService.instance,
+          hasPendingLocalEdits: hasPendingLocalEdits,
+        ),
+        child: child,
+      ),
+    );
+  }
+}
+
+/// 生成当前云同步状态的说明文案
+String _describeSyncStatus(
+  CloudSyncService service, {
+  required bool hasPendingLocalEdits,
+}) {
+  // 未开启实时同步时，图标不代表云同步状态
+  if (!service.isRealtimeSyncActive) return '实时同步未开启';
+  if (service.isSyncing) return '正在同步…';
+  if (hasPendingLocalEdits || service.hasUnsyncedChanges) return '尚未同步到云端';
+  return '已同步到云端';
 }
