@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
@@ -92,6 +93,7 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
   // 复用同一份实例可让框架只重新布局编辑区，而不重建整棵编辑器子树
   Widget? _cachedEditorCard;
   bool _cachedEditorCardHideTabBar = false;
+  bool _cachedEditorCardIsFullscreen = false;
   Color? _cachedEditorCardSurface;
 
   // 移动端左侧目录抽屉占屏幕宽度的比例
@@ -100,11 +102,19 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
   // 移动端右侧面板抽屉占屏幕宽度的比例
   static const double _mobileRightDrawerWidthFactor = 0.75;
 
+  // 注册到焦点管理器的按键提前拦截回调
+  // 保存同一份引用，便于在 dispose 时精确移除
+  late final KeyEventResult Function(KeyEvent) _earlyKeyHandler = _handleEarlyKeyEvent;
+
   @override
   void initState() {
     super.initState();
     // 监听窗口度量变化，仅用于跟踪软键盘的显示状态
     WidgetsBinding.instance.addObserver(this);
+    // 全屏模式下的退出按键需在焦点分发前拦截
+    // 编辑器内部绑定了 ESC 快捷键并在获取焦点时消费该按键，
+    // 只有在分发前处理，才能保证正文或大纲编辑器聚焦时 ESC 依然有效
+    FocusManager.instance.addEarlyKeyEventHandler(_earlyKeyHandler);
     // 初始化工作台数据
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -209,6 +219,7 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    FocusManager.instance.removeEarlyKeyEventHandler(_earlyKeyHandler);
     // 使用 initState 中保存的引用清空回调，避免在 dispose 中使用已失效的 context
     // 同窗口模式下从工作台返回书架时，WorkspacePage 会被卸载，
     // 若不清空 onBeforeClose，下次关闭主窗口时会因使用失效的 context 而报错
@@ -227,13 +238,70 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
       return _buildMobileLayout(context);
     }
 
+    final bool isEditorFullscreen =
+        context.select<WorkspaceProvider, bool>((provider) => provider.isEditorFullscreen);
+
+    // 桌面端在工作台外层统一响应全屏快捷键，焦点位于正文或大纲编辑器时均可触发
+    // ESC 退出全屏由提前拦截回调处理，编辑器会消费该按键，此处不再重复绑定
+    return CallbackShortcuts(
+      bindings: {
+        // F11 切换编辑区全屏
+        const SingleActivator(LogicalKeyboardKey.f11, includeRepeats: false): _toggleEditorFullscreen,
+      },
+      child: _buildDesktopLayout(context, isEditorFullscreen: isEditorFullscreen),
+    );
+  }
+
+  /// 在焦点分发前拦截按键
+  ///
+  /// 仅处理全屏模式下的 ESC，用于退出编辑区全屏；其余按键交回正常分发流程
+  KeyEventResult _handleEarlyKeyEvent(KeyEvent event) {
+    if (!mounted) return KeyEventResult.ignored;
+    // 只响应按下与长按重复，抬起事件不影响退出逻辑
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) return KeyEventResult.ignored;
+    if (event.logicalKey != LogicalKeyboardKey.escape) return KeyEventResult.ignored;
+
+    final WorkspaceProvider provider = context.read<WorkspaceProvider>();
+    if (!provider.isEditorFullscreen) return KeyEventResult.ignored;
+
+    _toggleEditorFullscreen();
+    return KeyEventResult.handled;
+  }
+
+  /// 切换编辑区全屏模式
+  void _toggleEditorFullscreen() {
+    final WorkspaceProvider provider = context.read<WorkspaceProvider>();
+    _setEditorFullscreen(!provider.isEditorFullscreen);
+  }
+
+  /// 设置编辑区全屏模式
+  ///
+  /// 界面元素隐藏与系统窗口全屏同步切换，使编辑区铺满整个屏幕
+  void _setEditorFullscreen(bool fullscreen) {
+    context.read<WorkspaceProvider>().setEditorFullscreen(fullscreen);
+    context.read<WindowProvider>().setFullScreen(fullscreen);
+
+    // 进入全屏后界面元素全部隐藏，通过浮动提示告知退出方式
+    if (fullscreen) {
+      SnackBarService.show(context, '已进入全屏，按 Esc 或 F11 退出');
+    }
+  }
+
+  /// 构建桌面端布局：标题栏 + 顶部工具栏 + 左右侧边栏 + 底部状态栏
+  ///
+  /// 编辑区全屏模式下其余界面元素通过 Offstage 隐藏，
+  /// 保持控件树结构不变，避免编辑区在切换全屏时被重建而丢失编辑状态
+  Widget _buildDesktopLayout(BuildContext context, {required bool isEditorFullscreen}) {
     return Scaffold(
       backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
-      appBar: _workspaceTitleBar(context),
+      // 全屏时使用零高度占位替代标题栏，保证 Scaffold 子级结构稳定
+      appBar: isEditorFullscreen
+          ? const PreferredSize(preferredSize: Size.zero, child: SizedBox.shrink())
+          : _workspaceTitleBar(context),
       body: Column(
         children: [
           // 顶部工具栏（与标题栏视觉一体）
-          const WorkspaceToolbar(),
+          Offstage(offstage: isEditorFullscreen, child: const WorkspaceToolbar()),
 
           // 主要内容区域
           Expanded(
@@ -243,20 +311,26 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
                 Row(
                   children: [
                     // 左侧边栏（章节目录 + 设定）
-                    const LeftSidebar(),
+                    Offstage(offstage: isEditorFullscreen, child: const LeftSidebar()),
 
-                    // 中间编辑区（多标签页）
-                    Expanded(child: _buildEditorCard(context)),
+                    // 中间编辑区（多标签页），全屏模式下收起标签页栏并铺满整窗
+                    Expanded(
+                      child: _buildEditorCard(
+                        context,
+                        hideTabBar: isEditorFullscreen,
+                        isFullscreen: isEditorFullscreen,
+                      ),
+                    ),
 
                     // 右侧边栏（属性面板）
-                    const RightSidebar(),
+                    Offstage(offstage: isEditorFullscreen, child: const RightSidebar()),
                   ],
                 ),
 
                 // 左侧边栏拖拽分隔条（浮层，不占用布局空间）
                 // 仅在左侧边栏展开时显示
                 // 定位：控制器中心对齐侧边栏边缘
-                if (context.watch<WorkspaceProvider>().isLeftSidebarExpanded)
+                if (!isEditorFullscreen && context.watch<WorkspaceProvider>().isLeftSidebarExpanded)
                   Positioned(
                     left: context.watch<WorkspaceProvider>().leftSidebarWidth,
                     top: 0,
@@ -272,7 +346,7 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
 
                 // 右侧边栏拖拽分隔条（浮层，不占用布局空间）
                 // 定位：控制器中心对齐侧边栏边缘
-                if (context.watch<WorkspaceProvider>().isRightSidebarExpanded)
+                if (!isEditorFullscreen && context.watch<WorkspaceProvider>().isRightSidebarExpanded)
                   Positioned(
                     right: context.watch<WorkspaceProvider>().rightSidebarWidth,
                     top: 0,
@@ -287,13 +361,14 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
                   ),
 
                 // 左侧边栏收起时的展开按钮（贴边长按钮）
-                if (!context.watch<WorkspaceProvider>().isLeftSidebarExpanded) _buildLeftSidebarExpandButton(context),
+                if (!isEditorFullscreen && !context.watch<WorkspaceProvider>().isLeftSidebarExpanded)
+                  _buildLeftSidebarExpandButton(context),
               ],
             ),
           ),
 
           // 底部状态栏（紧凑卡片样式）
-          _buildBottomStatusBar(context),
+          Offstage(offstage: isEditorFullscreen, child: _buildBottomStatusBar(context)),
         ],
       ),
     );
@@ -464,21 +539,28 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
   /// 构建编辑器卡片
   ///
   /// [hideTabBar] 为 true 时收起编辑区内部的标签页栏（移动端横屏沉浸编辑）
-  Widget _buildEditorCard(BuildContext context, {bool hideTabBar = false}) {
+  /// [isFullscreen] 为 true 时为编辑区全屏模式，卡片铺满整窗且不保留外边距与圆角
+  Widget _buildEditorCard(BuildContext context, {bool hideTabBar = false, bool isFullscreen = false}) {
     final Color surface = Theme.of(context).colorScheme.surface;
 
     // 构建依据未变时复用上一次的实例，使父级因约束变化重建时不连带重建编辑器子树
     if (_cachedEditorCard != null &&
         _cachedEditorCardHideTabBar == hideTabBar &&
+        _cachedEditorCardIsFullscreen == isFullscreen &&
         _cachedEditorCardSurface == surface) {
       return _cachedEditorCard!;
     }
     _cachedEditorCardHideTabBar = hideTabBar;
+    _cachedEditorCardIsFullscreen = isFullscreen;
     _cachedEditorCardSurface = surface;
 
     return _cachedEditorCard = Container(
-      margin: const EdgeInsets.only(left: 2, right: 4, top: 2, bottom: 2),
-      decoration: BoxDecoration(color: surface, borderRadius: BorderRadius.circular(6)),
+      margin: isFullscreen ? EdgeInsets.zero : const EdgeInsets.only(left: 2, right: 4, top: 2, bottom: 2),
+      decoration: BoxDecoration(
+        color: surface,
+        // 全屏模式下面板占据整个窗口，不需要圆角
+        borderRadius: isFullscreen ? null : BorderRadius.circular(6),
+      ),
       // 裁剪子组件，确保圆角生效
       clipBehavior: Clip.antiAlias,
       child: EditorContainer(hideTabBar: hideTabBar),
@@ -504,10 +586,18 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
       decoration: BoxDecoration(color: colorScheme.surface, borderRadius: BorderRadius.circular(6)),
       child: Row(
         children: [
-          // 左侧：当前文件信息（实时同步开启时图标反映云同步状态）
-          CloudSyncStatusIcon(size: 14, hasPendingLocalEdits: currentTab?.isModified ?? false),
-          const SizedBox(width: 6),
-          Text(currentTab?.title ?? '未打开文件', style: context.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant)),
+          // 左侧：当前文件信息（实时同步开启时图标反映云同步状态，整块信息悬停显示状态说明）
+          CloudSyncStatusTooltip(
+            hasPendingLocalEdits: currentTab?.isModified ?? false,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CloudSyncStatusIcon(size: 14, hasPendingLocalEdits: currentTab?.isModified ?? false),
+                const SizedBox(width: 6),
+                Text(currentTab?.title ?? '未打开文件', style: context.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant)),
+              ],
+            ),
+          ),
 
           const Spacer(),
 
@@ -540,6 +630,11 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
 
           // 右侧：保存状态信息
           _buildSaveStatusIndicator(context, colorScheme, currentTab),
+
+          const SizedBox(width: 12),
+
+          // 最右侧：全屏切换按钮
+          _buildFullScreenButton(context),
         ],
       ),
     );
@@ -560,21 +655,24 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
       decoration: BoxDecoration(color: colorScheme.surface, borderRadius: BorderRadius.circular(6)),
       child: Row(
         children: [
-          // 左侧：当前文件信息（实时同步开启时图标反映云同步状态，过长时省略号截断）
+          // 左侧：当前文件信息（实时同步开启时图标反映云同步状态，过长时省略号截断，整块信息悬停显示状态说明）
           Expanded(
-            child: Row(
-              children: [
-                CloudSyncStatusIcon(size: 14, hasPendingLocalEdits: currentTab?.isModified ?? false),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    currentTab?.title ?? '未打开文件',
-                    style: context.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+            child: CloudSyncStatusTooltip(
+              hasPendingLocalEdits: currentTab?.isModified ?? false,
+              child: Row(
+                children: [
+                  CloudSyncStatusIcon(size: 14, hasPendingLocalEdits: currentTab?.isModified ?? false),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      currentTab?.title ?? '未打开文件',
+                      style: context.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
 
@@ -600,6 +698,34 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
           // 右侧：字数统计
           _buildWordCountIndicator(context, workspaceProvider, currentTab),
         ],
+      ),
+    );
+  }
+
+  /// 构建全屏切换按钮
+  ///
+  /// 图标随编辑区全屏状态切换，点击切换编辑区全屏模式
+  Widget _buildFullScreenButton(BuildContext context) {
+    final bool isEditorFullscreen = context.select<WorkspaceProvider, bool>((provider) => provider.isEditorFullscreen);
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Tooltip(
+      message: isEditorFullscreen ? '退出全屏（F11 / Esc）' : '全屏（F11）',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _toggleEditorFullscreen,
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: Padding(
+            // 图标两侧留出点击余量，避免过小的点击区域难以命中
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Icon(
+              isEditorFullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
+              size: 14,
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
       ),
     );
   }

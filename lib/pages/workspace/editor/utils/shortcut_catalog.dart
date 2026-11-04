@@ -45,12 +45,14 @@ const List<ShortcutEntry> bodyEditorShortcuts = [
   ShortcutEntry(description: '移动光标', keys: '↑/↓/←/→'),
   ShortcutEntry(description: '移动光标（单词边界）', keys: 'Alt+←/→'),
   ShortcutEntry(description: '移动到页首/页尾', keys: 'Ctrl+↑/↓'),
+  ShortcutEntry(description: '全屏', keys: 'F11'),
+  ShortcutEntry(description: '退出全屏', keys: 'Esc'),
 ];
 
 /// 大纲编辑器快捷键分组列表
 ///
 /// 内容与大纲编辑器节点级键盘事件处理器及编辑器级键盘事件处理器中
-/// 已实现的快捷键保持一致。
+/// 已实现的快捷键保持一致，并包含工作台统一提供的全局快捷键。
 const List<ShortcutGroup> outlineEditorShortcutGroups = [
   ShortcutGroup(title: '基础导航', entries: [
     ShortcutEntry(description: '切换到上 / 下一节点', keys: '↑ / ↓'),
@@ -96,5 +98,9 @@ const List<ShortcutGroup> outlineEditorShortcutGroups = [
     ShortcutEntry(description: '查找', keys: 'Ctrl+F'),
     ShortcutEntry(description: '查找替换', keys: 'Ctrl+H'),
     ShortcutEntry(description: '保存', keys: 'Ctrl+S'),
+  ]),
+  ShortcutGroup(title: '窗口', entries: [
+    ShortcutEntry(description: '全屏', keys: 'F11'),
+    ShortcutEntry(description: '退出全屏', keys: 'Esc'),
   ]),
 ];

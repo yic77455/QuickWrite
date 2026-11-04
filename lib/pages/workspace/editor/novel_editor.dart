@@ -994,6 +994,12 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 布局设置-页边距（左右上下）则全部作为编辑器的内部留白，
   /// 使其落在编辑器盒内，点击边距空白处可把光标定位到附近的正文行。
   Widget _buildEditorAreaContent(BuildContext context, BoxConstraints constraints) {
+    // 窗口全屏切换、最小化等尺寸过渡期间可能瞬时得到无效宽度，
+    // 此时跳过内容布局，待尺寸恢复后正常渲染
+    if (!constraints.hasBoundedWidth || constraints.maxWidth <= 0) {
+      return const SizedBox.shrink();
+    }
+
     final SettingsService settings = SettingsService.instance;
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
     final bool pageViewEnabled = settings.isPageViewEnabled;

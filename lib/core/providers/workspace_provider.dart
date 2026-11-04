@@ -90,6 +90,13 @@ class WorkspaceProvider extends WorkspaceStateBase
   /// 上方工具栏是否展开，默认展开
   bool _isToolbarExpanded = true;
 
+  // ================= 编辑区全屏状态 =================
+
+  /// 编辑区是否处于全屏模式
+  ///
+  /// 全屏时仅显示编辑区域，隐藏标题栏、侧边栏、工具栏与状态栏
+  bool _isEditorFullscreen = false;
+
   // ================= 自定义高亮配置 =================
 
   /// 自定义高亮服务（按书籍独立加载，配置持久化到书籍根目录）
@@ -104,6 +111,9 @@ class WorkspaceProvider extends WorkspaceStateBase
   double get rightSidebarWidth => _rightSidebarWidth;
   RightSidebarType get rightSidebarType => _rightSidebarType;
   bool get isToolbarExpanded => _isToolbarExpanded;
+
+  /// 编辑区是否处于全屏模式
+  bool get isEditorFullscreen => _isEditorFullscreen;
 
   /// 获取自定义高亮服务
   CustomHighlightService get customHighlightService => _customHighlightService;
@@ -359,6 +369,15 @@ class WorkspaceProvider extends WorkspaceStateBase
       _isToolbarExpanded = expanded;
       notifyListeners();
     }
+  }
+
+  /// 设置编辑区全屏模式
+  ///
+  /// 全屏时仅保留编辑区域，退出后恢复全部界面元素
+  void setEditorFullscreen(bool fullscreen) {
+    if (_isEditorFullscreen == fullscreen) return;
+    _isEditorFullscreen = fullscreen;
+    notifyListeners();
   }
 
   // ================= 资源释放 =================

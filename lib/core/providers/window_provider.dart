@@ -29,6 +29,15 @@ class WindowProvider extends ChangeNotifier with WindowListener {
   // 窗口是否最小化，默认为 false
   bool _isMinimized = false;
 
+  // 窗口是否处于系统全屏，用于在尺寸切换期间跳过窗口状态的保存
+  bool _isFullScreen = false;
+
+  // 进入全屏前是否处于最大化，用于退出全屏后恢复最大化状态
+  bool _maximizedBeforeFullScreen = false;
+
+  // 进入全屏前的置顶状态，用于退出全屏后还原
+  bool _alwaysOnTopBeforeFullScreen = false;
+
   // 窗口类型，默认为主窗口
   final WindowType _windowType;
 
@@ -108,6 +117,7 @@ class WindowProvider extends ChangeNotifier with WindowListener {
   Future<void> _initWindowState() async {
     _isMaximized = await windowManager.isMaximized();
     _isMinimized = await windowManager.isMinimized();
+    _isFullScreen = await windowManager.isFullScreen();
     notifyListeners(); // 通知监听者状态已改变
   }
 
@@ -150,6 +160,20 @@ class WindowProvider extends ChangeNotifier with WindowListener {
         onAfterUnmaximize?.call();
       });
     }
+  }
+
+  // 窗口进入系统全屏时的回调
+  @override
+  void onWindowEnterFullScreen() {
+    _isFullScreen = true;
+  }
+
+  // 窗口退出系统全屏时的回调
+  @override
+  void onWindowLeaveFullScreen() {
+    _isFullScreen = false;
+    // 保存退出全屏后恢复的窗口位置与大小
+    _debounceSave();
   }
 
   // 窗口最小化时的回调
@@ -212,19 +236,21 @@ class WindowProvider extends ChangeNotifier with WindowListener {
   // 窗口调整大小后的回调，用户调整窗口大小时触发
   @override
   void onWindowResized() {
-    // 只有非最大化状态时才保存窗口大小
-    if (!_isMaximized) {
-      _debounceSave();
+    // 最大化或全屏状态下窗口尺寸不是用户设定的尺寸，不保存
+    if (_isMaximized || _isFullScreen) {
+      return;
     }
+    _debounceSave();
   }
 
   // 窗口移动后的回调，用户移动窗口时触发
   @override
   void onWindowMoved() {
-    // 只有非最大化状态时才保存窗口位置
-    if (!_isMaximized) {
-      _debounceSave();
+    // 最大化或全屏状态下窗口位置不是用户设定的位置，不保存
+    if (_isMaximized || _isFullScreen) {
+      return;
     }
+    _debounceSave();
   }
 
   // ================= 状态保存方法 =================
@@ -254,6 +280,9 @@ class WindowProvider extends ChangeNotifier with WindowListener {
   // 保存窗口状态到缓存文件
   // 包括窗口的位置、大小和最大化状态
   Future<void> _saveWindowState() async {
+    // 全屏期间窗口铺满屏幕，其尺寸与位置不代表用户设定的窗口状态，不写入缓存
+    if (_isFullScreen) return;
+
     final size = await windowManager.getSize();
     final position = await windowManager.getPosition();
     final isMaximized = await windowManager.isMaximized();
@@ -302,6 +331,56 @@ class WindowProvider extends ChangeNotifier with WindowListener {
   // 点击最小化按钮时调用
   Future<void> minimize() async {
     await windowManager.minimize();
+  }
+
+  // 设置系统全屏状态
+  // 进入编辑区全屏时调用，使窗口铺满屏幕并覆盖任务栏
+  Future<void> setFullScreen(bool fullscreen) async {
+    if (_isFullScreen == fullscreen) return;
+
+    if (fullscreen) {
+      await _enterFullScreen();
+    } else {
+      await _exitFullScreen();
+    }
+  }
+
+  // 进入系统全屏
+  Future<void> _enterFullScreen() async {
+    // 先标记全屏，避免切换过程中的尺寸与位置变化被当作普通缩放写入缓存
+    _isFullScreen = true;
+    _maximizedBeforeFullScreen = _isMaximized;
+    _alwaysOnTopBeforeFullScreen = await windowManager.isAlwaysOnTop();
+
+    // 最大化状态下窗口尺寸由系统接管，无法铺满整个屏幕，先恢复为普通窗口
+    if (_maximizedBeforeFullScreen) {
+      await windowManager.unmaximize();
+    }
+
+    // 置顶显示，避免系统任务栏遮挡全屏内容
+    // 放在全屏之后设置，确保窗口铺满屏幕后再提升到最顶层
+    await windowManager.setFullScreen(true);
+    await windowManager.setAlwaysOnTop(true);
+  }
+
+  // 退出系统全屏
+  Future<void> _exitFullScreen() async {
+    await windowManager.setFullScreen(false);
+    // 还原进入全屏前的置顶状态
+    await windowManager.setAlwaysOnTop(_alwaysOnTopBeforeFullScreen);
+
+    final bool restoreMaximized = _maximizedBeforeFullScreen;
+    _maximizedBeforeFullScreen = false;
+    // 清除全屏标记，避免恢复后的窗口状态被跳过
+    _isFullScreen = false;
+
+    // 全屏前处于最大化时恢复最大化状态
+    // 最大化状态由窗口回调单独保存，此处不再写入窗口位置与大小，避免用最大化尺寸覆盖缓存
+    if (restoreMaximized) {
+      await windowManager.maximize();
+    } else {
+      _debounceSave();
+    }
   }
 
   // 关闭窗口
