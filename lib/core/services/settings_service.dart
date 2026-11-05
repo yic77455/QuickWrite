@@ -423,6 +423,9 @@ class SettingsService extends ChangeNotifier {
   /// 获取是否显示大纲编辑器底部的快捷键提示
   bool get outlineBottomHintEnabled => _settings.outlineBottomHintEnabled;
 
+  /// 获取是否在大纲编辑器第一个节点上方显示大纲标题
+  bool get outlineShowTitle => _settings.outlineShowTitle;
+
   /// 更新是否显示章节标题
   Future<bool> updateShowChapterTitle(bool value) async {
     final newSettings = _settings.copyWith(showChapterTitle: value);
@@ -549,6 +552,12 @@ class SettingsService extends ChangeNotifier {
   /// 更新是否显示大纲编辑器底部的快捷键提示
   Future<bool> updateOutlineBottomHintEnabled(bool value) async {
     final newSettings = _settings.copyWith(outlineBottomHintEnabled: value);
+    return updateSettings(newSettings);
+  }
+
+  /// 更新是否在大纲编辑器第一个节点上方显示大纲标题
+  Future<bool> updateOutlineShowTitle(bool value) async {
+    final newSettings = _settings.copyWith(outlineShowTitle: value);
     return updateSettings(newSettings);
   }
 
@@ -906,6 +915,7 @@ class SettingsService extends ChangeNotifier {
       outlineNodeSpacing: _platformDefaults.outlineNodeSpacing,
       outlinePageViewMode: _platformDefaults.outlinePageViewMode,
       outlineBottomHintEnabled: _platformDefaults.outlineBottomHintEnabled,
+      outlineShowTitle: _platformDefaults.outlineShowTitle,
     );
     return updateSettings(newSettings);
   }

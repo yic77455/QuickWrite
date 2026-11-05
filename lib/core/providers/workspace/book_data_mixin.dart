@@ -1606,6 +1606,9 @@ mixin BookDataMixin on WorkspaceStateBase {
       return false;
     }
 
+    // 折叠状态文件随正文一同迁移
+    await _moveSettingFoldStateFile(oldFilePath, newFilePath);
+
     // 重命名备份目录（沿用标题变更后的新目录名）
     await BackupService.instance.renameSettingBackupDir(
       bookUuid: _currentBook!.uuid,
@@ -1744,6 +1747,9 @@ mixin BookDataMixin on WorkspaceStateBase {
     // 删除对应的设定备份目录
     await BackupService.instance.deleteSettingBackups(_currentBook!.uuid, itemTitle);
 
+    // 删除设定项的折叠状态文件
+    await _deleteSettingFoldStateFile(item);
+
     // 从数据库中删除设定项记录
     await _isar.writeTxn(() async {
       await _isar.settingItemModels.delete(item.id);
@@ -1759,6 +1765,48 @@ mixin BookDataMixin on WorkspaceStateBase {
     // 同步书架最近编辑与字数显示
     _notifyBookshelfRefresh();
     return true;
+  }
+
+  /// 删除设定项的大纲折叠状态文件
+  ///
+  /// 折叠状态文件按设定项文件路径派生，正文删除后不再有意义，
+  /// 残留文件会被之后新建的同名设定项误读。
+  Future<void> _deleteSettingFoldStateFile(SettingItemModel item) async {
+    final String? foldFilePath = BookFolderService.foldStateFilePath(getSettingItemFilePath(item));
+    if (foldFilePath == null) return;
+    try {
+      final File file = File(foldFilePath);
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (e) {
+      debugPrint('删除设定项折叠状态文件失败: $e');
+    }
+  }
+
+  /// 迁移设定项的大纲折叠状态文件
+  ///
+  /// 折叠状态文件按设定项文件路径派生，正文改名或移动分组后需要同步迁移，
+  /// 否则折叠状态会残留在旧路径下，并与之后新建的同名设定项混淆。
+  Future<void> _moveSettingFoldStateFile(String oldItemFilePath, String newItemFilePath) async {
+    final String? oldFoldPath = BookFolderService.foldStateFilePath(oldItemFilePath);
+    final String? newFoldPath = BookFolderService.foldStateFilePath(newItemFilePath);
+    if (oldFoldPath == null || newFoldPath == null || oldFoldPath == newFoldPath) return;
+    try {
+      final File oldFile = File(oldFoldPath);
+      if (!await oldFile.exists()) return;
+      final File newFile = File(newFoldPath);
+      if (!await newFile.parent.exists()) {
+        await newFile.parent.create(recursive: true);
+      }
+      // 目标文件已存在时先移除，避免重命名因目标存在而失败
+      if (await newFile.exists()) {
+        await newFile.delete();
+      }
+      await oldFile.rename(newFoldPath);
+    } catch (e) {
+      debugPrint('迁移设定项折叠状态文件失败: $e');
+    }
   }
 
   /// 切换设定分组展开/折叠状态
@@ -1922,6 +1970,9 @@ mixin BookDataMixin on WorkspaceStateBase {
       return false;
     }
 
+    // 折叠状态文件随正文一同迁移
+    await _moveSettingFoldStateFile(oldFilePath, newFilePath);
+
     // 更新组内序号
     final targetGroupItems = _settingItems.where((i) => i.groupUuid == targetGroupUuid && i.uuid != itemUuid).toList();
     item.groupOrderIndex = targetGroupItems.length;
@@ -1978,6 +2029,11 @@ mixin BookDataMixin on WorkspaceStateBase {
         _currentBook!.uuid,
         item.title,
       );
+    }
+
+    // 集中删除设定项折叠状态文件
+    for (final item in itemsToDelete) {
+      await _deleteSettingFoldStateFile(item);
     }
 
     // 删除所有设定项记录、更新书籍修改时间
@@ -2056,10 +2112,10 @@ mixin BookDataMixin on WorkspaceStateBase {
       item.filePath = newRelativePath;
 
       // 移动设定项文件
+      final String newFilePath = getSettingItemFilePath(item);
       try {
         final oldFile = File(oldFilePath);
         if (await oldFile.exists()) {
-          final newFilePath = getSettingItemFilePath(item);
           final parentDir = Directory(newFilePath).parent;
           if (!await parentDir.exists()) {
             await parentDir.create(recursive: true);
@@ -2069,6 +2125,9 @@ mixin BookDataMixin on WorkspaceStateBase {
       } catch (e) {
         debugPrint('移动设定项文件失败: $e');
       }
+
+      // 折叠状态文件随正文一同迁移
+      await _moveSettingFoldStateFile(oldFilePath, newFilePath);
     }
 
     // 单事务批量更新所有设定项记录和书籍修改时间

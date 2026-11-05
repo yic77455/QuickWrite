@@ -10,6 +10,7 @@ import 'package:quick_write/core/constants/constants.dart';
 import 'package:quick_write/core/constants/material_icons.dart';
 import 'package:quick_write/core/constants/punctuation_symbols.dart';
 import 'package:quick_write/core/services/settings_service.dart';
+import 'package:quick_write/core/services/workspace/book_folder_service.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/providers/window_provider.dart';
 import 'package:quick_write/core/utils/batch_selection_controller.dart';
@@ -44,6 +45,16 @@ class OutlineEditor extends StatefulWidget {
   /// 关联的本地文件路径（为空时不进行文件读写）
   final String? filePath;
 
+  /// 大纲标题
+  ///
+  /// 显示在第一个节点上方，不属于节点，不参与节点格式与样式的设置。
+  final String title;
+
+  /// 大纲标题修改回调
+  ///
+  /// 标题内容随标签页标题更新，保存时由外部同步重命名大纲文件。
+  final ValueChanged<String>? onTitleChanged;
+
   /// 内容变化回调（用于触发自动保存和备份）
   final VoidCallback? onContentChanged;
 
@@ -67,16 +78,24 @@ class OutlineEditor extends StatefulWidget {
   /// 异步加载文件内容完成后触发，用于通知外部刷新查找替换结果等依赖内容的状态。
   final VoidCallback? onContentLoaded;
 
+  /// 内容加载完成后是否自动聚焦第一个节点
+  ///
+  /// 新建设定文件时为 true，使光标直接落在首个节点上便于立即输入。
+  final bool autoFocusFirstNode;
+
   const OutlineEditor({
     super.key,
     required this.colorScheme,
     this.filePath,
+    this.title = '',
+    this.onTitleChanged,
     this.onContentChanged,
     this.onSave,
     this.readOnly = false,
     this.onStatsChanged,
     this.extraTopPadding = 0.0,
     this.onContentLoaded,
+    this.autoFocusFirstNode = false,
   });
 
   @override
@@ -113,6 +132,15 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
   /// 节点瓦片的全局键映射（节点ID -> GlobalKey），用于命中检测
   final Map<String, GlobalKey> _nodeTileKeys = {};
+
+  /// 大纲标题输入控制器
+  late final TextEditingController _titleController;
+
+  /// 大纲标题输入框焦点
+  final FocusNode _titleFocusNode = FocusNode();
+
+  /// 大纲标题区域的全局键，用于标题区域的命中检测
+  final GlobalKey _titleFieldKey = GlobalKey();
 
   /// 滚动控制器
   ///
@@ -280,6 +308,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     WidgetsBinding.instance.addObserver(this);
     _scrollController = SyncScrollController(onApplyContentDimensions: _onApplyContentDimensions);
     _scrollGuard = EditorScrollGuard(_scrollController);
+    // 标题初始内容取自外部传入的大纲标题
+    _titleController = TextEditingController(text: widget.title);
 
     // 初始化批量选择滑选交互控制器，按住行尾竖条滑动时按区间连续选中或取消途经节点
     _batchSelectionController = BatchSelectionController(
@@ -320,6 +350,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       focusNode.dispose();
     }
     _editorFocusNode.dispose();
+    _titleController.dispose();
+    _titleFocusNode.dispose();
     _scrollController.dispose();
     _batchRevision.dispose();
     super.dispose();
@@ -337,6 +369,17 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   @override
   void didUpdateWidget(covariant OutlineEditor oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // 外部重命名后同步标题输入框内容，避免输入框与文件标题不一致；
+    // 标题输入框正在输入时不覆盖，防止光标位置被打断
+    if (widget.title != oldWidget.title &&
+        _titleController.text != widget.title &&
+        !_titleFocusNode.hasFocus) {
+      _titleController.text = widget.title;
+    }
+    // 大纲文件改名后同步迁移折叠状态文件
+    if (widget.filePath != oldWidget.filePath) {
+      _renameFoldStateFile(oldWidget.filePath, widget.filePath);
+    }
     // 查找替换栏显示/隐藏导致额外顶边距变化时，记录变化量供 Layout 阶段补偿滚动偏移
     if (widget.extraTopPadding != oldWidget.extraTopPadding) {
       final delta = widget.extraTopPadding - oldWidget.extraTopPadding;
@@ -618,10 +661,28 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
         setState(() {
           _isLoading = false;
         });
+        // 新建设定文件时把焦点落到第一个节点，便于内容加载完成后立即输入
+        if (widget.autoFocusFirstNode) {
+          _focusFirstNode();
+        }
         // 通知外部内容已加载完成，用于刷新查找替换等依赖内容的状态
         widget.onContentLoaded?.call();
       }
     }
+  }
+
+  /// 聚焦第一个节点并把光标置于节点开头
+  ///
+  /// 内容加载完成后节点可能尚未完成构建，因此延后到下一帧再请求焦点，
+  /// 确保对应的输入框已挂载；滚动定位由 [_focusNodeWithSelection] 负责。
+  void _focusFirstNode() {
+    final flatList = _flatten();
+    if (flatList.isEmpty) return;
+    final String nodeId = flatList.first.node.id;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focusNodeWithSelection(nodeId, moveCursorToEnd: false);
+    });
   }
 
   /// 将大纲树序列化为纯文本
@@ -750,13 +811,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   ///
   /// 与大纲文件同目录同名、扩展名替换为 `.fold.json`，
   /// 独立存放可避免折叠标记混入正文，影响导出与备份的内容。
-  String? get _foldStateFilePath {
-    final String? path = widget.filePath;
-    if (path == null || path.isEmpty) return null;
-    const String extension = GlobalConstants.settingFileExtension;
-    final String base = path.endsWith(extension) ? path.substring(0, path.length - extension.length) : path;
-    return '$base.fold.json';
-  }
+  String? get _foldStateFilePath => BookFolderService.foldStateFilePath(widget.filePath);
 
   /// 从文件读取折叠状态并应用到当前大纲树
   Future<void> _loadFoldState() async {
@@ -797,6 +852,38 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       await file.writeAsString(jsonEncode({'collapsed': _collectCollapsedPaths()}));
     } catch (e) {
       debugPrint('保存大纲折叠状态失败: $e');
+    }
+  }
+
+  /// 将折叠状态文件随大纲文件重命名一同迁移
+  ///
+  /// 折叠状态文件按大纲文件路径派生，大纲文件改名后需要把旧文件移动到新路径，
+  /// 否则折叠状态会残留在旧文件名下，与新文件名脱节。
+  void _renameFoldStateFile(String? oldFilePath, String? newFilePath) {
+    if (widget.readOnly) return;
+    final String? oldFoldPath = BookFolderService.foldStateFilePath(oldFilePath);
+    final String? newFoldPath = BookFolderService.foldStateFilePath(newFilePath);
+    if (oldFoldPath == null || newFoldPath == null || oldFoldPath == newFoldPath) return;
+    // 并入写入任务链，保证先完成排队中的旧路径写入，再迁移折叠状态文件
+    _foldStateWriteChain = _foldStateWriteChain.then((_) => _moveFoldStateFile(oldFoldPath, newFoldPath));
+  }
+
+  /// 将折叠状态文件从旧路径移动到新路径
+  Future<void> _moveFoldStateFile(String oldPath, String newPath) async {
+    try {
+      final File oldFile = File(oldPath);
+      if (!await oldFile.exists()) return;
+      final File newFile = File(newPath);
+      if (!await newFile.parent.exists()) {
+        await newFile.parent.create(recursive: true);
+      }
+      // 目标文件已存在时先移除，避免重命名因目标存在而失败
+      if (await newFile.exists()) {
+        await newFile.delete();
+      }
+      await oldFile.rename(newPath);
+    } catch (e) {
+      debugPrint('重命名大纲折叠状态文件失败: $e');
     }
   }
 
@@ -2232,6 +2319,17 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     return result;
   }
 
+  /// 判断全局坐标是否落在大纲标题区域
+  ///
+  /// 标题不属于节点，位于其上的指针交互交由标题输入框自身处理，
+  /// 编辑器级的选区、拖拽与焦点处理需要跳过该区域。
+  bool _isPositionOnTitle(Offset globalPosition) {
+    final renderBox = _titleFieldKey.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox == null || !renderBox.attached) return false;
+    final rect = MatrixUtils.transformRect(renderBox.getTransformTo(null), Offset.zero & renderBox.size);
+    return rect.contains(globalPosition);
+  }
+
   /// 判断全局坐标是否落在某个节点瓦片的文本输入区上
   ///
   /// 文本区位于指示符（占位）之后，通过节点深度计算指示符总宽度来确定边界
@@ -2350,6 +2448,13 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     // 指针按下会重新定位光标，之前按方向键记录的横向坐标不再适用
     _preferredCaretX = null;
 
+    // 标题区域不参与节点选区与编辑器级焦点处理，交互交由标题输入框自身处理
+    if (_isPositionOnTitle(event.position)) {
+      _dragStartPosition = null;
+      _dragMode = _DragMode.none;
+      return;
+    }
+
     // 指针位于滚动条区域时跳过编辑器自身的指针处理，让滚动条正常响应点击与拖拽
     if (_isPositionOnScrollbar(event.position)) {
       _dragStartPosition = null;
@@ -2429,6 +2534,9 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   void _onPanStart(DragStartDetails details) {
     // 批量选择模式下禁用拖拽选区与文本选区，节点选中由节点行自身处理
     if (_isBatchSelectionMode) return;
+
+    // 标题区域不参与节点拖拽选区
+    if (_isPositionOnTitle(details.globalPosition)) return;
 
     _dragStartPosition = details.globalPosition;
     _dragMode = _DragMode.none;
@@ -4262,6 +4370,10 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       context.read<WorkspaceProvider>().openFindReplace(showReplace: true);
       return KeyEventResult.handled;
     }
+
+    // 标题输入框聚焦时，其余按键交还给输入框默认处理，避免误作用到节点
+    if (_titleFocusNode.hasFocus) return KeyEventResult.ignored;
+
     // Escape：查找替换栏可见时优先关闭它
     if (event.logicalKey == LogicalKeyboardKey.escape) {
       final provider = context.read<WorkspaceProvider>();
@@ -5161,7 +5273,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
                                       instance.onUpdate = _onPanUpdate;
                                       instance.onEnd = _onPanEnd;
                                       instance.onCancel = _onPanCancel;
-                                      instance.shouldDeferToScrollbar = _isPositionOnScrollbar;
+                                      instance.shouldYieldPointer = (position) =>
+                                          _isPositionOnScrollbar(position) || _isPositionOnTitle(position);
                                     },
                                   ),
                             }
@@ -5305,6 +5418,27 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       ),
     );
 
+    // 大纲标题距内容区左侧的内缩量：与一级节点的圆点左对齐；
+    // 桌面端由滚动容器统一施加左右边距，移动端边距由节点行自身承担，故需额外计入
+    final double titleLeftPadding = 2.0 +
+        (PlatformCapabilities.isMobile ? horizontalPadding : 0.0) +
+        OutlineNodeTile.dotLeftInsetForDepth(0, indentWidth: _indentWidth);
+
+    // 大纲标题显示在第一个节点上方，随内容一同滚动，不属于节点
+    final Widget? titleSliver = settings.outlineShowTitle
+        ? SliverToBoxAdapter(
+            child: OutlineTitleField(
+              key: _titleFieldKey,
+              controller: _titleController,
+              focusNode: _titleFocusNode,
+              colorScheme: colorScheme,
+              readOnly: widget.readOnly,
+              leftPadding: titleLeftPadding,
+              onChanged: (value) => widget.onTitleChanged?.call(value),
+            ),
+          )
+        : null;
+
     final List<Widget> slivers;
     if (isPaperMode) {
       // 纸张模式：纸张按 A4 宽度居中，水平/上下边距作为纸张内边距；
@@ -5330,6 +5464,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
                 padding: EdgeInsets.fromLTRB(horizontalPadding, topPadding, horizontalPadding, bottomPadding),
                 sliver: SliverMainAxisGroup(
                   slivers: [
+                    ?titleSliver,
                     nodeList,
                     SliverFillRemaining(hasScrollBody: false, child: const SizedBox.shrink()),
                   ],
@@ -5360,7 +5495,17 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
               top: topPadding + widget.extraTopPadding,
               bottom: bottomPadding + bottomHintHeight,
             );
-      slivers = [SliverPadding(padding: scrollPadding, sliver: nodeList)];
+      slivers = [
+        SliverPadding(
+          padding: scrollPadding,
+          sliver: SliverMainAxisGroup(
+            slivers: [
+              ?titleSliver,
+              nodeList,
+            ],
+          ),
+        ),
+      ];
     }
 
     return CustomScrollView(key: _scrollViewKey, controller: _scrollController, slivers: slivers);
@@ -5449,17 +5594,17 @@ enum _DragMode { none, text, node }
 /// 自定义平移手势识别器，以极小的移动阈值接受手势
 ///
 /// 确保在输入框内部开始拖拽时，能优先于输入框自带的手势识别器赢得竞技场。
-/// 当指针落在滚动条区域时则不参与竞技场，把交互让给滚动条。
+/// 当指针落在滚动条区域或大纲标题区域时则不参与竞技场，把交互让给目标控件。
 class _EagerPanGestureRecognizer extends PanGestureRecognizer {
-  /// 判断指针是否应交由滚动条处理
+  /// 判断指针是否应交由其他控件处理
   ///
-  /// 返回 true 时本识别器不进入该指针的竞技场，由滚动条赢得拖拽与点击。
-  bool Function(Offset globalPosition)? shouldDeferToScrollbar;
+  /// 返回 true 时本识别器不进入该指针的竞技场，由目标控件赢得拖拽与点击。
+  bool Function(Offset globalPosition)? shouldYieldPointer;
 
   @override
   bool isPointerAllowed(PointerEvent event) {
-    // 指针位于滚动条区域时不参与竞技场
-    if (shouldDeferToScrollbar?.call(event.position) ?? false) {
+    // 指针位于滚动条或大纲标题区域时不参与竞技场
+    if (shouldYieldPointer?.call(event.position) ?? false) {
       return false;
     }
     return super.isPointerAllowed(event);

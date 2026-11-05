@@ -157,7 +157,7 @@ class OutlineEditorSettingsCard extends StatelessWidget {
                   divisions: 20,
                   onChanged: (value) => settings.updateOutlineNodeSpacing(value, debounce: true),
                 ),
-                // 页面视图与底部快捷键提示仅桌面端可用，移动端固定为默认表现
+                // 页面视图仅桌面端可用，移动端固定为默认表现
                 if (!PlatformCapabilities.isMobile) ...[
                   _buildDivider(colorScheme),
                   _buildGroupLabel(context, '页面视图'),
@@ -168,9 +168,20 @@ class OutlineEditorSettingsCard extends StatelessWidget {
                     onChanged: (index) =>
                         SettingsService.instance.updateOutlinePageViewMode(_pageViewModes[index]),
                   ),
-                  _buildDivider(colorScheme),
-                  _buildGroupLabel(context, '显示'),
-                  const SizedBox(height: _labelSpacing),
+                ],
+                _buildDivider(colorScheme),
+                _buildGroupLabel(context, '显示'),
+                const SizedBox(height: _labelSpacing),
+                _buildSwitchRow(
+                  context,
+                  icon: Icons.title_rounded,
+                  label: '显示标题',
+                  value: settings.outlineShowTitle,
+                  onChanged: (value) => settings.updateOutlineShowTitle(value),
+                ),
+                // 底部快捷键提示仅桌面端可用，移动端没有物理键盘
+                if (!PlatformCapabilities.isMobile) ...[
+                  const SizedBox(height: _rowSpacing),
                   _buildSwitchRow(
                     context,
                     icon: Icons.keyboard_outlined,

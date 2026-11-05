@@ -159,6 +159,9 @@ class AppSettings {
   /// 是否显示大纲编辑器底部的快捷键提示（仅桌面端生效）
   final bool outlineBottomHintEnabled;
 
+  /// 大纲编辑器是否显示大纲标题
+  final bool outlineShowTitle;
+
   // ================= 排版设置（右侧边栏 - 排版设置面板）=================
   
   /// 字间距（单位：像素，负值表示紧凑）
@@ -306,6 +309,7 @@ class AppSettings {
     this.outlineNodeSpacing = 0.0, // 大纲编辑器节点间距（单位：像素）
     this.outlinePageViewMode = 'default', // 大纲编辑器页面视图模式
     this.outlineBottomHintEnabled = true, // 是否显示大纲编辑器底部的快捷键提示
+    this.outlineShowTitle = false, // 是否在大纲编辑器第一个节点上方显示大纲标题
     // 工作台排版设置
     this.letterSpacing = 0.7, // 字间距（单位：像素，负值表示紧凑）
     this.lineHeight = 1.8, // 行间距倍数（1.0 = 单倍行距）
@@ -416,6 +420,7 @@ class AppSettings {
       outlineNodeSpacing: (outlineLayoutJson['nodeSpacing'] as num?)?.toDouble() ?? defaults.outlineNodeSpacing,
       outlinePageViewMode: outlineLayoutJson['pageViewMode'] as String? ?? defaults.outlinePageViewMode,
       outlineBottomHintEnabled: outlineLayoutJson['bottomHintEnabled'] as bool? ?? defaults.outlineBottomHintEnabled,
+      outlineShowTitle: outlineLayoutJson['showTitle'] as bool? ?? defaults.outlineShowTitle,
 
       // 排版设置（编辑器）
       letterSpacing: (typographyJson['letterSpacing'] as num?)?.toDouble() ?? defaults.letterSpacing,
@@ -533,6 +538,7 @@ class AppSettings {
             'nodeSpacing': outlineNodeSpacing,
             'pageViewMode': outlinePageViewMode,
             'bottomHintEnabled': outlineBottomHintEnabled,
+            'showTitle': outlineShowTitle,
           },
         },
         // 排版设置
@@ -621,6 +627,7 @@ class AppSettings {
     double? outlineNodeSpacing,
     String? outlinePageViewMode,
     bool? outlineBottomHintEnabled,
+    bool? outlineShowTitle,
     // 排版设置（右侧边栏 - 排版设置面板）
     double? letterSpacing,
     double? lineHeight,
@@ -698,6 +705,7 @@ class AppSettings {
       outlineNodeSpacing: outlineNodeSpacing ?? this.outlineNodeSpacing,
       outlinePageViewMode: outlinePageViewMode ?? this.outlinePageViewMode,
       outlineBottomHintEnabled: outlineBottomHintEnabled ?? this.outlineBottomHintEnabled,
+      outlineShowTitle: outlineShowTitle ?? this.outlineShowTitle,
       // 排版设置（右侧边栏 - 排版设置面板）
       letterSpacing: letterSpacing ?? this.letterSpacing,
       lineHeight: lineHeight ?? this.lineHeight,
@@ -810,6 +818,7 @@ class AppSettings {
            other.outlineNodeSpacing == outlineNodeSpacing &&
            other.outlinePageViewMode == outlinePageViewMode &&
            other.outlineBottomHintEnabled == outlineBottomHintEnabled &&
+           other.outlineShowTitle == outlineShowTitle &&
            // 排版设置（右侧边栏 - 排版设置面板）
            other.letterSpacing == letterSpacing &&
            other.lineHeight == lineHeight &&
@@ -880,18 +889,23 @@ class AppSettings {
         bottomMargin,
         isPageViewEnabled,
         scrollbarAlwaysVisible,
-        // 编辑器背景设置
+      ),
+      // 编辑器背景设置
+      Object.hash(
         editorBackgroundMode,
         editorBackgroundColorLight,
         editorBackgroundColorDark,
         dimPaperBackground,
-        // 大纲编辑器布局设置
+      ),
+      // 大纲编辑器布局设置
+      Object.hash(
         outlineTopMargin,
         outlineHorizontalMargin,
         outlineBottomMargin,
         outlineNodeSpacing,
         outlinePageViewMode,
         outlineBottomHintEnabled,
+        outlineShowTitle,
       ),
       // 排版设置（右侧边栏 - 排版设置面板）
       Object.hash(

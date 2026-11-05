@@ -4,6 +4,7 @@
 // 供工作台 Provider 与未来的导出/备份等场景复用。
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:quick_write/core/constants/constants.dart';
 import 'package:quick_write/core/models/book.dart';
 import 'package:quick_write/core/models/chapter.dart';
 import 'package:quick_write/core/models/setting_item.dart';
@@ -76,5 +77,22 @@ class BookFolderService {
   String settingItemFilePath(BookModel book, SettingItemModel item) {
     final relativePath = relativePathToPlatform(item.filePath);
     return '${bookFolderPath(book)}${Platform.pathSeparator}settings${Platform.pathSeparator}$relativePath';
+  }
+
+  /// 大纲折叠状态文件后缀
+  static const String _foldStateFileSuffix = '.fold.json';
+
+  /// 由设定项文件路径派生大纲折叠状态文件路径
+  ///
+  /// 折叠状态文件与设定项文件同目录同名，扩展名替换为 `.fold.json`，
+  /// 独立存放可避免折叠标记混入正文，影响导出与备份的内容。
+  /// 路径为空时返回 null。
+  static String? foldStateFilePath(String? settingItemFilePath) {
+    if (settingItemFilePath == null || settingItemFilePath.isEmpty) return null;
+    const String extension = GlobalConstants.settingFileExtension;
+    final String base = settingItemFilePath.endsWith(extension)
+        ? settingItemFilePath.substring(0, settingItemFilePath.length - extension.length)
+        : settingItemFilePath;
+    return '$base$_foldStateFileSuffix';
   }
 }

@@ -121,6 +121,29 @@ class OutlineNodeTile extends StatefulWidget {
     required this.shouldPersistSelectionOnFocusLoss,
   });
 
+  /// 计算指定深度节点行首连接线区域的总宽度
+  ///
+  /// 连接线区域包含圆点占位与缩进列，并减去圆点与文本之间的间距缩减量；
+  /// 移动端折叠入口位于行尾、行首少一列，因此按移动端布局额外左移一列。
+  static double connectionWidthForDepth(
+    int depth, {
+    required double indentWidth,
+    required double dotTextGapReduction,
+  }) {
+    final int columnOffset = PlatformCapabilities.isMobile ? -1 : 0;
+    return (depth + 2 + columnOffset) * indentWidth - dotTextGapReduction;
+  }
+
+  /// 计算指定深度节点的圆点左边缘在节点行内的水平位置
+  ///
+  /// 圆点绘制在列 (depth + 1) 的中心，移动端整体左移一列；
+  /// 左边缘取圆心横坐标减去圆点半径。
+  static double dotLeftInsetForDepth(int depth, {required double indentWidth}) {
+    final int columnOffset = PlatformCapabilities.isMobile ? -1 : 0;
+    final double dotCenterX = (depth + 1 + columnOffset) * indentWidth + indentWidth / 2;
+    return dotCenterX - OutlineConnectionMetrics.dotRadius;
+  }
+
   @override
   State<OutlineNodeTile> createState() => _OutlineNodeTileState();
 }
@@ -245,7 +268,11 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
         final int columnOffset = isMobile ? -1 : 0;
 
         // 连接线绘制区域总宽度（包含圆点占位，减去与文本的间距缩减量）
-        final connectionWidth = (depth + 2 + columnOffset) * indentWidth - widget.dotTextGapReduction;
+        final connectionWidth = OutlineNodeTile.connectionWidthForDepth(
+          depth,
+          indentWidth: indentWidth,
+          dotTextGapReduction: widget.dotTextGapReduction,
+        );
 
         // 圆点颜色
         final dotColor = colorScheme.onSurfaceVariant.withValues(alpha: 0.4);

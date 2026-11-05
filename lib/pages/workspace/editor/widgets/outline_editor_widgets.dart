@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:quick_write/core/constants/material_icons.dart';
+import 'package:quick_write/core/services/settings_service.dart';
+import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/models/outline_models.dart';
@@ -206,6 +208,96 @@ class OutlineEditorTopBar extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// 大纲标题
+///
+/// 显示在第一个节点上方，不属于大纲节点，不参与节点的格式与样式设置；
+/// 仅提供纯文本编辑，字号略大于一级标题并加粗显示。
+class OutlineTitleField extends StatelessWidget {
+  /// 标题文本控制器
+  final TextEditingController controller;
+
+  /// 标题输入框的焦点节点
+  final FocusNode focusNode;
+
+  /// 颜色方案
+  final ColorScheme colorScheme;
+
+  /// 是否只读
+  final bool readOnly;
+
+  /// 标题左侧内缩量，用于与一级节点的圆点左边缘对齐
+  final double leftPadding;
+
+  /// 标题内容变化回调
+  final ValueChanged<String>? onChanged;
+
+  const OutlineTitleField({
+    super.key,
+    required this.controller,
+    required this.focusNode,
+    required this.colorScheme,
+    required this.readOnly,
+    required this.leftPadding,
+    this.onChanged,
+  });
+
+  /// 标题字号相对大纲基础字号的增量
+  ///
+  /// 大纲一级标题为基础字号 +6，标题在此基础上再大 4，形成比一级标题略高的层级
+  static const double _fontSizeOffset = 12.0;
+
+  /// 标题行高倍数
+  static const double _lineHeightFactor = 1.4;
+
+  @override
+  Widget build(BuildContext context) {
+    // 监听设置变化，字体或字号调整时同步更新标题样式
+    return ListenableBuilder(
+      listenable: SettingsService.instance,
+      builder: (context, _) {
+        final settings = SettingsService.instance;
+        final TextStyle style = TextStyle(
+          fontFamily: settings.outlineFontFamily,
+          fontSize: settings.outlineFontSize + _fontSizeOffset,
+          fontWeight: FontWeight.bold,
+          height: _lineHeightFactor,
+          color: colorScheme.onSurface,
+        );
+
+        return Padding(
+          // 右侧留白与节点内容保持一致，底部留白分隔标题与第一个节点
+          padding: EdgeInsets.only(left: leftPadding, right: 8, bottom: 20),
+          child: readOnly
+              // 只读时以静态文本展示，不提供编辑光标与选区交互
+              ? Text(controller.text, style: style, maxLines: 1, overflow: TextOverflow.ellipsis)
+              : ImeCursorFixerWrapper(
+                  controller: controller,
+                  focusNode: focusNode,
+                  child: TextField(
+                    controller: controller,
+                    focusNode: focusNode,
+                    maxLines: 1,
+                    style: style,
+                    decoration: const InputDecoration(
+                      border: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      filled: false,
+                      isCollapsed: true,
+                      isDense: true,
+                      // 清除主题输入框默认的水平内边距，使标题文字左边缘与一级节点圆点对齐
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    cursorColor: colorScheme.primary,
+                    onChanged: onChanged,
+                  ),
+                ),
+        );
+      },
     );
   }
 }

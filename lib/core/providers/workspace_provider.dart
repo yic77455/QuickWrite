@@ -445,6 +445,12 @@ class EditorTab {
   /// 双击或编辑内容后退出预览模式，标签页转为固定状态
   bool isPreview;
 
+  /// 内容加载完成后是否自动聚焦第一个节点
+  ///
+  /// 新建设定文件时置为 true，使光标直接落在首个节点上便于立即输入；
+  /// 打开已有文件时保持 false，避免打开时抢占焦点。
+  bool autoFocusFirstNode;
+
   /// 是否被鼠标悬停
   bool isHovered;
 
@@ -519,6 +525,7 @@ class EditorTab {
     this.icon,
     this.isModified = false,
     this.isPreview = false,
+    this.autoFocusFirstNode = false,
     this.isHovered = false,
     this.cursorPosition,
     this.textController,

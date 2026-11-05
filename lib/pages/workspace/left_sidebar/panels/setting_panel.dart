@@ -847,8 +847,13 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
       groups: provider.settingGroups,
       initialGroupUuid: initialGroupUuid,
       onCreated: (settingItem) {
-        // 创建成功后打开设定项
-        provider.openTab(EditorTab(id: settingItem.uuid, title: settingItem.title, type: EditorTabType.settings));
+        // 创建成功后打开设定项，并在内容加载完成后聚焦第一个节点
+        provider.openTab(EditorTab(
+          id: settingItem.uuid,
+          title: settingItem.title,
+          type: EditorTabType.settings,
+          autoFocusFirstNode: true,
+        ));
       },
     );
   }

@@ -421,8 +421,28 @@ class _EditorContainerState extends State<EditorContainer> {
             key: tab.editorKey,
             colorScheme: colorScheme,
             filePath: provider.getTabFilePath(tab),
+            // 大纲标题取自标签页标题，编辑后随保存同步重命名大纲文件
+            title: tab.title,
+            onTitleChanged: (title) {
+              // 空标题会生成无效文件名，保留原标题不做更新
+              if (title.trim().isEmpty) return;
+              // 编辑预览模式下修改标题时，退出预览模式
+              if (tab.isPreview) {
+                provider.pinTab(tab.id);
+              }
+              // 标题即设定项名称，保存时据此重命名文件
+              tab.title = title;
+              if (!tab.isModified) {
+                tab.isModified = true;
+                provider.notifyTabModified(tab.id);
+              }
+              // 触发自动保存
+              provider.triggerAutoSave();
+            },
             // 查找替换栏可见时为编辑器预留顶边距，避免内容被遮挡
             extraTopPadding: provider.findReplaceBarPadding,
+            // 新建设定文件时，内容加载完成后聚焦第一个节点
+            autoFocusFirstNode: tab.autoFocusFirstNode,
             // 大纲内容异步加载完成后，若查找替换栏处于打开状态则刷新查找结果，
             // 并通知等待内容就绪的调用方（如全文搜索跳转）
             onContentLoaded: () {
@@ -458,6 +478,8 @@ class _EditorContainerState extends State<EditorContainer> {
             colorScheme: colorScheme,
             filePath: tab.backupFilePath,
             readOnly: true,
+            // 备份预览展示原始标题，只读不可编辑
+            title: tab.originalChapterTitle ?? tab.title,
             // 查找替换栏可见时为编辑器预留顶边距，避免内容被遮挡
             extraTopPadding: provider.findReplaceBarPadding,
             // 大纲内容异步加载完成后，若查找替换栏处于打开状态则刷新查找结果
