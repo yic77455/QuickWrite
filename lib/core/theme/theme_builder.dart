@@ -22,9 +22,12 @@ class ThemeBuilder {
   /// [p] 调色板，作为主题颜色的唯一来源
   /// [fontFamily] 应用界面字体名称，null 表示跟随系统默认字体
   static ThemeData build(ThemePalette p, {String? fontFamily}) {
-    // 将界面字体注入到显式声明的文本样式上，
-    // 使各组件自身的文字（如对话框标题、菜单项）同样跟随界面字体
-    TextStyle font(TextStyle style) => style.apply(fontFamily: fontFamily);
+    // 将界面字体与中文回退链注入到显式声明的文本样式上，
+    // 使各组件自身的文字（如对话框标题、菜单项、提示框）与正文使用同一套字体
+    TextStyle font(TextStyle style) => style.apply(
+      fontFamily: fontFamily,
+      fontFamilyFallback: fontFallback,
+    );
 
     return ThemeData(
       useMaterial3: true,

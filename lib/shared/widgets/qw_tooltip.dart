@@ -502,8 +502,12 @@ class ArrowTooltip {
 
     final overlay = Overlay.of(context);
 
-    // 从主题中提取 tooltip 背景色
+    // 从主题中提取 tooltip 背景色与文字样式
     final tooltipTheme = Theme.of(context).tooltipTheme;
+    final textStyle =
+        tooltipTheme.textStyle ??
+        Theme.of(context).textTheme.bodySmall ??
+        const TextStyle();
     final decoration = tooltipTheme.decoration;
     final Color backgroundColor;
     if (decoration is BoxDecoration && decoration.color != null) {
@@ -523,6 +527,7 @@ class ArrowTooltip {
         arrowSize: arrowSize,
         gap: gap,
         backgroundColor: backgroundColor,
+        textStyle: textStyle,
         content: content,
         onHoverChanged: (isHovering) {
           _isHoveringTooltip = isHovering;
@@ -582,6 +587,7 @@ class _ArrowTooltipWidget extends StatefulWidget {
   final double arrowSize;
   final double gap;
   final Color backgroundColor;
+  final TextStyle textStyle;
   final Widget content;
   final ValueChanged<bool> onHoverChanged;
   final VoidCallback onTooltipExit;
@@ -594,6 +600,7 @@ class _ArrowTooltipWidget extends StatefulWidget {
     required this.arrowSize,
     required this.gap,
     required this.backgroundColor,
+    required this.textStyle,
     required this.content,
     required this.onHoverChanged,
     required this.onTooltipExit,
@@ -733,7 +740,11 @@ class _ArrowTooltipWidgetState extends State<_ArrowTooltipWidget>
                     horizontal: 12,
                     vertical: 8,
                   ),
-                  child: widget.content,
+                  // 以提示框主题的文字样式为基准，使箭头提示框的字体、字号与其他提示框一致
+                  child: DefaultTextStyle(
+                    style: widget.textStyle,
+                    child: widget.content,
+                  ),
                 ),
               ),
             ),

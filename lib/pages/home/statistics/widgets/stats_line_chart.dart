@@ -207,7 +207,12 @@ class _StatsLineChartState extends State<StatsLineChart> {
               points: widget.points,
               lineColor: widget.lineColor,
               valueFormatter: widget.valueFormatter,
-              textColor: Theme.of(context).colorScheme.onSurfaceVariant,
+              // 轴标签以界面文字样式为基础，确保字体与页面其他文字一致
+              labelStyle: (Theme.of(context).textTheme.bodySmall ?? const TextStyle())
+                  .copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontSize: 10,
+                  ),
               gridColor: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.4),
               hoveredIndex: _hoveredIndex,
             ),
@@ -311,7 +316,7 @@ class _LineChartPainter extends CustomPainter {
   final List<ChartPoint> points;
   final Color lineColor;
   final String Function(int value) valueFormatter;
-  final Color textColor;
+  final TextStyle labelStyle;
   final Color gridColor;
   final int hoveredIndex;
 
@@ -319,7 +324,7 @@ class _LineChartPainter extends CustomPainter {
     required this.points,
     required this.lineColor,
     required this.valueFormatter,
-    required this.textColor,
+    required this.labelStyle,
     required this.gridColor,
     required this.hoveredIndex,
   });
@@ -351,7 +356,6 @@ class _LineChartPainter extends CustomPainter {
     final gridPaint = Paint()
       ..color = gridColor
       ..strokeWidth = 1;
-    final labelStyle = TextStyle(color: textColor, fontSize: 10);
     for (int i = 0; i <= 4; i++) {
       final y = plotBottom - (plotHeight * i / 4);
       canvas.drawLine(Offset(plotLeft, y), Offset(plotRight, y), gridPaint);
@@ -500,7 +504,7 @@ class _LineChartPainter extends CustomPainter {
   bool shouldRepaint(covariant _LineChartPainter oldDelegate) {
     return oldDelegate.points != points ||
         oldDelegate.lineColor != lineColor ||
-        oldDelegate.textColor != textColor ||
+        oldDelegate.labelStyle != labelStyle ||
         oldDelegate.gridColor != gridColor ||
         oldDelegate.hoveredIndex != hoveredIndex;
   }
