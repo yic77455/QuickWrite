@@ -127,8 +127,8 @@ class OutlineEditorTopBar extends StatelessWidget {
               icon: isAllNodesSelected
                   ? Icons.check_box_rounded
                   : isPartialNodesSelected
-                      ? Icons.indeterminate_check_box_rounded
-                      : Icons.check_box_outline_blank_rounded,
+                  ? Icons.indeterminate_check_box_rounded
+                  : Icons.check_box_outline_blank_rounded,
               tooltip: isAllNodesSelected ? '取消全选' : '全选',
               onTap: onToggleSelectAll,
               isSelected: isAllNodesSelected || isPartialNodesSelected,
@@ -188,8 +188,8 @@ class OutlineEditorTopBar extends StatelessWidget {
     final Color iconColor = !enabled
         ? colorScheme.onSurfaceVariant.withValues(alpha: 0.3)
         : isSelected
-            ? colorScheme.primary
-            : colorScheme.onSurfaceVariant;
+        ? colorScheme.primary
+        : colorScheme.onSurfaceVariant;
 
     return SizedBox(
       key: key,
@@ -270,7 +270,7 @@ class OutlineTitleField extends StatelessWidget {
 
         return Padding(
           // 右侧留白与节点内容保持一致，底部留白分隔标题与第一个节点
-          padding: EdgeInsets.only(left: leftPadding, right: 8, bottom: 20),
+          padding: EdgeInsets.only(left: leftPadding, right: 8, bottom: PlatformCapabilities.isMobile ? 12 : 20),
           child: readOnly
               // 只读时以静态文本展示，不提供编辑光标与选区交互
               ? Text(controller.text, style: style, maxLines: 1, overflow: TextOverflow.ellipsis)
@@ -312,11 +312,7 @@ class OutlineEditorBottomHint extends StatefulWidget {
   /// 关闭提示回调
   final VoidCallback onClose;
 
-  const OutlineEditorBottomHint({
-    super.key,
-    required this.colorScheme,
-    required this.onClose,
-  });
+  const OutlineEditorBottomHint({super.key, required this.colorScheme, required this.onClose});
 
   @override
   State<OutlineEditorBottomHint> createState() => _OutlineEditorBottomHintState();
@@ -470,11 +466,7 @@ class HeadingLevelSelector extends StatefulWidget {
   /// 级别变化回调
   final ValueChanged<int> onLevelChanged;
 
-  const HeadingLevelSelector({
-    super.key,
-    required this.nodes,
-    required this.onLevelChanged,
-  });
+  const HeadingLevelSelector({super.key, required this.nodes, required this.onLevelChanged});
 
   @override
   State<HeadingLevelSelector> createState() => _HeadingLevelSelectorState();
@@ -530,27 +522,35 @@ class _HeadingLevelSelectorState extends State<HeadingLevelSelector> {
           tooltip: '一级标题',
           iconSize: 22,
           isSelected: _selectedLevel == 1,
-          onChanged: (selected) { if (selected) _select(1); },
+          onChanged: (selected) {
+            if (selected) _select(1);
+          },
         ),
         ToggleToolButton(
           icon: MaterialIcons.format_h2,
           tooltip: '二级标题',
           iconSize: 22,
           isSelected: _selectedLevel == 2,
-          onChanged: (selected) { if (selected) _select(2); },
+          onChanged: (selected) {
+            if (selected) _select(2);
+          },
         ),
         ToggleToolButton(
           icon: MaterialIcons.format_h3,
           tooltip: '三级标题',
           iconSize: 22,
           isSelected: _selectedLevel == 3,
-          onChanged: (selected) { if (selected) _select(3); },
+          onChanged: (selected) {
+            if (selected) _select(3);
+          },
         ),
         ToggleToolButton(
           icon: MaterialIcons.format_title,
           tooltip: '正文',
           isSelected: _selectedLevel == 0,
-          onChanged: (selected) { if (selected) _select(0); },
+          onChanged: (selected) {
+            if (selected) _select(0);
+          },
         ),
       ],
     );

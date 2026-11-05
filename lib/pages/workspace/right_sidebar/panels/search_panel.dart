@@ -103,7 +103,7 @@ class _SearchPanelState extends State<SearchPanel> {
               onChanged: _onSearchChanged,
               style: context.bodyMedium,
               decoration: InputDecoration(
-                hintText: provider.globalSearchIncludeOutlines ? '搜索全部章节与大纲...' : '搜索全部章节...',
+                hintText: provider.globalSearchIncludeOutlines ? '搜索全部章节与设定...' : '搜索全部章节...',
                 hintStyle: context.bodyMedium?.copyWith(
                   color: colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
                   height: 1.8,
@@ -180,9 +180,9 @@ class _SearchPanelState extends State<SearchPanel> {
     );
   }
 
-  /// 构建搜索范围复选框（是否包含大纲文件）
+  /// 构建搜索范围复选框（是否包含设定文件）
   ///
-  /// 勾选后全文搜索会同时搜索大纲文件（设定项），取消勾选则只搜索正文文件。
+  /// 勾选后全文搜索会同时搜索设定文件（设定项），取消勾选则只搜索正文文件。
   Widget _buildIncludeOutlinesCheckbox(
     BuildContext context,
     WorkspaceProvider provider,
@@ -191,7 +191,7 @@ class _SearchPanelState extends State<SearchPanel> {
     final checked = provider.globalSearchIncludeOutlines;
 
     return CursorTooltipTarget(
-      tooltipContent: const Text('同时搜索大纲文件'),
+      tooltipContent: const Text('同时搜索设定文件'),
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: () => provider.setGlobalSearchIncludeOutlines(!checked),
@@ -227,7 +227,7 @@ class _SearchPanelState extends State<SearchPanel> {
               ),
             ),
             Text(
-              '大纲',
+              '设定',
               style: context.labelSmall?.copyWith(color: colorScheme.onSurfaceVariant),
             ),
           ],
