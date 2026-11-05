@@ -63,6 +63,12 @@ class CloudSyncService extends ChangeNotifier {
   /// 正在执行的同步任务（null 表示当前没有同步在执行）
   Future<CloudSyncResult>? _runningSync;
 
+  /// 是否已进入同步流程
+  ///
+  /// 需要在任务真正开始前就置位，界面才能在同步开始时的首次通知中
+  /// 切换为「正在同步」，而不必等待后续进度通知
+  bool _isSyncing = false;
+
   /// 同步执行期间是否又发生了本地变更
   ///
   /// 实时同步要求「每次保存都同步」，同步进行中的保存不能直接丢弃，
@@ -75,10 +81,16 @@ class CloudSyncService extends ChangeNotifier {
   /// 供界面展示当前文件的同步状态
   bool _hasUnsyncedChanges = false;
 
+  /// 最近一次同步是否失败
+  ///
+  /// 同步异常或仍有项目未同步成功时置为 true，
+  /// 下一次完整成功的同步后恢复为 false
+  bool _lastSyncFailed = false;
+
   // ================= 多窗口状态镜像 =================
   //
   // 工作台子窗口不执行同步，同步统一由主窗口负责。
-  // 子窗口通过多窗口通信接收主窗口推送的同步状态，以下三个字段仅在
+  // 子窗口通过多窗口通信接收主窗口推送的同步状态，以下字段仅在
   // 子窗口中被赋值：为 null 表示本窗口即同步执行者，直接使用本地真实状态。
 
   /// 镜像的「实时同步是否生效」
@@ -89,6 +101,9 @@ class CloudSyncService extends ChangeNotifier {
 
   /// 镜像的「是否存在未同步改动」
   bool? _mirroredUnsyncedChanges;
+
+  /// 镜像的「最近一次同步是否失败」
+  bool? _mirroredSyncFailed;
 
   /// 待用户确认的高风险同步（null 表示没有）
   SyncRiskAssessment? _pendingRisk;
@@ -143,13 +158,19 @@ class CloudSyncService extends ChangeNotifier {
   ///
   /// 与 [isBusy] 不同，连接测试与同步预演不计入同步中，
   /// 仅表示本地与云端的同步流程正在推进
-  bool get isSyncing => _mirroredSyncing ?? (_runningSync != null);
+  bool get isSyncing => _mirroredSyncing ?? _isSyncing;
 
   /// 是否存在尚未同步到云端的本地改动
   ///
   /// 从未同步过同样视为存在未同步内容，界面可据此区分「已同步」与「未同步」
   bool get hasUnsyncedChanges =>
       _mirroredUnsyncedChanges ?? (_hasUnsyncedChanges || lastSyncTime == null);
+
+  /// 最近一次同步是否失败
+  ///
+  /// 与 [hasUnsyncedChanges] 不同，它表示同步过程本身出错，
+  /// 用于界面提示用户检查网络或云盘设置
+  bool get syncFailed => _mirroredSyncFailed ?? _lastSyncFailed;
 
   /// 实时同步当前是否生效
   ///
@@ -161,11 +182,12 @@ class CloudSyncService extends ChangeNotifier {
 
   /// 用于多窗口广播的同步状态快照
   ///
-  /// 只包含界面展示所需的三项状态，主窗口据此判断是否需要向子窗口推送
+  /// 只包含界面展示所需的四项状态，主窗口据此判断是否需要向子窗口推送
   Map<String, bool> get statusSnapshot => {
     'realtimeActive': isRealtimeSyncActive,
     'syncing': isSyncing,
     'unsynced': hasUnsyncedChanges,
+    'failed': syncFailed,
   };
 
   /// 应用主窗口推送的同步状态
@@ -175,15 +197,18 @@ class CloudSyncService extends ChangeNotifier {
     final realtimeActive = status['realtimeActive'] ?? false;
     final syncing = status['syncing'] ?? false;
     final unsynced = status['unsynced'] ?? false;
+    final failed = status['failed'] ?? false;
 
     if (_mirroredRealtimeActive == realtimeActive &&
         _mirroredSyncing == syncing &&
-        _mirroredUnsyncedChanges == unsynced) {
+        _mirroredUnsyncedChanges == unsynced &&
+        _mirroredSyncFailed == failed) {
       return;
     }
     _mirroredRealtimeActive = realtimeActive;
     _mirroredSyncing = syncing;
     _mirroredUnsyncedChanges = unsynced;
+    _mirroredSyncFailed = failed;
     notifyListeners();
   }
 
@@ -441,10 +466,13 @@ class CloudSyncService extends ChangeNotifier {
     }
 
     _localChangePending = false;
+    // 先标记进入同步流程，确保同步开始时的首次通知即可让界面显示「正在同步」
+    _isSyncing = true;
     final future = _executeSync();
     _runningSync = future;
     return future.whenComplete(() {
       _runningSync = null;
+      _isSyncing = false;
       // 同步任务已结束，通知界面同步状态由「正在同步」回落
       notifyListeners();
       _scheduleFollowUpSync();
@@ -507,6 +535,8 @@ class CloudSyncService extends ChangeNotifier {
         dataChanged = summary.hasChanges;
         // 本次未执行，本地改动仍处于未同步状态
         _setHasUnsyncedChanges(true);
+        // 等待用户确认不属于同步失败
+        _setSyncFailed(false);
         notifyListeners();
         return CloudSyncResult.failure(_describeSummary(summary));
       }
@@ -515,6 +545,10 @@ class CloudSyncService extends ChangeNotifier {
 
       // 存在失败或中断未处理的项目时，本地仍有内容等待下次同步
       _setHasUnsyncedChanges(
+        summary.failedCount > 0 || summary.abortedCount > 0,
+      );
+      // 有项目同步失败或被中断时，同步过程本身未完整成功
+      _setSyncFailed(
         summary.failedCount > 0 || summary.abortedCount > 0,
       );
 
@@ -534,6 +568,8 @@ class CloudSyncService extends ChangeNotifier {
       dataChanged = true;
       // 同步未能完成，本地改动仍待下次同步
       _setHasUnsyncedChanges(true);
+      // 记录本次同步失败，界面据此提示用户检查网络或云盘设置
+      _setSyncFailed(true);
       return CloudSyncResult.failure('同步失败：${describeRemoteError(e)}');
     } finally {
       _syncProgress = null;
@@ -822,6 +858,13 @@ class CloudSyncService extends ChangeNotifier {
   void _setHasUnsyncedChanges(bool value) {
     if (_hasUnsyncedChanges == value) return;
     _hasUnsyncedChanges = value;
+    notifyListeners();
+  }
+
+  /// 更新「最近一次同步是否失败」标记，仅在状态变化时通知界面
+  void _setSyncFailed(bool value) {
+    if (_lastSyncFailed == value) return;
+    _lastSyncFailed = value;
     notifyListeners();
   }
 

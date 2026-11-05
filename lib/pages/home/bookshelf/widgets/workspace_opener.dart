@@ -89,6 +89,6 @@ Future<void> _syncBeforeOpen(BuildContext context) async {
 
   // 同步未完成时告知用户，随后仍照常打开工作台
   if (!succeeded && context.mounted) {
-    SnackBarService.show(context, '云同步未完成，已先打开工作台，可稍后手动同步');
+    SnackBarService.show(context, '同步未完成，已先打开工作台，可稍后手动同步');
   }
 }

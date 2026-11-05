@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:quick_write/core/constants/material_icons.dart';
 import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 
 /// 当前文件的同步状态图标
 ///
 /// 未开启实时同步时保持普通文件图标；开启后改用云同步图标反映同步状态：
-/// 未同步、正在同步（持续旋转）与已同步
+/// 未同步、正在同步（持续旋转）、同步失败与已同步
 class CloudSyncStatusIcon extends StatefulWidget {
   /// 图标尺寸
   final double size;
@@ -34,6 +35,12 @@ class _CloudSyncStatusIconState extends State<CloudSyncStatusIcon>
     vsync: this,
     duration: const Duration(milliseconds: 1400),
   );
+
+  // 逆时针旋转动画：进度从 0 到 1 时角度由 0 递减到 -1 圈
+  late final Animation<double> _rotationAnimation = Tween<double>(
+    begin: 0,
+    end: -1,
+  ).animate(_rotationController);
 
   @override
   void initState() {
@@ -74,12 +81,12 @@ class _CloudSyncStatusIconState extends State<CloudSyncStatusIcon>
 
   /// 构建状态图标
   ///
-  /// [rotating] 控制图标是否随同步旋转
-  Widget _buildStatusIcon(IconData icon, {bool rotating = false}) {
-    final color = Theme.of(context).colorScheme.onSurfaceVariant;
-    Widget child = Icon(icon, size: widget.size, color: color);
+  /// [rotating] 控制图标是否随同步旋转，[color] 用于指定图标颜色
+  Widget _buildStatusIcon(IconData icon, {bool rotating = false, Color? color}) {
+    final iconColor = color ?? Theme.of(context).colorScheme.onSurfaceVariant;
+    Widget child = Icon(icon, size: widget.size, color: iconColor);
     if (rotating) {
-      child = RotationTransition(turns: _rotationController, child: child);
+      child = RotationTransition(turns: _rotationAnimation, child: child);
     }
     return child;
   }
@@ -93,7 +100,15 @@ class _CloudSyncStatusIconState extends State<CloudSyncStatusIcon>
 
     // 正在同步：旋转的云同步图标
     if (_service.isSyncing) {
-      return _buildStatusIcon(Icons.cloud_sync_outlined, rotating: true);
+      return _buildStatusIcon(Icons.sync_outlined, rotating: true);
+    }
+
+    // 同步失败：以错误色提示用户检查网络或云盘设置
+    if (_service.syncFailed) {
+      return _buildStatusIcon(
+        MaterialIcons.cloud_alert,
+        color: Theme.of(context).colorScheme.error,
+      );
     }
 
     // 已同步：本地内容已落盘且不存在待推送的改动
@@ -145,6 +160,7 @@ String _describeSyncStatus(
   // 未开启实时同步时，图标不代表云同步状态
   if (!service.isRealtimeSyncActive) return '实时同步未开启';
   if (service.isSyncing) return '正在同步…';
+  if (service.syncFailed) return '同步失败，请检查网络或云盘设置';
   if (hasPendingLocalEdits || service.hasUnsyncedChanges) return '尚未同步到云端';
   return '已同步到云端';
 }
