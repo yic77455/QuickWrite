@@ -2891,6 +2891,44 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     _endBatchAndNotify(description: '设置标题级别', focusNodeId: nodeIds.first, focusSelection: selection);
   }
 
+  /// 将当前节点的样式应用到全部同级节点
+  ///
+  /// 样式包括标题级别，以及当前节点整个文本合并后的文字样式
+  /// （加粗/斜体/下划线/删除线、字体颜色、字底颜色）。
+  /// 同级节点以统一样式覆盖全部文本，当前节点本身保持不变。
+  void _applyStyleToSiblings(String nodeId) {
+    final sourceNode = _findNode(nodeId);
+    if (sourceNode == null) return;
+
+    final siblingIds = _getSiblingNodeIds(nodeId);
+    if (siblingIds.length <= 1) return;
+
+    // 合并当前节点整个文本的样式，作为同级节点的统一样式
+    final sourceFlags = _getSelectionFlags([sourceNode], null);
+    final TextSelection? selection = _controllers[nodeId]?.selection;
+
+    _undoManager.beginBatch();
+    setState(() {
+      for (final siblingId in siblingIds) {
+        if (siblingId == nodeId) continue;
+        final sibling = _findNode(siblingId);
+        if (sibling == null) continue;
+
+        sibling.headingLevel = sourceNode.headingLevel;
+        // 统一样式覆盖同级节点全部文本；空样式表示清除所有文字样式
+        sibling.styleRanges = sourceFlags.isEmpty
+            ? []
+            : [TextStyleRange(start: 0, end: sibling.text.length, flags: sourceFlags)];
+
+        final controller = _controllers[siblingId];
+        if (controller is RichTextEditingController) {
+          controller.styleRanges = sibling.styleRanges;
+        }
+      }
+    });
+    _endBatchAndNotify(description: '应用样式到同级节点', focusNodeId: nodeId, focusSelection: selection);
+  }
+
   // ================= 移动端键盘工具栏接口 =================
 
   /// 编辑器是否持有输入焦点
@@ -4075,6 +4113,11 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       _toggleTextStyle([nodeId], TextStyleFlags.toggleUnderline);
       return KeyEventResult.handled;
     }
+    // Ctrl+=：将当前节点的样式应用到全部同级节点
+    if (isControl && !isAlt && event.logicalKey == LogicalKeyboardKey.equal) {
+      _applyStyleToSiblings(nodeId);
+      return KeyEventResult.handled;
+    }
 
     // Alt+数字：设置标题级别
     // Shift 时作用于当前节点的所有同级节点，否则仅作用于当前节点
@@ -5180,7 +5223,12 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
                     right: 0,
                     top: 0,
                     bottom: 0,
-                    child: OutlineShortcutPanel(colorScheme: colorScheme, onClose: _toggleShortcutPanel),
+                    child: OutlineShortcutPanel(
+                      colorScheme: colorScheme,
+                      // 传入编辑器画布底色，面板据此叠加出层次化的浮层底色
+                      canvasColor: editorAreaColor,
+                      onClose: _toggleShortcutPanel,
+                    ),
                   ),
               ],
             ),

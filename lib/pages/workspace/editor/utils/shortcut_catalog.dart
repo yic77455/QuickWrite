@@ -70,6 +70,7 @@ const List<ShortcutGroup> outlineEditorShortcutGroups = [
     ShortcutEntry(description: '斜体', keys: 'Ctrl+I'),
     ShortcutEntry(description: '下划线', keys: 'Ctrl+U'),
     ShortcutEntry(description: '删除线', keys: 'Ctrl+Enter'),
+    ShortcutEntry(description: '将当前节点样式应用到同级节点', keys: 'Ctrl+='),
   ]),
   ShortcutGroup(title: '标题级别', entries: [
     ShortcutEntry(description: '设为一级标题', keys: 'Alt+1'),

@@ -6,11 +6,14 @@ import 'shortcut_entry_tile.dart';
 /// 大纲编辑器快捷键列表面板
 ///
 /// 浮动在编辑器右侧的快捷键查阅面板，按功能分组展示全部快捷键。
-/// 面板以侧边栏样式呈现：贴右、近全高、左侧投影，作为浮层覆盖在编辑器之上，
+/// 面板以侧边栏样式呈现：贴右、近全高，作为浮层覆盖在编辑器之上，
 /// 不挤压左侧编辑器宽度，也不随内容滚动。
 class OutlineShortcutPanel extends StatelessWidget {
   /// 颜色方案
   final ColorScheme colorScheme;
+
+  /// 编辑器画布底色，面板在此基础上叠加淡色形成层次
+  final Color canvasColor;
 
   /// 关闭面板回调
   final VoidCallback onClose;
@@ -18,23 +21,34 @@ class OutlineShortcutPanel extends StatelessWidget {
   const OutlineShortcutPanel({
     super.key,
     required this.colorScheme,
+    required this.canvasColor,
     required this.onClose,
   });
+
+  /// 面板相对画布底色的层次叠加强度
+  ///
+  /// 取值较小，仅在画布底色上产生可辨识的明暗差，
+  /// 使面板既不与画布混同，也不破坏编辑区的整体色调。
+  static const double _layerOverlayAlpha = 0.02;
+
+  /// 解析面板底色：按画布明暗叠加中性色，形成不透明的浮层底色
+  Color get _panelColor {
+    // 亮色画布压暗、暗色画布提亮，保证层次方向符合视觉习惯
+    final bool isLightCanvas = canvasColor.computeLuminance() > 0.5;
+    final Color overlay = isLightCanvas ? Colors.black : Colors.white;
+    return Color.alphaBlend(overlay.withValues(alpha: _layerOverlayAlpha), canvasColor);
+  }
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: 320,
-      // 左侧分隔线与投影，营造浮层侧边栏的视觉层次
+      // 左侧分隔线勾勒面板边界，与编辑器画布形成区分
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerLowest,
-        boxShadow: [
-          BoxShadow(
-            color: colorScheme.shadow.withValues(alpha: 0.08),
-            blurRadius: 12,
-            offset: const Offset(-2, 0),
-          ),
-        ],
+        color: _panelColor,
+        border: Border(
+          left: BorderSide(color: colorScheme.outlineVariant.withValues(alpha: 0.2)),
+        ),
       ),
       child: Column(
         children: [
