@@ -47,6 +47,17 @@ class OutlineNodeTile extends StatefulWidget {
   /// 是否被选中
   final bool isSelected;
 
+  /// 是否为当前编辑节点
+  ///
+  /// 为 true 时圆点以点亮色绘制，标识当前正在编辑的节点
+  final bool isActiveNode;
+
+  /// 需要点亮的连接线所在列
+  ///
+  /// 非空时该列连接线以点亮色绘制，即当前编辑节点圆点下方通往下一个同级节点的连接线；
+  /// 不处于该连接线上的节点传 null
+  final int? highlightedLineColumn;
+
   /// 是否处于批量选择模式
   final bool isBatchMode;
 
@@ -96,6 +107,8 @@ class OutlineNodeTile extends StatefulWidget {
     required this.nodeSpacing,
     required this.horizontalMargin,
     required this.isSelected,
+    required this.isActiveNode,
+    this.highlightedLineColumn,
     required this.isBatchMode,
     required this.readOnly,
     required this.onToggleExpand,
@@ -139,8 +152,7 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
   static const double _trailingBarIconOffsetX = 1.0;
 
   /// 失焦时绘制持久化选区的 Painter
-  final PersistentSelectionOverlayPainter _persistentSelectionPainter =
-      PersistentSelectionOverlayPainter();
+  final PersistentSelectionOverlayPainter _persistentSelectionPainter = PersistentSelectionOverlayPainter();
 
   /// TextField 的 GlobalKey，用于查找 RenderEditable 注入 Painter
   final GlobalKey _textFieldKey = GlobalKey();
@@ -183,9 +195,7 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
 
   /// 选区变化时同步给 Painter
   void _onSelectionChanged() {
-    _persistentSelectionPainter.update(
-      selection: widget.controller.selection,
-    );
+    _persistentSelectionPainter.update(selection: widget.controller.selection);
   }
 
   /// 将持久化选区 Painter 注入到 RenderEditable
@@ -235,11 +245,13 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
         final int columnOffset = isMobile ? -1 : 0;
 
         // 连接线绘制区域总宽度（包含圆点占位，减去与文本的间距缩减量）
-        final connectionWidth =
-            (depth + 2 + columnOffset) * indentWidth - widget.dotTextGapReduction;
+        final connectionWidth = (depth + 2 + columnOffset) * indentWidth - widget.dotTextGapReduction;
 
         // 圆点颜色
         final dotColor = colorScheme.onSurfaceVariant.withValues(alpha: 0.4);
+
+        // 当前编辑节点的点亮色
+        final activeColor = colorScheme.primary.withValues(alpha: 0.6);
 
         // 折叠态圆点背景色：与圆点同色但更透明，作为子节点被收起的视觉提示
         final collapsedDotBackground = colorScheme.onSurfaceVariant.withValues(alpha: 0.1);
@@ -248,10 +260,7 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
         // 底部间距纳入内容区高度，使连接线的 Positioned 能覆盖间距区域
         // 右侧留白由外层内容区的内边距统一承担，为行尾竖条与左右边距预留空间
         final Widget rowContent = Padding(
-          padding: EdgeInsets.only(
-            left: connectionWidth,
-            bottom: widget.nodeSpacing,
-          ),
+          padding: EdgeInsets.only(left: connectionWidth, bottom: widget.nodeSpacing),
           child: _buildTextField(node, colorScheme),
         );
 
@@ -273,12 +282,15 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
                   lineColor: lineColor,
                   dotColor: dotColor,
                   // 移动端圆点整体上移两个像素，与行尾竖条折叠三角的视觉重心对齐
-                  dotVerticalOffset:
-                      OutlineConnectionMetrics.dotVerticalOffset - (isMobile ? 2.0 : 0.0),
+                  dotVerticalOffset: OutlineConnectionMetrics.dotVerticalOffset - (isMobile ? 2.0 : 0.0),
                   // 有子节点且处于折叠态时，为圆点绘制背景以提示子节点被收起
-                  collapsedDotBackgroundColor: hasChildren && !node.isExpanded
-                      ? collapsedDotBackground
-                      : null,
+                  collapsedDotBackgroundColor: hasChildren && !node.isExpanded ? collapsedDotBackground : null,
+                  // 当前编辑节点的圆点点亮
+                  activeDotColor: widget.isActiveNode ? activeColor : null,
+                  // 当前编辑节点圆点下方连接线的点亮
+                  siblingLineHighlight: widget.highlightedLineColumn == null
+                      ? null
+                      : OutlineSiblingLineHighlight(column: widget.highlightedLineColumn!, color: activeColor),
                 ),
               ),
             ),
@@ -296,11 +308,7 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
           ),
           child: widget.isBatchMode
               // 批量选择模式下整行可点击切换节点选中
-              ? GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: widget.onBatchTap,
-                  child: row,
-                )
+              ? GestureDetector(behavior: HitTestBehavior.opaque, onTap: widget.onBatchTap, child: row)
               : row,
         );
 
@@ -312,12 +320,7 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
             color: widget.isSelected ? colorScheme.primary.withValues(alpha: 0.12) : Colors.transparent,
             child: isMobile
                 // 行尾竖条叠加在内容区之上并贴到编辑区右边缘，不随左右边距设置移动
-                ? Stack(
-                    children: [
-                      content,
-                      _buildTrailingBar(node, colorScheme),
-                    ],
-                  )
+                ? Stack(children: [content, _buildTrailingBar(node, colorScheme)])
                 : content,
           ),
         );
@@ -380,7 +383,8 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
   /// 长按选中文字后在选区上方弹出，提供剪切、复制、粘贴、全选四项操作；
   /// 无选中文字时仅保留粘贴与全选，只读节点仅保留复制与全选。
   Widget _buildMobileSelectionToolbar(BuildContext context, EditableTextState editableTextState) {
-    final bool hasSelection = editableTextState.textEditingValue.selection.isValid &&
+    final bool hasSelection =
+        editableTextState.textEditingValue.selection.isValid &&
         !editableTextState.textEditingValue.selection.isCollapsed;
 
     return AdaptiveTextSelectionToolbar.buttonItems(
@@ -499,12 +503,9 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
       child: GestureDetector(
         // 空白处同样响应手势，保证整个竖条区域都是有效的点击与长按热区
         behavior: HitTestBehavior.opaque,
-        onTap: widget.isBatchMode
-            ? widget.onBatchTap
-            : (hasChildren ? widget.onToggleExpand : null),
+        onTap: widget.isBatchMode ? widget.onBatchTap : (hasChildren ? widget.onToggleExpand : null),
         onLongPressStart: (details) => widget.onTrailingBarLongPress(details.globalPosition),
-        onLongPressMoveUpdate: (details) =>
-            widget.onTrailingBarLongPressMove(details.globalPosition),
+        onLongPressMoveUpdate: (details) => widget.onTrailingBarLongPressMove(details.globalPosition),
         // 批量选择模式下按住竖条纵向滑动即可连续选中或取消途经节点
         onVerticalDragStart: widget.isBatchMode ? (_) => widget.onTrailingBarDragStart() : null,
         onVerticalDragEnd: widget.isBatchMode ? (_) => widget.onTrailingBarDragEnd() : null,
@@ -527,11 +528,7 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
                   child: AnimatedRotation(
                     turns: node.isExpanded ? 0 : 0.25,
                     duration: const Duration(milliseconds: 150),
-                    child: Icon(
-                      Icons.arrow_drop_down,
-                      size: _trailingBarIconSize,
-                      color: iconColor,
-                    ),
+                    child: Icon(Icons.arrow_drop_down, size: _trailingBarIconSize, color: iconColor),
                   ),
                 ),
               ),
@@ -546,15 +543,9 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
 ///
 /// 折叠光标（单击定位时的光标）不绘制拖动调整用的手柄，仅显示光标本身；
 /// 选中文字后的左右手柄沿用 Material 默认样式，仍可拖动调整选区范围。
-class _OutlineNodeSelectionControls extends MaterialTextSelectionControls
-    with TextSelectionHandleControls {
+class _OutlineNodeSelectionControls extends MaterialTextSelectionControls with TextSelectionHandleControls {
   @override
-  Widget buildHandle(
-    BuildContext context,
-    TextSelectionHandleType type,
-    double textHeight, [
-    VoidCallback? onTap,
-  ]) {
+  Widget buildHandle(BuildContext context, TextSelectionHandleType type, double textHeight, [VoidCallback? onTap]) {
     if (type == TextSelectionHandleType.collapsed) {
       return const SizedBox.shrink();
     }

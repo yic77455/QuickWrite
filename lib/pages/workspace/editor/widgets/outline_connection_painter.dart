@@ -22,6 +22,20 @@ class OutlineConnectionMetrics {
   static const double collapsedDotBackgroundRadius = 8.0;
 }
 
+/// 同级连接线的高亮列
+///
+/// 当前编辑节点的圆点位于列 (depth + 1)，该列上的连接线由其后代节点行绘制，
+/// 从圆点下方一直延伸到下一个同级节点所在行，即为需要点亮的连接线
+class OutlineSiblingLineHighlight {
+  /// 高亮竖线所在列（列号与节点深度使用同一坐标系）
+  final int column;
+
+  /// 高亮颜色
+  final Color color;
+
+  const OutlineSiblingLineHighlight({required this.column, required this.color});
+}
+
 /// 大纲节点连接线绘制器
 ///
 /// 在 CustomPaint 中绘制节点行前的连接线和圆点
@@ -31,6 +45,7 @@ class OutlineConnectionMetrics {
 /// - 深度 > 0 的节点从列 1 到列 depth 绘制连接线
 /// - 圆点始终绘制在列 (depth + 1) 的中心，y 坐标为单行文字高度的一半加固定偏移
 /// - 所有列按 [columnOffset] 整体横向偏移，用于调整整块指示区的左边界
+/// - 当前编辑节点的圆点使用高亮色绘制，其到下一个同级节点之间的连接线叠加高亮
 class OutlineConnectionPainter extends CustomPainter {
   /// 节点深度
   final int depth;
@@ -62,6 +77,18 @@ class OutlineConnectionPainter extends CustomPainter {
   /// 展开态与无子节点的节点传 null，不绘制背景
   final Color? collapsedDotBackgroundColor;
 
+  /// 当前编辑节点的圆点高亮色
+  ///
+  /// 非空时圆点使用该颜色绘制，用于标识当前正在编辑的节点；
+  /// 其他节点传 null，沿用普通圆点颜色
+  final Color? activeDotColor;
+
+  /// 同级连接线高亮配置
+  ///
+  /// 非空时高亮当前编辑节点到下一个同级节点之间的连接线，
+  /// 未处于该连接线上的行传 null
+  final OutlineSiblingLineHighlight? siblingLineHighlight;
+
   OutlineConnectionPainter({
     required this.depth,
     this.columnOffset = 0,
@@ -71,6 +98,8 @@ class OutlineConnectionPainter extends CustomPainter {
     required this.dotColor,
     this.dotVerticalOffset = OutlineConnectionMetrics.dotVerticalOffset,
     this.collapsedDotBackgroundColor,
+    this.activeDotColor,
+    this.siblingLineHighlight,
   });
 
   @override
@@ -93,6 +122,17 @@ class OutlineConnectionPainter extends CustomPainter {
         Rect.fromLTRB(lineLeft, 0, lineLeft + OutlineConnectionMetrics.lineWidth, size.height),
         linePaint,
       );
+
+      // 当前编辑节点到下一个同级节点的连接线整行高亮
+      final highlight = siblingLineHighlight;
+      if (highlight != null && highlight.column == i) {
+        canvas.drawRect(
+          Rect.fromLTRB(lineLeft, 0, lineLeft + OutlineConnectionMetrics.lineWidth, size.height),
+          Paint()
+            ..color = highlight.color
+            ..style = PaintingStyle.fill,
+        );
+      }
     }
 
     // 绘制圆点
@@ -105,25 +145,19 @@ class OutlineConnectionPainter extends CustomPainter {
       final backgroundPaint = Paint()
         ..color = collapsedDotBackgroundColor!
         ..style = PaintingStyle.fill;
-      canvas.drawCircle(
-        dotCenter,
-        OutlineConnectionMetrics.collapsedDotBackgroundRadius,
-        backgroundPaint,
-      );
+      canvas.drawCircle(dotCenter, OutlineConnectionMetrics.collapsedDotBackgroundRadius, backgroundPaint);
     }
 
     final dotPaint = Paint()
-      ..color = dotColor
+      ..color = activeDotColor ?? dotColor
       ..style = PaintingStyle.fill;
-    canvas.drawCircle(
-      dotCenter,
-      OutlineConnectionMetrics.dotRadius,
-      dotPaint,
-    );
+    canvas.drawCircle(dotCenter, OutlineConnectionMetrics.dotRadius, dotPaint);
   }
 
   @override
   bool shouldRepaint(covariant OutlineConnectionPainter oldDelegate) {
+    final oldHighlight = oldDelegate.siblingLineHighlight;
+    final highlight = siblingLineHighlight;
     // 比较所有影响绘制的关键字段
     return oldDelegate.depth != depth ||
         oldDelegate.columnOffset != columnOffset ||
@@ -132,6 +166,9 @@ class OutlineConnectionPainter extends CustomPainter {
         oldDelegate.lineColor != lineColor ||
         oldDelegate.dotColor != dotColor ||
         oldDelegate.dotVerticalOffset != dotVerticalOffset ||
-        oldDelegate.collapsedDotBackgroundColor != collapsedDotBackgroundColor;
+        oldDelegate.collapsedDotBackgroundColor != collapsedDotBackgroundColor ||
+        oldDelegate.activeDotColor != activeDotColor ||
+        oldHighlight?.column != highlight?.column ||
+        oldHighlight?.color != highlight?.color;
   }
 }

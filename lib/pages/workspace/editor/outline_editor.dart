@@ -404,6 +404,33 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     return result;
   }
 
+  /// 计算当前编辑节点下方连接线的高亮范围
+  ///
+  /// 当前节点的圆点位于列（深度 + 1），该列上的连接线由其后代节点行绘制，
+  /// 从圆点下方一直延伸到下一个同级节点所在行；同级节点是最后一个时，
+  /// 连接线一直延伸到子树结束处，只要有子节点就存在可点亮的线条。
+  /// 返回高亮列、起始行索引（当前节点的下一行）与结束行索引（不含）；
+  /// 当前节点没有子孙节点时该列上不存在连接线，返回 null。
+  ({int column, int startIndex, int endIndex})? _resolveActiveSiblingLine(
+    List<FlatNode> flatList,
+    String? activeNodeId,
+  ) {
+    if (activeNodeId == null) return null;
+    final int activeIndex = flatList.indexWhere((flat) => flat.node.id == activeNodeId);
+    if (activeIndex < 0) return null;
+    final int activeDepth = flatList[activeIndex].depth;
+
+    // 向后跨过当前节点的全部子孙行，直到子树结束
+    int endIndex = activeIndex + 1;
+    while (endIndex < flatList.length && flatList[endIndex].depth > activeDepth) {
+      endIndex++;
+    }
+
+    // 当前节点没有子孙节点时，圆点所在列上没有连接线
+    if (endIndex == activeIndex + 1) return null;
+    return (column: activeDepth + 1, startIndex: activeIndex + 1, endIndex: endIndex);
+  }
+
   /// 查找节点的位置信息（父节点和在父节点children中的索引）
   ({OutlineNode? parent, int index})? _findLocation(String id) {
     ({OutlineNode? parent, int index})? search(List<OutlineNode> nodes, OutlineNode? parent) {
@@ -487,12 +514,14 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
               (_selectedNodeIds.isNotEmpty || _selectAllLevel != 0)) {
             _selectedNodeIds.clear();
             _selectAllLevel = 0;
-            if (mounted) setState(() {});
           }
           // 重置选区锚点：点击输入框获得焦点后，Shift+click 应以当前焦点节点为起始
           if (!_isShiftClicking && !_isContextMenuOpening && !_isUndoRedoing) {
             _selectionAnchorIndex = null;
           }
+          // 当前编辑节点变为本节点，刷新节点列表以更新圆点与连接线高亮；
+          // 失焦时高亮仍保留在最近编辑的节点上，无需重建
+          if (mounted) setState(() {});
         }
       });
       _focusNodes[node.id] = focusNode;
@@ -725,9 +754,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     final String? path = widget.filePath;
     if (path == null || path.isEmpty) return null;
     const String extension = GlobalConstants.settingFileExtension;
-    final String base = path.endsWith(extension)
-        ? path.substring(0, path.length - extension.length)
-        : path;
+    final String base = path.endsWith(extension) ? path.substring(0, path.length - extension.length) : path;
     return '$base.fold.json';
   }
 
@@ -740,8 +767,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       if (!await file.exists()) return;
       final dynamic data = jsonDecode(await file.readAsString());
       if (data is! Map) return;
-      final Set<String>? collapsed =
-          (data['collapsed'] as List?)?.whereType<String>().toSet();
+      final Set<String>? collapsed = (data['collapsed'] as List?)?.whereType<String>().toSet();
       if (collapsed == null || collapsed.isEmpty || !mounted) return;
       setState(() => _applyFoldState(collapsed));
     } catch (e) {
@@ -1150,9 +1176,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
     // 从当前行向上/下偏移一行得到探测点，再换算成该点处的文字位置
     final TextPosition probePosition = renderEditable.getPositionForPoint(
-      renderEditable.localToGlobal(
-        Offset(goalX, caretRect.center.dy + (forward ? lineHeight : -lineHeight)),
-      ),
+      renderEditable.localToGlobal(Offset(goalX, caretRect.center.dy + (forward ? lineHeight : -lineHeight))),
     );
     final Rect probeCaretRect = renderEditable.getLocalRectForCaret(probePosition);
 
@@ -1240,8 +1264,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     if (controller == null || renderEditable == null || !renderEditable.attached) return false;
 
     // 向下切换定位到首行，向上切换定位到末行
-    final TextPosition anchor =
-        lastLine ? TextPosition(offset: controller.text.length) : const TextPosition(offset: 0);
+    final TextPosition anchor = lastLine ? TextPosition(offset: controller.text.length) : const TextPosition(offset: 0);
     final Rect lineRect = renderEditable.getLocalRectForCaret(anchor);
     final TextPosition position = renderEditable.getPositionForPoint(
       renderEditable.localToGlobal(Offset(caretX, lineRect.center.dy)),
@@ -1255,11 +1278,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// [ensureVisible] 为 true 时立即把节点滚动进视口：
   /// 节点可能位于视口之外而尚未构建，仅请求焦点不会带动视口，
   /// 因此交由 [_scrollToNode] 滚动并按需重试定位。
-  void _focusNodeWithSelection(
-    String nodeId, {
-    required bool moveCursorToEnd,
-    bool ensureVisible = true,
-  }) {
+  void _focusNodeWithSelection(String nodeId, {required bool moveCursorToEnd, bool ensureVisible = true}) {
     final focusNode = _focusNodes[nodeId];
     final controller = _controllers[nodeId];
     if (focusNode == null || controller == null) return;
@@ -1559,8 +1578,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 批量缩进时判断节点是否可以缩进
   ///
   /// 除单个节点的缩进条件外，还要求存在未被选中的前兄弟节点作为移动目标
-  bool _canBatchIndentNode(String nodeId) =>
-      _canIndentNode(nodeId) && _indentTargetParent(nodeId) != null;
+  bool _canBatchIndentNode(String nodeId) => _canIndentNode(nodeId) && _indentTargetParent(nodeId) != null;
 
   /// 反缩进节点（提升一级，变成父节点的兄弟节点）
   void _outdentNode(String nodeId) {
@@ -1610,9 +1628,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     final nodeToDelete = siblings[location.index];
 
     // 最后一个无子节点的根节点不可删除，始终保持至少一个节点存在
-    if (location.parent == null &&
-        nodeToDelete.children.isEmpty &&
-        _roots.length == 1) {
+    if (location.parent == null && nodeToDelete.children.isEmpty && _roots.length == 1) {
       return;
     }
 
@@ -1906,10 +1922,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     setState(() {});
     _notifyBatchChanged();
     // 长按后按住不放继续上下拖动时，指针越出视口边缘即持续滚动视口
-    _updateEdgeAutoScroll(
-      globalPosition,
-      selectionUpdater: _onTrailingBarLongPressMove,
-    );
+    _updateEdgeAutoScroll(globalPosition, selectionUpdater: _onTrailingBarLongPressMove);
   }
 
   /// 行尾竖条长按拖动：以长按节点为锚点，按指针位置扩展或收缩节点选区
@@ -2146,18 +2159,14 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 顺序取自扁平列表而非选中集合的插入顺序，避免批量操作结果随选择顺序变化
   List<String> _selectedTopLevelNodeIdsInOrder() {
     final topLevelIds = _selectedTopLevelNodeIds().toSet();
-    return _flatten()
-        .where((flat) => topLevelIds.contains(flat.node.id))
-        .map((flat) => flat.node.id)
-        .toList();
+    return _flatten().where((flat) => topLevelIds.contains(flat.node.id)).map((flat) => flat.node.id).toList();
   }
 
   /// 批量选中的节点是否可以缩进为子节点
   bool get canIndentSelectedNodes => _selectedTopLevelNodeIds().any(_canBatchIndentNode);
 
   /// 批量选中的节点是否可以提升层级
-  bool get canOutdentSelectedNodes =>
-      _selectedTopLevelNodeIds().any((id) => _findLocation(id)?.parent != null);
+  bool get canOutdentSelectedNodes => _selectedTopLevelNodeIds().any((id) => _findLocation(id)?.parent != null);
 
   /// 批量缩进选中的节点
   ///
@@ -2325,10 +2334,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   bool _isPositionOnScrollbar(Offset globalPosition) {
     final renderObject = _scrollbarKey.currentContext?.findRenderObject();
     if (renderObject is! RenderBox || !renderObject.attached) return false;
-    final rect = MatrixUtils.transformRect(
-      renderObject.getTransformTo(null),
-      Offset.zero & renderObject.size,
-    );
+    final rect = MatrixUtils.transformRect(renderObject.getTransformTo(null), Offset.zero & renderObject.size);
     return globalPosition.dx >= rect.right - editorScrollbarThickness &&
         globalPosition.dx <= rect.right &&
         globalPosition.dy >= rect.top &&
@@ -2445,10 +2451,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
     final globalPosition = details.globalPosition;
     // 指针拖出视口上下边缘时持续滚动视口，滚动中指针不动也能继续扩展选区
-    _updateEdgeAutoScroll(
-      globalPosition,
-      selectionUpdater: _updateDragSelection,
-    );
+    _updateEdgeAutoScroll(globalPosition, selectionUpdater: _updateDragSelection);
     _updateDragSelection(globalPosition);
   }
 
@@ -2877,8 +2880,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     final nodes = nodeIds.map((id) => _findNode(id)).whereType<OutlineNode>().toList();
     if (nodes.isEmpty) return;
 
-    final TextSelection? selection =
-        nodes.length == 1 ? _controllers[nodeIds.first]?.selection : null;
+    final TextSelection? selection = nodes.length == 1 ? _controllers[nodeIds.first]?.selection : null;
 
     _undoManager.beginBatch();
     setState(() {
@@ -2886,8 +2888,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
         node.headingLevel = level;
       }
     });
-    _endBatchAndNotify(
-        description: '设置标题级别', focusNodeId: nodeIds.first, focusSelection: selection);
+    _endBatchAndNotify(description: '设置标题级别', focusNodeId: nodeIds.first, focusSelection: selection);
   }
 
   // ================= 移动端键盘工具栏接口 =================
@@ -2955,8 +2956,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   }
 
   /// 当前文字样式标记（加粗、斜体、下划线、删除线）
-  TextStyleFlags get currentTextStyleFlags =>
-      _getSelectionFlags(_toolbarTargetNodes, _toolbarTargetSelection);
+  TextStyleFlags get currentTextStyleFlags => _getSelectionFlags(_toolbarTargetNodes, _toolbarTargetSelection);
 
   /// 当前字体颜色或字底颜色
   ///
@@ -2989,14 +2989,13 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     Color? backgroundColor,
     bool clearForeground = false,
     bool clearBackground = false,
-  }) =>
-      _applyColor(
-        _toolbarTargetNodeIds,
-        foregroundColor: foregroundColor,
-        backgroundColor: backgroundColor,
-        clearForeground: clearForeground,
-        clearBackground: clearBackground,
-      );
+  }) => _applyColor(
+    _toolbarTargetNodeIds,
+    foregroundColor: foregroundColor,
+    backgroundColor: backgroundColor,
+    clearForeground: clearForeground,
+    clearBackground: clearBackground,
+  );
 
   /// 将活动节点缩进为前一兄弟节点的子节点
   void indentActiveNode() {
@@ -3034,8 +3033,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       return;
     }
 
-    final bool autoComplete =
-        symbol.isPairStart && SettingsService.instance.punctuationAutoCompleteEnabled;
+    final bool autoComplete = symbol.isPairStart && SettingsService.instance.punctuationAutoCompleteEnabled;
 
     final String inserted;
     final int caretOffset;
@@ -3063,8 +3061,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     node.styleRanges = TextStyleRangeUtils.adjustForTextChange(node.styleRanges, text, newText);
     (controller as RichTextEditingController).styleRanges = node.styleRanges;
     node.text = newText;
-    _endBatchAndNotify(
-        description: '插入标点符号', focusNodeId: nodeId, focusSelection: controller.selection);
+    _endBatchAndNotify(description: '插入标点符号', focusNodeId: nodeId, focusSelection: controller.selection);
   }
 
   // ================= 剪贴板操作 =================
@@ -3254,11 +3251,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
         if (!_isBatchSelectionMode) {
           _focusNodeWithSelection(targetId!, moveCursorToEnd: true);
         }
-        _endBatchAndNotify(
-          description: '删除选中节点',
-          focusNodeId: targetId,
-          focusSelection: _selectionAtEnd(targetId!),
-        );
+        _endBatchAndNotify(description: '删除选中节点', focusNodeId: targetId, focusSelection: _selectionAtEnd(targetId!));
       });
     } else {
       // 无可聚焦节点时仍需结束批量操作
@@ -3896,10 +3889,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     if (nodes.isEmpty) {
       return const SizedBox.shrink();
     }
-    return HeadingLevelSelector(
-      nodes: nodes,
-      onLevelChanged: (level) => _setHeadingLevel(targetIds, level),
-    );
+    return HeadingLevelSelector(nodes: nodes, onLevelChanged: (level) => _setHeadingLevel(targetIds, level));
   }
 
   /// 构建文字样式按钮行（加粗/斜体/下划线/删除线）
@@ -3992,7 +3982,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     if (_isArrowKey(event.logicalKey)) {
       if (event is KeyDownEvent || event is KeyRepeatEvent) {
         // 带修饰键的方向键交由输入框默认行为处理（扩展选区、按词/段跳转等）
-        final bool plain = !HardwareKeyboard.instance.isShiftPressed &&
+        final bool plain =
+            !HardwareKeyboard.instance.isShiftPressed &&
             !HardwareKeyboard.instance.isControlPressed &&
             !HardwareKeyboard.instance.isAltPressed;
         if (plain) {
@@ -4100,8 +4091,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
         if (OutlineShortcutKeys.isClearColorKey(event.logicalKey)) {
           _applyColor([nodeId], clearForeground: true);
         } else {
-          _applyColor([nodeId],
-              foregroundColor: OutlineShortcutKeys.foregroundColor(event.logicalKey));
+          _applyColor([nodeId], foregroundColor: OutlineShortcutKeys.foregroundColor(event.logicalKey));
         }
         return KeyEventResult.handled;
       }
@@ -4112,8 +4102,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       if (OutlineShortcutKeys.isClearColorKey(event.logicalKey)) {
         _applyColor([nodeId], clearBackground: true);
       } else {
-        _applyColor([nodeId],
-            backgroundColor: OutlineShortcutKeys.backgroundColor(event.logicalKey));
+        _applyColor([nodeId], backgroundColor: OutlineShortcutKeys.backgroundColor(event.logicalKey));
       }
       return KeyEventResult.handled;
     }
@@ -4306,8 +4295,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
           if (OutlineShortcutKeys.isClearColorKey(event.logicalKey)) {
             _applyColor(targetIds, clearForeground: true);
           } else {
-            _applyColor(targetIds,
-                foregroundColor: OutlineShortcutKeys.foregroundColor(event.logicalKey));
+            _applyColor(targetIds, foregroundColor: OutlineShortcutKeys.foregroundColor(event.logicalKey));
           }
           return KeyEventResult.handled;
         }
@@ -4318,8 +4306,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
         if (OutlineShortcutKeys.isClearColorKey(event.logicalKey)) {
           _applyColor(targetIds, clearBackground: true);
         } else {
-          _applyColor(targetIds,
-              backgroundColor: OutlineShortcutKeys.backgroundColor(event.logicalKey));
+          _applyColor(targetIds, backgroundColor: OutlineShortcutKeys.backgroundColor(event.logicalKey));
         }
         return KeyEventResult.handled;
       }
@@ -4446,11 +4433,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       final textLength = _controllers[entry.node.id]?.text.length ?? entry.node.text.length;
       final nodeEnd = entry.startOffset + textLength;
       if (globalOffset >= entry.startOffset && globalOffset <= nodeEnd) {
-        return (
-          nodeId: entry.node.id,
-          nodeStart: entry.startOffset,
-          localOffset: globalOffset - entry.startOffset,
-        );
+        return (nodeId: entry.node.id, nodeStart: entry.startOffset, localOffset: globalOffset - entry.startOffset);
       }
     }
     return null;
@@ -4502,12 +4485,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 滚动到节点的重试实现
   ///
   /// 节点未构建时通过估算偏移量跳转，下一帧重试直到节点构建成功或超过最大重试次数。
-  void _scrollToNodeWithRetry(
-    String nodeId,
-    int retryCount,
-    double? lastJumpOffset, {
-    double margin = 0,
-  }) {
+  void _scrollToNodeWithRetry(String nodeId, int retryCount, double? lastJumpOffset, {double margin = 0}) {
     if (!mounted || !_scrollController.hasClients || retryCount >= 30) return;
 
     final key = _nodeTileKeys[nodeId];
@@ -4631,10 +4609,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   ///
   /// 指针进入视口上下边缘的触发区时启动定时滚动，离开触发区后停止；
   /// [selectionUpdater] 用于在指针不动、仅视口滚动的过程中继续刷新选区。
-  void _updateEdgeAutoScroll(
-    Offset globalPosition, {
-    required void Function(Offset globalPosition) selectionUpdater,
-  }) {
+  void _updateEdgeAutoScroll(Offset globalPosition, {required void Function(Offset globalPosition) selectionUpdater}) {
     _autoScrollPointerPosition = globalPosition;
     _autoScrollSelectionUpdater = selectionUpdater;
 
@@ -4649,10 +4624,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       return;
     }
 
-    _autoScrollTimer ??= Timer.periodic(
-      const Duration(milliseconds: 16),
-      (_) => _onEdgeAutoScrollTick(),
-    );
+    _autoScrollTimer ??= Timer.periodic(const Duration(milliseconds: 16), (_) => _onEdgeAutoScrollTick());
   }
 
   /// 停止边缘自动滚动
@@ -4691,10 +4663,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     final double delta = overshoot > 0 ? magnitude : -magnitude;
 
     final position = _scrollController.position;
-    final double target = (position.pixels + delta).clamp(
-      position.minScrollExtent,
-      position.maxScrollExtent,
-    );
+    final double target = (position.pixels + delta).clamp(position.minScrollExtent, position.maxScrollExtent);
     // 已到达可滚动边界，滚动不再生效
     if ((target - position.pixels).abs() < 0.5) return;
 
@@ -4732,10 +4701,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   Rect? _viewportGlobalRect() {
     final renderObject = _scrollViewKey.currentContext?.findRenderObject();
     if (renderObject is! RenderBox || !renderObject.attached) return null;
-    return MatrixUtils.transformRect(
-      renderObject.getTransformTo(null),
-      Offset.zero & renderObject.size,
-    );
+    return MatrixUtils.transformRect(renderObject.getTransformTo(null), Offset.zero & renderObject.size);
   }
 
   @override
@@ -4802,13 +4768,10 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
     // 切换到新节点时，清除上一个节点的文字选区
     final previousNodeId = _lastFocusedNodeId;
-    if (previousNodeId != null &&
-        previousNodeId != baseResolved.nodeId &&
-        _controllers.containsKey(previousNodeId)) {
+    if (previousNodeId != null && previousNodeId != baseResolved.nodeId && _controllers.containsKey(previousNodeId)) {
       final prevController = _controllers[previousNodeId]!;
       if (!prevController.selection.isCollapsed) {
-        final offset = prevController.selection.baseOffset
-            .clamp(0, prevController.text.length);
+        final offset = prevController.selection.baseOffset.clamp(0, prevController.text.length);
         prevController.selection = TextSelection.collapsed(offset: offset);
       }
     }
@@ -4847,11 +4810,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     // 通过批量操作合并为单条撤销记录，期间抑制控制器变化监听
     _undoManager.beginBatch();
     // 调整样式区间位置，保持样式与文字对应
-    node.styleRanges = TextStyleRangeUtils.adjustForTextChange(
-      node.styleRanges,
-      oldText,
-      newText,
-    );
+    node.styleRanges = TextStyleRangeUtils.adjustForTextChange(node.styleRanges, oldText, newText);
     if (controller is RichTextEditingController) {
       controller.styleRanges = node.styleRanges;
     }
@@ -4886,8 +4845,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
           .firstWhere((e) => e.node.id == entry.key, orElse: () => (node: node, startOffset: 0))
           .startOffset;
 
-      final sortedMatches = entry.value.toList()
-        ..sort((a, b) => b.start.compareTo(a.start));
+      final sortedMatches = entry.value.toList()..sort((a, b) => b.start.compareTo(a.start));
 
       final oldText = controller.text;
       var newText = oldText;
@@ -4901,11 +4859,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       if (newText == oldText) continue;
 
       // 调整样式区间位置
-      node.styleRanges = TextStyleRangeUtils.adjustForTextChange(
-        node.styleRanges,
-        oldText,
-        newText,
-      );
+      node.styleRanges = TextStyleRangeUtils.adjustForTextChange(node.styleRanges, oldText, newText);
       if (controller is RichTextEditingController) {
         controller.styleRanges = node.styleRanges;
       }
@@ -5029,11 +4983,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     final double editorLeft = editorBox?.localToGlobal(Offset.zero).dx ?? anchorRect.left;
 
     setState(() => _isSettingsCardVisible = true);
-    await OutlineEditorSettingsCard.show(
-      context: context,
-      anchorRect: anchorRect,
-      editorLeft: editorLeft,
-    );
+    await OutlineEditorSettingsCard.show(context: context, anchorRect: anchorRect, editorLeft: editorLeft);
     if (!mounted) return;
     setState(() => _isSettingsCardVisible = false);
   }
@@ -5084,10 +5034,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
     // 将查找匹配高亮同步到各节点控制器
     final workspaceProvider = context.read<WorkspaceProvider>();
-    _syncFindHighlightsToControllers(
-      workspaceProvider.findMatches,
-      workspaceProvider.currentMatchIndex,
-    );
+    _syncFindHighlightsToControllers(workspaceProvider.findMatches, workspaceProvider.currentMatchIndex);
 
     // 异步加载文件内容时显示加载状态
     if (_isLoading) {
@@ -5143,72 +5090,72 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
               children: [
                 // 主内容区域：可滚动的大纲列表
                 Focus(
-                        focusNode: _editorFocusNode,
-                        onKeyEvent: _onEditorKeyEvent,
-                        child: Listener(
-                          behavior: HitTestBehavior.translucent,
-                          // 移动端不安装编辑器级指针处理，避免清除选区、抢占焦点等干扰输入框自身选区
-                          onPointerDown: enableEditorSelection ? _onPointerDown : null,
-                          onPointerUp: enableEditorSelection
-                              ? _onPointerUp
-                              // 批量选择模式下抬起指针结束竖条滑选
-                              : (_isBatchSelectionMode ? _onBatchPointerUp : null),
-                          // 批量选择模式下按住竖条滑动时按指针位置更新选区，
-                          // 指针越出视口上下边缘时持续滚动视口
-                          onPointerMove: _isBatchSelectionMode ? _onBatchPointerMove : null,
-                          onPointerCancel: _isBatchSelectionMode ? _onBatchPointerUp : null,
-                          child: RawGestureDetector(
-                            behavior: HitTestBehavior.translucent,
-                            // 移动端不注册自定义拖拽识别器，让垂直拖动交由滚动容器处理，
-                            // 保证手指滑动屏幕可正常滚动而非触发节点选区
-                            gestures: enableEditorSelection
-                                ? {
-                                    _EagerPanGestureRecognizer:
-                                        GestureRecognizerFactoryWithHandlers<_EagerPanGestureRecognizer>(
-                                          () => _EagerPanGestureRecognizer(),
-                                          (instance) {
-                                            instance.onStart = _onPanStart;
-                                            instance.onUpdate = _onPanUpdate;
-                                            instance.onEnd = _onPanEnd;
-                                            instance.onCancel = _onPanCancel;
-                                            instance.shouldDeferToScrollbar = _isPositionOnScrollbar;
-                                          },
-                                        ),
-                                  }
-                                : const <Type, GestureRecognizerFactory>{},
-                            child: LayoutBuilder(
-                              builder: (context, constraints) {
-                                final settings = SettingsService.instance;
-
-                                final scrollContent = ScrollConfiguration(
-                                  behavior: CleanEditorScrollBehavior(),
-                                  child: _buildEditorScrollView(
-                                    constraints: constraints,
-                                    pageViewMode: settings.outlinePageViewMode,
-                                    colorScheme: colorScheme,
-                                    paperColor: editorBackgroundColor,
-                                    flatList: flatList,
+                  focusNode: _editorFocusNode,
+                  onKeyEvent: _onEditorKeyEvent,
+                  child: Listener(
+                    behavior: HitTestBehavior.translucent,
+                    // 移动端不安装编辑器级指针处理，避免清除选区、抢占焦点等干扰输入框自身选区
+                    onPointerDown: enableEditorSelection ? _onPointerDown : null,
+                    onPointerUp: enableEditorSelection
+                        ? _onPointerUp
+                        // 批量选择模式下抬起指针结束竖条滑选
+                        : (_isBatchSelectionMode ? _onBatchPointerUp : null),
+                    // 批量选择模式下按住竖条滑动时按指针位置更新选区，
+                    // 指针越出视口上下边缘时持续滚动视口
+                    onPointerMove: _isBatchSelectionMode ? _onBatchPointerMove : null,
+                    onPointerCancel: _isBatchSelectionMode ? _onBatchPointerUp : null,
+                    child: RawGestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      // 移动端不注册自定义拖拽识别器，让垂直拖动交由滚动容器处理，
+                      // 保证手指滑动屏幕可正常滚动而非触发节点选区
+                      gestures: enableEditorSelection
+                          ? {
+                              _EagerPanGestureRecognizer:
+                                  GestureRecognizerFactoryWithHandlers<_EagerPanGestureRecognizer>(
+                                    () => _EagerPanGestureRecognizer(),
+                                    (instance) {
+                                      instance.onStart = _onPanStart;
+                                      instance.onUpdate = _onPanUpdate;
+                                      instance.onEnd = _onPanEnd;
+                                      instance.onCancel = _onPanCancel;
+                                      instance.shouldDeferToScrollbar = _isPositionOnScrollbar;
+                                    },
                                   ),
-                                );
+                            }
+                          : const <Type, GestureRecognizerFactory>{},
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final settings = SettingsService.instance;
 
-                                // 移动端隐藏滚动条，避免遮挡窄屏下的编辑内容；桌面端保持原有滚动条表现
-                                if (PlatformCapabilities.isMobile) {
-                                  return scrollContent;
-                                }
-
-                                return Scrollbar(
-                                  key: _scrollbarKey,
-                                  controller: _scrollController,
-                                  thumbVisibility: settings.scrollbarAlwaysVisible ? true : null,
-                                  thickness: editorScrollbarThickness,
-                                  radius: Radius.circular(editorScrollbarThickness / 2),
-                                  child: scrollContent,
-                                );
-                              },
+                          final scrollContent = ScrollConfiguration(
+                            behavior: CleanEditorScrollBehavior(),
+                            child: _buildEditorScrollView(
+                              constraints: constraints,
+                              pageViewMode: settings.outlinePageViewMode,
+                              colorScheme: colorScheme,
+                              paperColor: editorBackgroundColor,
+                              flatList: flatList,
                             ),
-                          ),
-                        ),
+                          );
+
+                          // 移动端隐藏滚动条，避免遮挡窄屏下的编辑内容；桌面端保持原有滚动条表现
+                          if (PlatformCapabilities.isMobile) {
+                            return scrollContent;
+                          }
+
+                          return Scrollbar(
+                            key: _scrollbarKey,
+                            controller: _scrollController,
+                            thumbVisibility: settings.scrollbarAlwaysVisible ? true : null,
+                            thickness: editorScrollbarThickness,
+                            radius: Radius.circular(editorScrollbarThickness / 2),
+                            child: scrollContent,
+                          );
+                        },
                       ),
+                    ),
+                  ),
+                ),
                 // 底部快捷键提示：仅桌面端且设置中开启时显示
                 // 移动端没有物理键盘，隐藏提示，底部预留高度保持为 0
                 if (!PlatformCapabilities.isMobile && SettingsService.instance.outlineBottomHintEnabled)
@@ -5233,10 +5180,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
                     right: 0,
                     top: 0,
                     bottom: 0,
-                    child: OutlineShortcutPanel(
-                      colorScheme: colorScheme,
-                      onClose: _toggleShortcutPanel,
-                    ),
+                    child: OutlineShortcutPanel(colorScheme: colorScheme, onClose: _toggleShortcutPanel),
                   ),
               ],
             ),
@@ -5266,10 +5210,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   }) {
     final settings = SettingsService.instance;
     final bool isPaperMode = pageViewMode == 'paper';
-    final double horizontalBase =
-        isPaperMode ? GlobalConstants.a4Width : constraints.maxWidth;
-    final double horizontalPadding =
-        horizontalBase * (settings.outlineHorizontalMargin / 100);
+    final double horizontalBase = isPaperMode ? GlobalConstants.a4Width : constraints.maxWidth;
+    final double horizontalPadding = horizontalBase * (settings.outlineHorizontalMargin / 100);
     // 顶边距和底边距（百分比，相对于编辑器高度）
     // 换算基准在键盘升降期间保持不变，避免节点内容随键盘上下移动
     final double marginBasisHeight = _resolveMarginBasisHeight(constraints.maxHeight);
@@ -5278,16 +5220,23 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     // 记录底边距，供聚焦、定位节点时作为底部安全间距使用
     _bottomContentPadding = bottomPadding;
     // 底部快捷键提示的预留高度：提示关闭或移动端不显示时不预留
-    final double bottomHintHeight =
-        (!PlatformCapabilities.isMobile && settings.outlineBottomHintEnabled) ? _bottomHintHeight : 0.0;
+    final double bottomHintHeight = (!PlatformCapabilities.isMobile && settings.outlineBottomHintEnabled)
+        ? _bottomHintHeight
+        : 0.0;
 
     // 内容按 A4 宽度居中的额外内缩量；宽度不足以容纳 A4 时取 0；
     // 纸张模式与移动端在整个视口宽度内居中，桌面端非纸张模式先施加左右边距再居中
     final double viewportCenterRaw = (constraints.maxWidth - GlobalConstants.a4Width) / 2;
     final double viewportCenterInset = viewportCenterRaw > 0 ? viewportCenterRaw : 0.0;
-    final double paddedCenterRaw =
-        (constraints.maxWidth - 2 * horizontalPadding - GlobalConstants.a4Width) / 2;
+    final double paddedCenterRaw = (constraints.maxWidth - 2 * horizontalPadding - GlobalConstants.a4Width) / 2;
     final double paddedCenterInset = paddedCenterRaw > 0 ? paddedCenterRaw : 0.0;
+
+    // 当前编辑节点，及其到下一个同级节点之间连接线的高亮范围
+    final String? activeNodeId = _activeNodeId;
+    final ({int column, int startIndex, int endIndex})? siblingLineRange = _resolveActiveSiblingLine(
+      flatList,
+      activeNodeId,
+    );
 
     // 构建节点列表，每个节点都用右键菜单包装；
     // 移动端长按交还系统原生选择行为，不注册长按识别器
@@ -5298,7 +5247,13 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
         onSecondaryTapDown: _handleSecondaryTapDown,
         onDismissed: _handleContextMenuDismissed,
         enableMobileLongPress: !PlatformCapabilities.isMobile,
-        child: _buildNodeTile(flatList[index], horizontalMargin: horizontalPadding),
+        child: _buildNodeTile(
+          flatList[index],
+          index: index,
+          activeNodeId: activeNodeId,
+          siblingLineRange: siblingLineRange,
+          horizontalMargin: horizontalPadding,
+        ),
       ),
     );
 
@@ -5309,10 +5264,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       // 内容不足 A4 高度时在其后补足空白，使纸张始终保持 A4 尺寸
       slivers = [
         SliverPadding(
-          padding: EdgeInsets.only(
-            top: widget.extraTopPadding + 10.0,
-            bottom: bottomHintHeight,
-          ),
+          padding: EdgeInsets.only(top: widget.extraTopPadding + 10.0, bottom: bottomHintHeight),
           sliver: SliverPadding(
             padding: EdgeInsets.symmetric(horizontal: viewportCenterInset),
             sliver: DecoratedSliver(
@@ -5327,19 +5279,11 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
                 ],
               ),
               sliver: SliverPadding(
-                padding: EdgeInsets.fromLTRB(
-                  horizontalPadding,
-                  topPadding,
-                  horizontalPadding,
-                  bottomPadding,
-                ),
+                padding: EdgeInsets.fromLTRB(horizontalPadding, topPadding, horizontalPadding, bottomPadding),
                 sliver: SliverMainAxisGroup(
                   slivers: [
                     nodeList,
-                    SliverFillRemaining(
-                      hasScrollBody: false,
-                      child: const SizedBox.shrink(),
-                    ),
+                    SliverFillRemaining(hasScrollBody: false, child: const SizedBox.shrink()),
                   ],
                 ),
               ),
@@ -5368,25 +5312,38 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
               top: topPadding + widget.extraTopPadding,
               bottom: bottomPadding + bottomHintHeight,
             );
-      slivers = [
-        SliverPadding(padding: scrollPadding, sliver: nodeList),
-      ];
+      slivers = [SliverPadding(padding: scrollPadding, sliver: nodeList)];
     }
 
-    return CustomScrollView(
-      key: _scrollViewKey,
-      controller: _scrollController,
-      slivers: slivers,
-    );
+    return CustomScrollView(key: _scrollViewKey, controller: _scrollController, slivers: slivers);
   }
 
   /// 构建单个节点行
   ///
   /// [horizontalMargin] 为左右边距（像素），仅移动端使用：
-  /// 桌面端由滚动容器内边距统一施加，移动端则由节点行内容承担
-  Widget _buildNodeTile(FlatNode flatNode, {required double horizontalMargin}) {
+  /// 桌面端由滚动容器内边距统一施加，移动端则由节点行内容承担。
+  /// [index] 为该节点在扁平列表中的行索引，
+  /// [activeNodeId] 为当前编辑节点 ID，[siblingLineRange] 为连接线高亮范围，
+  /// 二者共同决定该行圆点与同级连接线是否点亮
+  Widget _buildNodeTile(
+    FlatNode flatNode, {
+    required int index,
+    required String? activeNodeId,
+    required ({int column, int startIndex, int endIndex})? siblingLineRange,
+    required double horizontalMargin,
+  }) {
     // 获取或创建节点瓦片的全局键，用于拖拽选区的命中检测
     final key = _nodeTileKeys.putIfAbsent(flatNode.node.id, () => GlobalKey());
+
+    // 当前编辑节点的圆点高亮
+    final bool isActiveNode = flatNode.node.id == activeNodeId;
+
+    // 当前编辑节点到下一个同级节点之间的连接线高亮列：
+    // 该连接线位于当前节点圆点所在的列，由两者之间的子孙节点行整行点亮
+    final int? highlightedLineColumn =
+        siblingLineRange != null && index >= siblingLineRange.startIndex && index < siblingLineRange.endIndex
+        ? siblingLineRange.column
+        : null;
 
     return OutlineNodeTile(
       key: key,
@@ -5401,6 +5358,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       nodeSpacing: SettingsService.instance.outlineNodeSpacing,
       horizontalMargin: horizontalMargin,
       isSelected: _selectedNodeIds.contains(flatNode.node.id),
+      isActiveNode: isActiveNode,
+      highlightedLineColumn: highlightedLineColumn,
       isBatchMode: _isBatchSelectionMode,
       readOnly: widget.readOnly,
       onToggleExpand: () => _toggleExpand(flatNode.node.id),
