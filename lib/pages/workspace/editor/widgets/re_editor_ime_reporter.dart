@@ -55,6 +55,7 @@ class ReEditorImeReporterState extends State<ReEditorImeReporter> with WidgetsBi
   /// 不必等到下一帧才纠正输入法窗口，避免候选框先出现在滚动前的位置再跳回。
   void reportNow() {
     if (!PlatformCapabilities.needsImeCursorFix) return;
+    if (!widget.focusNode.hasFocus) return;
     if (!_tryReportNow()) _scheduleReport();
   }
 
@@ -117,6 +118,8 @@ class ReEditorImeReporterState extends State<ReEditorImeReporter> with WidgetsBi
   void _scheduleReport() {
     // 当前平台不需要修正输入法候选框时，跳过整个上报流程
     if (!PlatformCapabilities.needsImeCursorFix) return;
+    // 锚点只对持有焦点的输入框有意义，失焦后不再安排帧末上报
+    if (!widget.focusNode.hasFocus) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _reportWithRetry(0);
       // 排版与滚动可能在本帧末才稳定，下一帧再核对一次
@@ -151,6 +154,8 @@ class ReEditorImeReporterState extends State<ReEditorImeReporter> with WidgetsBi
   /// 读取光标矩形并上报；渲染对象不可用或读取失败时返回 false
   bool _tryReportNow() {
     if (!mounted) return false;
+    // 仅编辑器持有焦点时上报：失焦后选区与滚动位置的变化不代表输入法位置
+    if (!widget.focusNode.hasFocus) return false;
 
     final Object? render = _findCodeFieldRender(context as Element);
     if (render == null) {

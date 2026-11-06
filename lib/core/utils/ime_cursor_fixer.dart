@@ -199,6 +199,10 @@ class _ImeCursorFixerWrapperState extends State<ImeCursorFixerWrapper> with Widg
   /// 成功返回 true，失败（RenderEditable 还未 attach）返回 false。
   bool _tryReportNow() {
     if (!mounted) return false;
+    // 只有持有焦点的输入框才能决定输入法窗口的锚点：
+    // 失焦后控制器仍可能被外部改写，此时上报会把锚点从当前焦点输入框
+    // 拉回到这个已失焦的输入框，导致候选框出现在错误的位置
+    if (!widget.focusNode.hasFocus) return false;
 
     // 找到底层的 RenderEditable，它是真正负责文字排版和渲染的节点
     final renderEditable = _findRenderEditable(context as Element);

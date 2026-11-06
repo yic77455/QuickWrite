@@ -189,6 +189,11 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 此处记录键盘收起时的编辑区高度作为基准，键盘弹出期间沿用该基准。
   double _marginBasisHeight = 0;
 
+  /// 上一次记录的软键盘高度
+  ///
+  /// 用于识别键盘由弹出变为收起的时刻，据此释放输入框焦点
+  double _lastKeyboardInset = 0;
+
   /// 底部内容边距（像素）
   ///
   /// 由用户设置的底边距按编辑区高度百分比换算而来，随布局一并更新。
@@ -372,6 +377,26 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     if (state == AppLifecycleState.resumed) {
       _scrollGuard.protect(const Duration(milliseconds: 300));
     }
+  }
+
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    // 仅移动端需要处理软键盘收起
+    if (!PlatformCapabilities.isMobile) return;
+    // 度量变化当帧布局尚未完成，键盘高度需等布局结束后读取
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final double keyboardInset = View.of(context).viewInsets.bottom;
+      final double previousInset = _lastKeyboardInset;
+      _lastKeyboardInset = keyboardInset;
+      // 键盘由弹出变为收起：释放输入框焦点。
+      // 键盘收起后若输入框仍持有焦点，打开再关闭抽屉或卡片时焦点会被恢复，
+      // 键盘随之重新弹出；释放焦点后只有用户点击输入框才会再次唤起键盘
+      if (previousInset > 0 && keyboardInset <= 0) {
+        _releaseTextInputFocus();
+      }
+    });
   }
 
   @override
@@ -1989,6 +2014,20 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     _collapseTextSelections();
     // 将焦点从输入框转移到编辑器，隐藏光标
     _editorFocusNode.requestFocus();
+  }
+
+  /// 释放大纲内所有输入框的焦点
+  ///
+  /// 输入框失焦后不再参与焦点恢复，打开再关闭抽屉或卡片时不会重新唤起键盘
+  void _releaseTextInputFocus() {
+    if (_titleFocusNode.hasFocus) {
+      _titleFocusNode.unfocus();
+    }
+    for (final focusNode in _focusNodes.values) {
+      if (focusNode.hasFocus) {
+        focusNode.unfocus();
+      }
+    }
   }
 
   /// 行尾竖条长按：选中长按所在的节点及其全部子节点，并进入批量选择模式
