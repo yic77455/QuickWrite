@@ -31,6 +31,7 @@ import 'package:quick_write/core/models/outline_models.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 import 'utils/outline_shortcut_keys.dart';
 import 'widgets/outline_color_palette.dart';
+import 'widgets/outline_connection_painter.dart';
 import 'widgets/outline_node_widgets.dart';
 import 'widgets/outline_editor_widgets.dart';
 import 'widgets/outline_settings_card.dart';
@@ -2485,12 +2486,39 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     return globalPosition.dx >= indicatorLeft && globalPosition.dx < textAreaStartX;
   }
 
-  /// 判断全局坐标是否在指定节点的文本渲染区域内
+  /// 判断全局坐标是否在指定节点行的文本区域内
+  ///
+  /// 横向起点取圆点右边缘、终点取节点行右边缘，行首与文字之间的空白同样算作文本区；
+  /// 纵向覆盖整个节点行，行下方的节点间距也归属于当前节点行的文本区，
+  /// 从该处起拖同样拉出文本选区，不唤起节点选区。
   bool _isPositionWithinNodeText(String nodeId, Offset globalPosition) {
+    final renderBox = _nodeTileKeys[nodeId]?.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox == null || !renderBox.attached) return false;
+
+    final flatList = _flatten();
+    final int index = flatList.indexWhere((flat) => flat.node.id == nodeId);
+    if (index == -1) return false;
+
+    final tileRect = MatrixUtils.transformRect(renderBox.getTransformTo(null), Offset.zero & renderBox.size);
+    // 文本区起点 = 节点行内容左内边距 8 + 圆点左边缘 + 圆点直径
+    final double textAreaStartX =
+        tileRect.left +
+        8 +
+        OutlineNodeTile.dotLeftInsetForDepth(flatList[index].depth, indentWidth: _indentWidth) +
+        OutlineConnectionMetrics.dotRadius * 2;
+
+    return tileRect.contains(globalPosition) && globalPosition.dx >= textAreaStartX;
+  }
+
+  /// 判断全局坐标是否完全落在指定节点的文字行内
+  ///
+  /// 仅用于拖拽文本选区时判断指针是否已进入其他节点：节点行下方的间距不算进入文字行，
+  /// 指针停留在间距时仍继续扩展文本选区，避免文字选区被节点选区抢占。
+  bool _isPositionWithinNodeTextLine(String nodeId, Offset globalPosition) {
     final renderEditable = _findRenderEditable(nodeId);
     if (renderEditable == null || !renderEditable.attached) return false;
     final rect = MatrixUtils.transformRect(renderEditable.getTransformTo(null), Offset.zero & renderEditable.size);
-    return rect.contains(globalPosition);
+    return globalPosition.dy >= rect.top && globalPosition.dy <= rect.bottom;
   }
 
   /// 判断全局坐标是否落在滚动条所在的右侧条带上
@@ -2634,7 +2662,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 按指针位置更新拖拽选区
   ///
   /// 统一选区逻辑：
-  /// - 起始位置在文本内时先做文本选区，指针移动到其他节点行后才切换为节点选区
+  /// - 起始位置在节点行的文本区内时先做文本选区，指针完全进入其他节点的文字行后才切换为节点选区
   /// - 起始位置在圆点、竖线之外的空白区域时，上下拖拽超过阈值后做节点选区
   /// - 起始位置在圆点与竖线指示区内时不唤起节点选区
   void _updateDragSelection(Offset globalPosition) {
@@ -2681,18 +2709,21 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
         _selectAllLevel = 0;
         _activateNodeSelectionFocus();
       } else {
-        // 仅当指针移动到其他节点行时才从文本选区切换为节点选区，
-        // 停留在起始节点行内（含行内空白）时始终扩展文本选区
+        // 仅当指针完全进入其他节点的文字行时才从文本选区切换为节点选区，
+        // 停留在起始节点行内（含行下方的节点间距）时始终扩展文本选区
         final currentIndex = _findNodeIndexAtPosition(globalPosition);
-        final movedToOtherNode = currentIndex != null && currentIndex != _dragStartIndex;
-        if (!movedToOtherNode) {
+        final int? otherNodeIndex = currentIndex != _dragStartIndex ? currentIndex : null;
+        final bool enteredOtherNode =
+            otherNodeIndex != null &&
+            _isPositionWithinNodeTextLine(_flatten()[otherNodeIndex].node.id, globalPosition);
+        if (!enteredOtherNode) {
           _extendTextSelection(_dragStartNodeId!, _dragTextAnchor!, globalPosition);
         } else {
-          // 移动到其他节点行：切换到节点选区
+          // 完全进入其他节点的文字行：切换到节点选区
           _dragMode = _DragMode.node;
           _selectAllLevel = 0;
           _activateNodeSelectionFocus();
-          _selectNodeRange(_dragStartIndex!, currentIndex);
+          _selectNodeRange(_dragStartIndex!, otherNodeIndex);
         }
       }
     } else if (_dragMode == _DragMode.node) {
