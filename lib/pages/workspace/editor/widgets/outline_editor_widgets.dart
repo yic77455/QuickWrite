@@ -7,6 +7,7 @@ import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/models/outline_models.dart';
+import 'package:quick_write/pages/workspace/editor/utils/shortcut_catalog.dart';
 import 'package:quick_write/shared/widgets/toolbar_button.dart';
 
 /// 大纲编辑器顶部工具栏
@@ -346,10 +347,10 @@ class _OutlineEditorBottomHintState extends State<OutlineEditorBottomHint> {
               children: [
                 _buildShortcutHint('Enter', '新建同级', colorScheme),
                 _buildShortcutHint('Tab', '缩进', colorScheme),
-                _buildShortcutHint('Shift+Tab', '反缩进', colorScheme),
-                _buildShortcutHint('Ctrl+Enter', '完成', colorScheme),
+                _buildShortcutHint(formatShortcutKeys('Shift+Tab'), '反缩进', colorScheme),
+                _buildShortcutHint(formatShortcutKeys('Ctrl+Enter'), '完成', colorScheme),
                 _buildShortcutHint('↑↓', '切换节点', colorScheme),
-                _buildShortcutHint('Ctrl+A', '全选', colorScheme),
+                _buildShortcutHint(formatShortcutKeys('Ctrl+A'), '全选', colorScheme),
               ],
             ),
           ),

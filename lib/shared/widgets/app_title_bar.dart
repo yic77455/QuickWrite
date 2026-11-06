@@ -54,11 +54,33 @@ class AppTitleBar extends StatefulWidget implements PreferredSizeWidget {
 // 使用 Provider 管理窗口状态，不再需要混入 WindowListener
 // 窗口监听逻辑现在由 WindowProvider 统一管理
 class _AppTitleBarState extends State<AppTitleBar> {
+  /// macOS 系统红绿灯按钮占用的左侧宽度
+  ///
+  /// 使用隐藏标题栏时，红、黄、绿三个按钮绘制在窗口左上角，
+  /// 需要为它们预留空间，避免遮挡页面自身的左侧内容
+  static const double _macTrafficLightWidth = 78;
+
   @override
   Widget build(BuildContext context) {
     // 使用 context.watch 监听 WindowProvider 的变化
     // 当窗口状态改变时，会自动重新构建此组件
     final windowProvider = context.watch<WindowProvider>();
+    final bool isMacOS = PlatformCapabilities.isMacOS;
+
+    // macOS 的窗口控制由系统红绿灯按钮提供，无需自绘窗口按钮
+    final bool showCaptionButtons =
+        !isMacOS && PlatformCapabilities.supportsNativeWindowControl;
+
+    // macOS 在左侧预留红绿灯按钮的空间，使页面自身的左侧内容显示在其右侧
+    final Widget? effectiveLeading = isMacOS
+        ? Padding(
+            padding: const EdgeInsets.only(left: _macTrafficLightWidth),
+            child: widget.leading ?? const SizedBox.shrink(),
+          )
+        : widget.leading;
+    final double? effectiveLeadingWidth = isMacOS
+        ? _macTrafficLightWidth + (widget.leadingWidth ?? kToolbarHeight)
+        : widget.leadingWidth;
 
     return AppBar(
       // 1. 全局生效的拖拽区域（拖动移动窗口依赖原生窗口，仅在支持原生窗口控制的平台启用）
@@ -67,8 +89,8 @@ class _AppTitleBarState extends State<AppTitleBar> {
           : null,
 
       // 2. 接收外部传入的标题和按钮
-      leading: widget.leading,
-      leadingWidth: widget.leadingWidth,
+      leading: effectiveLeading,
+      leadingWidth: effectiveLeadingWidth,
       titleSpacing: widget.titleSpacing,
       title: widget.title != null
           ? IgnorePointer(child: widget.title) // 忽略并穿透手势
@@ -80,8 +102,9 @@ class _AppTitleBarState extends State<AppTitleBar> {
           ...widget
               .actions!, // 如果外部传了其他按钮，先渲染它们（...是扩展操作符 ：将一个列表中的所有元素展开并插入到另一个列表中）
         // 固定的系统窗口按钮（依赖原生窗口，仅在支持原生窗口控制的平台显示）
+        // macOS 由系统红绿灯按钮承担窗口控制，这里不再重复绘制
         // （WindowCaptionButton 是 window_manager 库提供的）
-        if (PlatformCapabilities.supportsNativeWindowControl)
+        if (showCaptionButtons)
           Row(
             mainAxisSize: MainAxisSize.min, // 紧凑布局
             children: [

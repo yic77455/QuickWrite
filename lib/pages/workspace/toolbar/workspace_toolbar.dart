@@ -8,6 +8,7 @@ import 'package:quick_write/core/utils/color_utils.dart';
 import 'package:quick_write/core/utils/code_line_selection_utils.dart';
 import 'package:quick_write/core/utils/paragraph_formatter.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
+import 'package:quick_write/pages/workspace/editor/utils/shortcut_catalog.dart';
 import 'package:quick_write/pages/workspace/editor/novel_editor.dart';
 import 'package:quick_write/pages/workspace/toolbar/widgets/chapter_title_format_panel.dart';
 import 'package:quick_write/shared/dialogs/color_picker_dialog.dart';
@@ -344,7 +345,7 @@ class _WorkspaceToolbarState extends State<WorkspaceToolbar> {
         LargeToolbarButton(
           icon: Icons.find_replace_rounded,
           label: '查找替换',
-          tooltip: '查找替换 (Ctrl+H)',
+          tooltip: '查找替换 ($findReplaceShortcutKeys)',
           onPressed: () {
             context.read<WorkspaceProvider>().toggleFindReplace();
           },

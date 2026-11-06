@@ -1,8 +1,13 @@
+import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:quick_write/core/constants/constants.dart';
 import 'package:quick_write/core/models/app_settings.dart';
+import 'package:quick_write/core/providers/home_state_provider.dart';
 import 'package:quick_write/core/router/router.dart';
+import 'package:quick_write/core/services/home_navigation_service.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
 import 'package:quick_write/core/services/settings_service.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/shared/dialogs/close_action_dialog.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
@@ -19,14 +24,26 @@ class TrayService with TrayListener {
 
   // ================= 常量定义 =================
 
-  /// 托盘图标资源路径（Flutter 资源相对路径）
-  static const String _iconPath = 'assets/icon/tray.ico';
+  /// Windows 托盘图标资源路径（ICO 格式）
+  static const String _windowsIconPath = 'assets/icon/tray.ico';
+
+  /// macOS 菜单栏图标资源路径
+  ///
+  /// macOS 图标只支持位图，且需要透明背景以便系统按模板图取色
+  static const String _macOSIconPath = 'assets/icon/tray_macos.png';
 
   /// 右键菜单项：[显示主窗口]
   static const String _menuKeyShowWindow = 'show_main_window';
 
   /// 右键菜单项：[退出程序]
   static const String _menuKeyExit = 'exit_app';
+
+  /// macOS 应用退出通道
+  ///
+  /// 原生层拦截菜单栏退出快捷键后，通过该通道转交 Dart 处理
+  static const MethodChannel _macOSLifecycleChannel = MethodChannel(
+    'quick_write/app_lifecycle',
+  );
 
   // ================= 状态属性 =================
 
@@ -52,6 +69,9 @@ class TrayService with TrayListener {
     // 关闭行为变化时同步托盘的显隐（含多窗口模式的强制行为）
     SettingsService.instance.addListener(_syncIconVisibility);
     await _syncIconVisibility();
+
+    // macOS 的菜单栏退出快捷键不会经过窗口关闭拦截，需要单独接管
+    await _initMacOSQuitHandler();
   }
 
   /// 停止托盘服务并注销事件监听
@@ -83,7 +103,11 @@ class TrayService with TrayListener {
     if (_iconVisible) return;
     _iconVisible = true;
 
-    await trayManager.setIcon(_iconPath);
+    await trayManager.setIcon(
+      PlatformCapabilities.isMacOS ? _macOSIconPath : _windowsIconPath,
+      // macOS 使用模板图，由系统根据菜单栏明暗自动着色
+      isTemplate: PlatformCapabilities.isMacOS,
+    );
     await trayManager.setToolTip(GlobalConstants.appTitle);
     await trayManager.setContextMenu(
       Menu(
@@ -121,11 +145,52 @@ class TrayService with TrayListener {
 
   @override
   void onTrayIconRightMouseDown() {
-    // Windows 下右键不会自动弹出菜单，需要手动弹出
+    // 托盘右键不会自动弹出菜单，需要手动弹出
     trayManager.popUpContextMenu();
   }
 
   // ================= 窗口显示与退出 =================
+
+  /// 注册 macOS 退出通道
+  ///
+  /// macOS 菜单栏的退出快捷键由系统直接发起终止，不经过窗口关闭拦截。
+  /// 原生层收到终止请求后通知本通道，由 Dart 走正常的退出流程，
+  /// 完成子窗口保存确认与退出同步后再结束进程
+  Future<void> _initMacOSQuitHandler() async {
+    if (!PlatformCapabilities.isMacOS) return;
+
+    _macOSLifecycleChannel.setMethodCallHandler((call) async {
+      switch (call.method) {
+        case 'requestQuit':
+          await requestExit();
+        case 'showMainWindow':
+          await showMainWindow();
+        case 'openSettings':
+          await _openHomePage(HomePageEnum.settings);
+        case 'openAbout':
+          await _openHomePage(HomePageEnum.about);
+      }
+    });
+
+    // 告知原生层 Dart 已能处理退出请求，此后退出快捷键才转交 Dart
+    try {
+      await _macOSLifecycleChannel.invokeMethod('ready');
+    } catch (e) {
+      debugPrint('注册 macOS 退出通道失败: $e');
+    }
+  }
+
+  /// 打开主页内的指定页面
+  ///
+  /// 菜单栏入口可能在工作台等其他路由下触发，先回到主页再切换页面
+  Future<void> _openHomePage(HomePageEnum page) async {
+    if (appRouter.state.matchedLocation != '/') {
+      appRouter.go('/');
+      // 等待主页挂载完成后再发出切换请求
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    HomeNavigationService.open(page);
+  }
 
   /// 显示并聚焦主窗口（最小化状态会自动还原）
   Future<void> showMainWindow() async {

@@ -1,3 +1,29 @@
+import 'package:quick_write/core/utils/platform_capabilities.dart';
+
+/// 查找替换快捷键文案
+///
+/// macOS 使用系统标准的 Command+Option+F，其他平台沿用 Ctrl+H
+String get findReplaceShortcutKeys =>
+    PlatformCapabilities.isMacOS ? '⌘⌥F' : 'Ctrl+H';
+
+/// 将快捷键文案中的修饰键转换为当前平台的书写方式
+///
+/// macOS 使用 ⌘ / ⌥ / ⇧ 符号，其他平台沿用 Ctrl / Alt / Shift 文字。
+/// 这里只处理书写差异；按键组合本身不同的快捷键应使用专用文案
+String formatShortcutKeys(String keys) {
+  if (!PlatformCapabilities.isMacOS) return keys;
+  return keys
+      .replaceAll('Ctrl', '⌘')
+      .replaceAll('Alt', '⌥')
+      .replaceAll('Shift', '⇧');
+}
+
+/// 编辑区全屏快捷键文案
+///
+/// macOS 键盘上的 F11 通常被系统占用，改用系统习惯的 Command+Shift+F
+String get editorFullscreenShortcutKeys =>
+    PlatformCapabilities.isMacOS ? '⌘⇧F' : 'F11';
+
 /// 快捷键说明条目
 ///
 /// 一条快捷键由功能描述与按键说明两部分组成，列表中以左右两列展示。
@@ -8,7 +34,21 @@ class ShortcutEntry {
   /// 按键说明（右列，等宽字体展示）
   final String keys;
 
-  const ShortcutEntry({required this.description, required this.keys});
+  /// macOS 上的按键说明
+  ///
+  /// 仅在 macOS 上按键组合与 Windows 不同时填写，
+  /// 为空时沿用 [keys] 并只转换修饰键符号
+  final String? macOSKeys;
+
+  const ShortcutEntry({
+    required this.description,
+    required this.keys,
+    this.macOSKeys,
+  });
+
+  /// 当前平台实际展示的按键说明
+  String get displayKeys =>
+      PlatformCapabilities.isMacOS ? (macOSKeys ?? formatShortcutKeys(keys)) : keys;
 }
 
 /// 快捷键分组
@@ -27,16 +67,16 @@ class ShortcutGroup {
 /// 正文编辑器快捷键列表
 ///
 /// 由 re_editor 的内置快捷键与工作台覆盖实现共同决定。
-const List<ShortcutEntry> bodyEditorShortcuts = [
+final List<ShortcutEntry> bodyEditorShortcuts = [
   ShortcutEntry(description: '全选', keys: 'Ctrl+A'),
   ShortcutEntry(description: '剪切选中/当前行', keys: 'Ctrl+X'),
   ShortcutEntry(description: '复制选中/当前行', keys: 'Ctrl+C'),
   ShortcutEntry(description: '粘贴', keys: 'Ctrl+V'),
   ShortcutEntry(description: '撤销', keys: 'Ctrl+Z'),
-  ShortcutEntry(description: '重做', keys: 'Ctrl+Y / Ctrl+Shift+Z'),
+  ShortcutEntry(description: '重做', keys: 'Ctrl+Y / Ctrl+Shift+Z', macOSKeys: '⌘⇧Z'),
   ShortcutEntry(description: '缩进', keys: 'Tab'),
   ShortcutEntry(description: '查找', keys: 'Ctrl+F'),
-  ShortcutEntry(description: '替换', keys: 'Ctrl+H / Ctrl+Alt+F'),
+  ShortcutEntry(description: '替换', keys: 'Ctrl+H / Ctrl+Alt+F', macOSKeys: '⌘⌥F'),
   ShortcutEntry(description: '保存', keys: 'Ctrl+S'),
   ShortcutEntry(description: '选中当前行', keys: 'Ctrl+L'),
   ShortcutEntry(description: '删除当前行', keys: 'Ctrl+D'),
@@ -45,7 +85,7 @@ const List<ShortcutEntry> bodyEditorShortcuts = [
   ShortcutEntry(description: '移动光标', keys: '↑/↓/←/→'),
   ShortcutEntry(description: '移动光标（单词边界）', keys: 'Alt+←/→'),
   ShortcutEntry(description: '移动到页首/页尾', keys: 'Ctrl+↑/↓'),
-  ShortcutEntry(description: '全屏', keys: 'F11'),
+  ShortcutEntry(description: '全屏', keys: 'F11', macOSKeys: '⌘⇧F'),
   ShortcutEntry(description: '退出全屏', keys: 'Esc'),
 ];
 
@@ -53,7 +93,7 @@ const List<ShortcutEntry> bodyEditorShortcuts = [
 ///
 /// 内容与大纲编辑器节点级键盘事件处理器及编辑器级键盘事件处理器中
 /// 已实现的快捷键保持一致，并包含工作台统一提供的全局快捷键。
-const List<ShortcutGroup> outlineEditorShortcutGroups = [
+final List<ShortcutGroup> outlineEditorShortcutGroups = [
   ShortcutGroup(title: '基础导航', entries: [
     ShortcutEntry(description: '切换到上 / 下一节点', keys: '↑ / ↓'),
     ShortcutEntry(description: '全选主题，再次按下全选文档', keys: 'Ctrl+A'),
@@ -93,15 +133,15 @@ const List<ShortcutGroup> outlineEditorShortcutGroups = [
   ]),
   ShortcutGroup(title: '撤销重做', entries: [
     ShortcutEntry(description: '撤销', keys: 'Ctrl+Z'),
-    ShortcutEntry(description: '重做', keys: 'Ctrl+Y / Ctrl+Shift+Z'),
+    ShortcutEntry(description: '重做', keys: 'Ctrl+Y / Ctrl+Shift+Z', macOSKeys: '⌘⇧Z'),
   ]),
   ShortcutGroup(title: '查找与保存', entries: [
     ShortcutEntry(description: '查找', keys: 'Ctrl+F'),
-    ShortcutEntry(description: '查找替换', keys: 'Ctrl+H'),
+    ShortcutEntry(description: '查找替换', keys: 'Ctrl+H', macOSKeys: '⌘⌥F'),
     ShortcutEntry(description: '保存', keys: 'Ctrl+S'),
   ]),
   ShortcutGroup(title: '窗口', entries: [
-    ShortcutEntry(description: '全屏', keys: 'F11'),
+    ShortcutEntry(description: '全屏', keys: 'F11', macOSKeys: '⌘⇧F'),
     ShortcutEntry(description: '退出全屏', keys: 'Esc'),
   ]),
 ];

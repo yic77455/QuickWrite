@@ -38,7 +38,7 @@ class ShortcutEntryTile extends StatelessWidget {
               border: Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.5)),
             ),
             child: Text(
-              entry.keys,
+              entry.displayKeys,
               style: TextStyle(
                 fontSize: 11,
                 color: colorScheme.onSurface,

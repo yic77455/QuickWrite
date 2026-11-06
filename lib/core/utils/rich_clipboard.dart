@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:quick_write/core/utils/android_native.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
@@ -26,9 +27,15 @@ class RichClipboardContent {
 ///
 /// Windows 下通过系统 "HTML Format" 格式读写，
 /// 安卓下通过原生剪贴板的 `text/html` 读写，
+/// macOS 下通过原生通道读写剪贴板的 `public.html` 类型，
 /// 其他平台退回 [Clipboard] 的纯文本能力。
 class RichClipboard {
   RichClipboard._();
+
+  /// macOS 富文本剪贴板通道，与原生层保持一致
+  static const MethodChannel _macOSChannel = MethodChannel(
+    'quick_write/rich_clipboard',
+  );
 
   /// 纯文本剪贴板格式标识
   static const int _cfUnicodeText = 13;
@@ -62,13 +69,17 @@ class RichClipboard {
           )) {
         return;
       }
+      if (PlatformCapabilities.isMacOS &&
+          await _writeWithHtmlMacOS(plainText, htmlFragment)) {
+        return;
+      }
     }
     await Clipboard.setData(ClipboardData(text: plainText));
   }
 
   /// 读取剪贴板内容
   ///
-  /// 同时返回纯文本与（Windows / 安卓下的）HTML 片段。
+  /// 同时返回纯文本与（Windows / 安卓 / macOS 下的）HTML 片段。
   static Future<RichClipboardContent> read() async {
     final ClipboardData? data = await Clipboard.getData(Clipboard.kTextPlain);
 
@@ -77,6 +88,8 @@ class RichClipboard {
       html = await _readHtml();
     } else if (PlatformCapabilities.isAndroid) {
       html = await AndroidNative.readClipboardHtml();
+    } else if (PlatformCapabilities.isMacOS) {
+      html = await _readHtmlMacOS();
     }
 
     return RichClipboardContent(text: data?.text, html: html);
@@ -254,4 +267,46 @@ class RichClipboard {
 
   /// 将偏移量格式化为 10 位数字
   static String _formatOffset(int offset) => offset.toString().padLeft(10, '0');
+
+  // ================= macOS 实现 =================
+
+  /// 同时写入纯文本与 HTML
+  ///
+  /// 把片段包装为完整 HTML 文档并声明 UTF-8 编码，
+  /// 便于其他应用正确识别中文与文字样式
+  static Future<bool> _writeWithHtmlMacOS(
+    String plainText,
+    String htmlFragment,
+  ) async {
+    final String html =
+        '<html><head><meta charset="utf-8"></head>'
+        '<body>$htmlFragment</body></html>';
+
+    try {
+      final bool? success = await _macOSChannel.invokeMethod<bool>(
+        'writeHtml',
+        {'text': plainText, 'html': html},
+      );
+      return success ?? false;
+    } on PlatformException catch (e) {
+      debugPrint('写入 macOS HTML 剪贴板失败: $e');
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
+  /// 读取剪贴板中的 HTML 内容
+  ///
+  /// 剪贴板不含 HTML 时返回 null，由调用方回退为纯文本
+  static Future<String?> _readHtmlMacOS() async {
+    try {
+      return await _macOSChannel.invokeMethod<String>('readHtml');
+    } on PlatformException catch (e) {
+      debugPrint('读取 macOS HTML 剪贴板失败: $e');
+      return null;
+    } on MissingPluginException {
+      return null;
+    }
+  }
 }

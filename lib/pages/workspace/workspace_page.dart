@@ -12,6 +12,7 @@ import 'package:quick_write/core/utils/tab_close_guard.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/utils/word_count_utils.dart';
 import 'package:quick_write/pages/workspace/left_sidebar/widgets/left_sidebar_expand_btn.dart';
+import 'package:quick_write/pages/workspace/editor/utils/shortcut_catalog.dart';
 import 'package:quick_write/shared/dialogs/word_count_dialog.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 import 'left_sidebar/left_sidebar.dart';
@@ -247,6 +248,9 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
       bindings: {
         // F11 切换编辑区全屏
         const SingleActivator(LogicalKeyboardKey.f11, includeRepeats: false): _toggleEditorFullscreen,
+        // macOS 键盘没有可用的 F11，改用 Command+Shift+F 切换编辑区全屏
+        const SingleActivator(LogicalKeyboardKey.keyF, meta: true, shift: true, includeRepeats: false):
+            _toggleEditorFullscreen,
       },
       child: _buildDesktopLayout(context, isEditorFullscreen: isEditorFullscreen),
     );
@@ -283,7 +287,7 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
 
     // 进入全屏后界面元素全部隐藏，通过浮动提示告知退出方式
     if (fullscreen) {
-      SnackBarService.show(context, '已进入全屏，按 Esc 或 F11 退出');
+      SnackBarService.show(context, '已进入全屏，按 Esc 或 $editorFullscreenShortcutKeys 退出');
     }
   }
 
@@ -710,7 +714,9 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
     final colorScheme = Theme.of(context).colorScheme;
 
     return Tooltip(
-      message: isEditorFullscreen ? '退出全屏（F11 / Esc）' : '全屏（F11）',
+      message: isEditorFullscreen
+          ? '退出全屏（$editorFullscreenShortcutKeys / Esc）'
+          : '全屏（$editorFullscreenShortcutKeys）',
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: _toggleEditorFullscreen,

@@ -7,6 +7,7 @@ import 'package:quick_write/core/providers/recycle_bin_provider.dart';
 import 'package:quick_write/core/providers/home_sidebar_provider.dart';
 import 'package:quick_write/core/providers/theme_provider.dart';
 import 'package:quick_write/core/providers/update_provider.dart';
+import 'package:quick_write/core/services/home_navigation_service.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/pages/home/about/about_page.dart';
 import 'package:quick_write/pages/home/bookshelf/bookshelf.dart';
@@ -19,8 +20,35 @@ import 'package:quick_write/shared/widgets/widgets.dart';
 import 'sidebar/sidebar.dart';
 
 /// 主页面
-class HomePage extends StatelessWidget {
+class HomePage extends StatefulWidget {
   const HomePage({super.key});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  @override
+  void initState() {
+    super.initState();
+    // 菜单栏等外部入口通过该通知器请求切换主页内的页面
+    HomeNavigationService.request.addListener(_handleNavigationRequest);
+    // 请求可能在主页挂载前发出，首帧后补处理一次
+    WidgetsBinding.instance.addPostFrameCallback((_) => _handleNavigationRequest());
+  }
+
+  @override
+  void dispose() {
+    HomeNavigationService.request.removeListener(_handleNavigationRequest);
+    super.dispose();
+  }
+
+  /// 响应外部入口的页面切换请求
+  void _handleNavigationRequest() {
+    final HomePageEnum? page = HomeNavigationService.consume();
+    if (page == null || !mounted) return;
+    context.read<HomeStateProvider>().setPage(page);
+  }
 
   @override
   Widget build(BuildContext context) {

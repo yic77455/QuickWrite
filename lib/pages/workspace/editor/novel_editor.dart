@@ -927,10 +927,12 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
         const SingleActivator(LogicalKeyboardKey.keyF, meta: true): () {
           workspaceProvider.openFindReplace();
         },
+        // Ctrl+H：打开查找替换（Windows 习惯）
         const SingleActivator(LogicalKeyboardKey.keyH, control: true): () {
           workspaceProvider.openFindReplace(showReplace: true);
         },
-        const SingleActivator(LogicalKeyboardKey.keyH, meta: true): () {
+        // Cmd+Option+F：打开查找替换（macOS 习惯）
+        const SingleActivator(LogicalKeyboardKey.keyF, meta: true, alt: true): () {
           workspaceProvider.openFindReplace(showReplace: true);
         },
         const SingleActivator(LogicalKeyboardKey.escape): () {

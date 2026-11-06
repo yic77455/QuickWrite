@@ -60,7 +60,7 @@ class OutlineEditor extends StatefulWidget {
   /// 内容变化回调（用于触发自动保存和备份）
   final VoidCallback? onContentChanged;
 
-  /// 保存回调（Ctrl+S 触发）
+  /// 保存回调（Ctrl/Cmd+S 触发）
   final VoidCallback? onSave;
 
   /// 是否只读（备份预览时为 true）
@@ -215,7 +215,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 供编辑器之外的移动端键盘工具栏监听，同步工具栏的显隐、形态与按钮可用状态
   final ValueNotifier<int> _batchRevision = ValueNotifier(0);
 
-  /// Ctrl+A 全选状态：0=未全选，1=已全选主题，2=已全选文档
+  /// Ctrl/Cmd+A 全选状态：0=未全选，1=已全选主题，2=已全选文档
   int _selectAllLevel = 0;
 
   /// 选区锚点索引（Shift+click 扩展选区时的起始点）
@@ -2080,7 +2080,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     return flatList.where((f) => _selectedNodeIds.contains(f.node.id)).toList();
   }
 
-  /// 处理 Ctrl+A 全选操作
+  /// 处理 Ctrl/Cmd+A 全选操作
   ///
   /// 状态循环：未选区 → 全选当前主题 → 全选整个文档 → 取消全选
   /// 进入主题/文档选区时转移焦点到编辑器，取消时恢复到最近编辑的节点
@@ -4333,8 +4333,10 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       return KeyEventResult.handled;
     }
 
-    // 拦截撤销/恢复的重复事件（长按 Ctrl+Z / Ctrl+Y），避免触发 TextField 内置撤销机制
-    if (event is KeyRepeatEvent && HardwareKeyboard.instance.isControlPressed) {
+    // 拦截撤销/恢复的重复事件（长按 Ctrl/Cmd+Z、Ctrl+Y），避免触发 TextField 内置撤销机制
+    if (event is KeyRepeatEvent &&
+        (HardwareKeyboard.instance.isControlPressed ||
+            HardwareKeyboard.instance.isMetaPressed)) {
       if (event.logicalKey == LogicalKeyboardKey.keyZ) {
         if (HardwareKeyboard.instance.isShiftPressed) {
           redo();
@@ -4357,7 +4359,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
         // 带修饰键的方向键交由输入框默认行为处理（扩展选区、按词/段跳转等）
         final bool plain =
             !HardwareKeyboard.instance.isShiftPressed &&
-            !HardwareKeyboard.instance.isControlPressed &&
+            !(HardwareKeyboard.instance.isControlPressed ||
+                HardwareKeyboard.instance.isMetaPressed) &&
             !HardwareKeyboard.instance.isAltPressed;
         if (plain) {
           if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
@@ -4386,22 +4389,30 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
 
     final isShift = HardwareKeyboard.instance.isShiftPressed;
-    final isControl = HardwareKeyboard.instance.isControlPressed;
+    // 主修饰键：Windows 使用 Ctrl，macOS 使用 Command，两者均视为快捷键前缀
+    final isCommand =
+        HardwareKeyboard.instance.isControlPressed ||
+        HardwareKeyboard.instance.isMetaPressed;
     final isAlt = HardwareKeyboard.instance.isAltPressed;
 
-    // Ctrl+S / Cmd+S：保存
-    if ((isControl || HardwareKeyboard.instance.isMetaPressed) && event.logicalKey == LogicalKeyboardKey.keyS) {
+    // Ctrl/Cmd+S：保存
+    if (isCommand && event.logicalKey == LogicalKeyboardKey.keyS) {
       widget.onSave?.call();
       return KeyEventResult.handled;
     }
 
     // Ctrl+F / Cmd+F：打开查找
-    if ((isControl || HardwareKeyboard.instance.isMetaPressed) && event.logicalKey == LogicalKeyboardKey.keyF) {
+    if (isCommand && !isAlt && event.logicalKey == LogicalKeyboardKey.keyF) {
       context.read<WorkspaceProvider>().openFindReplace();
       return KeyEventResult.handled;
     }
-    // Ctrl+H / Cmd+H：打开查找替换（展开替换区域）
-    if ((isControl || HardwareKeyboard.instance.isMetaPressed) && event.logicalKey == LogicalKeyboardKey.keyH) {
+    // Cmd+Option+F：打开查找替换（macOS 习惯）
+    if (isCommand && isAlt && event.logicalKey == LogicalKeyboardKey.keyF) {
+      context.read<WorkspaceProvider>().openFindReplace(showReplace: true);
+      return KeyEventResult.handled;
+    }
+    // Ctrl+H：打开查找替换（Windows 习惯）
+    if (HardwareKeyboard.instance.isControlPressed && event.logicalKey == LogicalKeyboardKey.keyH) {
       context.read<WorkspaceProvider>().openFindReplace(showReplace: true);
       return KeyEventResult.handled;
     }
@@ -4414,21 +4425,21 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       }
     }
 
-    // Ctrl+C：复制节点内选中的文本（含文字样式）
-    if (isControl && !isAlt && event.logicalKey == LogicalKeyboardKey.keyC) {
+    // Ctrl/Cmd+C：复制节点内选中的文本（含文字样式）
+    if (isCommand && !isAlt && event.logicalKey == LogicalKeyboardKey.keyC) {
       if (_copyNodeTextSelection(nodeId)) return KeyEventResult.handled;
     }
 
     // 只读模式下仅允许导航，禁用所有修改操作
     if (widget.readOnly) return KeyEventResult.ignored;
 
-    // Ctrl+X：剪切节点内选中的文本（含文字样式）
-    if (isControl && !isAlt && event.logicalKey == LogicalKeyboardKey.keyX) {
+    // Ctrl/Cmd+X：剪切节点内选中的文本（含文字样式）
+    if (isCommand && !isAlt && event.logicalKey == LogicalKeyboardKey.keyX) {
       if (_cutNodeTextSelection(nodeId)) return KeyEventResult.handled;
     }
 
-    // Ctrl+Z：撤销；Ctrl+Shift+Z 或 Ctrl+Y：重做
-    if (isControl && event.logicalKey == LogicalKeyboardKey.keyZ) {
+    // Ctrl/Cmd+Z：撤销；Ctrl/Cmd+Shift+Z：重做（macOS 习惯）；Ctrl+Y：重做（Windows 习惯）
+    if (isCommand && event.logicalKey == LogicalKeyboardKey.keyZ) {
       if (isShift) {
         redo();
       } else {
@@ -4436,37 +4447,37 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       }
       return KeyEventResult.handled;
     }
-    if (isControl && event.logicalKey == LogicalKeyboardKey.keyY) {
+    if (HardwareKeyboard.instance.isControlPressed && event.logicalKey == LogicalKeyboardKey.keyY) {
       redo();
       return KeyEventResult.handled;
     }
 
     // ================= 文字样式快捷键 =================
 
-    // Ctrl+B：加粗
-    if (isControl && !isAlt && event.logicalKey == LogicalKeyboardKey.keyB) {
+    // Ctrl/Cmd+B：加粗
+    if (isCommand && !isAlt && event.logicalKey == LogicalKeyboardKey.keyB) {
       _toggleTextStyle([nodeId], TextStyleFlags.toggleBold);
       return KeyEventResult.handled;
     }
-    // Ctrl+I：斜体
-    if (isControl && !isAlt && event.logicalKey == LogicalKeyboardKey.keyI) {
+    // Ctrl/Cmd+I：斜体
+    if (isCommand && !isAlt && event.logicalKey == LogicalKeyboardKey.keyI) {
       _toggleTextStyle([nodeId], TextStyleFlags.toggleItalic);
       return KeyEventResult.handled;
     }
-    // Ctrl+U：下划线
-    if (isControl && !isAlt && event.logicalKey == LogicalKeyboardKey.keyU) {
+    // Ctrl/Cmd+U：下划线
+    if (isCommand && !isAlt && event.logicalKey == LogicalKeyboardKey.keyU) {
       _toggleTextStyle([nodeId], TextStyleFlags.toggleUnderline);
       return KeyEventResult.handled;
     }
-    // Ctrl+=：将当前节点的样式应用到全部同级节点
-    if (isControl && !isAlt && event.logicalKey == LogicalKeyboardKey.equal) {
+    // Ctrl/Cmd+=：将当前节点的样式应用到全部同级节点
+    if (isCommand && !isAlt && event.logicalKey == LogicalKeyboardKey.equal) {
       _applyStyleToSiblings(nodeId);
       return KeyEventResult.handled;
     }
 
     // Alt+数字：设置标题级别
     // Shift 时作用于当前节点的所有同级节点，否则仅作用于当前节点
-    if (isAlt && !isControl) {
+    if (isAlt && !isCommand) {
       final level = OutlineShortcutKeys.headingLevelFromKey(event.logicalKey);
       if (level != null) {
         final targetIds = isShift ? _getSiblingNodeIds(nodeId) : [nodeId];
@@ -4485,8 +4496,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       }
     }
 
-    // Ctrl+Alt+字母：设置字底颜色（D 为清除）
-    if (isControl && isAlt && OutlineShortcutKeys.isColorLetterKey(event.logicalKey)) {
+    // Ctrl/Cmd+Alt+字母：设置字底颜色（D 为清除）
+    if (isCommand && isAlt && OutlineShortcutKeys.isColorLetterKey(event.logicalKey)) {
       if (OutlineShortcutKeys.isClearColorKey(event.logicalKey)) {
         _applyColor([nodeId], clearBackground: true);
       } else {
@@ -4495,9 +4506,9 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       return KeyEventResult.handled;
     }
 
-    // Enter：创建同级新节点（Ctrl+Enter 切换删除线）
+    // Enter：创建同级新节点（Ctrl/Cmd+Enter 切换删除线）
     if (event.logicalKey == LogicalKeyboardKey.enter) {
-      if (isControl || isAlt) {
+      if (isCommand || isAlt) {
         _toggleTextStyle([nodeId], TextStyleFlags.toggleStrikethrough);
       } else if (!isShift) {
         _createSibling(nodeId);
@@ -4534,8 +4545,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       }
     }
 
-    // Ctrl+A：全选当前主题，再次按下全选整个文档
-    if (isControl && event.logicalKey == LogicalKeyboardKey.keyA) {
+    // Ctrl/Cmd+A：全选当前主题，再次按下全选整个文档
+    if (isCommand && event.logicalKey == LogicalKeyboardKey.keyA) {
       final controller = _controllers[nodeId];
       // 无节点选区时：先检查当前输入框文本是否已全选
       // 未全选则放行默认行为（全选文本），已全选则进入主题选区
@@ -4551,8 +4562,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       return KeyEventResult.handled;
     }
 
-    // Ctrl+V：粘贴文本（多行转换为节点，缩进转换为子节点）
-    if (isControl && event.logicalKey == LogicalKeyboardKey.keyV) {
+    // Ctrl/Cmd+V：粘贴文本（多行转换为节点，缩进转换为子节点）
+    if (isCommand && event.logicalKey == LogicalKeyboardKey.keyV) {
       _pasteIntoNode(nodeId);
       return KeyEventResult.handled;
     }
@@ -4570,8 +4581,10 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
   /// 编辑器级键盘事件处理（节点选区激活时接收键盘事件）
   KeyEventResult _onEditorKeyEvent(FocusNode node, KeyEvent event) {
-    // 拦截撤销/恢复的重复事件（长按 Ctrl+Z / Ctrl+Y），与 _onKeyEvent 保持一致
-    if (event is KeyRepeatEvent && HardwareKeyboard.instance.isControlPressed) {
+    // 拦截撤销/恢复的重复事件（长按 Ctrl/Cmd+Z、Ctrl+Y），与 _onKeyEvent 保持一致
+    if (event is KeyRepeatEvent &&
+        (HardwareKeyboard.instance.isControlPressed ||
+            HardwareKeyboard.instance.isMetaPressed)) {
       if (event.logicalKey == LogicalKeyboardKey.keyZ) {
         if (HardwareKeyboard.instance.isShiftPressed) {
           redo();
@@ -4587,23 +4600,31 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     }
 
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
-    final isControl = HardwareKeyboard.instance.isControlPressed;
     final isShift = HardwareKeyboard.instance.isShiftPressed;
+    // 主修饰键：Windows 使用 Ctrl，macOS 使用 Command，两者均视为快捷键前缀
+    final isCommand =
+        HardwareKeyboard.instance.isControlPressed ||
+        HardwareKeyboard.instance.isMetaPressed;
     final isAlt = HardwareKeyboard.instance.isAltPressed;
 
     // Ctrl+S / Cmd+S：保存
-    if ((isControl || HardwareKeyboard.instance.isMetaPressed) && event.logicalKey == LogicalKeyboardKey.keyS) {
+    if (isCommand && event.logicalKey == LogicalKeyboardKey.keyS) {
       widget.onSave?.call();
       return KeyEventResult.handled;
     }
 
     // Ctrl+F / Cmd+F：打开查找
-    if ((isControl || HardwareKeyboard.instance.isMetaPressed) && event.logicalKey == LogicalKeyboardKey.keyF) {
+    if (isCommand && !isAlt && event.logicalKey == LogicalKeyboardKey.keyF) {
       context.read<WorkspaceProvider>().openFindReplace();
       return KeyEventResult.handled;
     }
-    // Ctrl+H / Cmd+H：打开查找替换（展开替换区域）
-    if ((isControl || HardwareKeyboard.instance.isMetaPressed) && event.logicalKey == LogicalKeyboardKey.keyH) {
+    // Cmd+Option+F：打开查找替换（macOS 习惯）
+    if (isCommand && isAlt && event.logicalKey == LogicalKeyboardKey.keyF) {
+      context.read<WorkspaceProvider>().openFindReplace(showReplace: true);
+      return KeyEventResult.handled;
+    }
+    // Ctrl+H：打开查找替换（Windows 习惯）
+    if (HardwareKeyboard.instance.isControlPressed && event.logicalKey == LogicalKeyboardKey.keyH) {
       context.read<WorkspaceProvider>().openFindReplace(showReplace: true);
       return KeyEventResult.handled;
     }
@@ -4625,8 +4646,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
     // 只读模式下禁用所有修改操作
     if (widget.readOnly) {
-      // Ctrl+C：复制选中节点（只读模式下仍允许复制）
-      if (isControl && event.logicalKey == LogicalKeyboardKey.keyC) {
+      // Ctrl/Cmd+C：复制选中节点（只读模式下仍允许复制）
+      if (isCommand && event.logicalKey == LogicalKeyboardKey.keyC) {
         if (_selectedNodeIds.isNotEmpty) {
           _copySelectedNodes();
           return KeyEventResult.handled;
@@ -4635,8 +4656,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       return KeyEventResult.ignored;
     }
 
-    // Ctrl+Z：撤销；Ctrl+Shift+Z 或 Ctrl+Y：重做
-    if (isControl && event.logicalKey == LogicalKeyboardKey.keyZ) {
+    // Ctrl/Cmd+Z：撤销；Ctrl/Cmd+Shift+Z：重做（macOS 习惯）；Ctrl+Y：重做（Windows 习惯）
+    if (isCommand && event.logicalKey == LogicalKeyboardKey.keyZ) {
       if (isShift) {
         redo();
       } else {
@@ -4644,7 +4665,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       }
       return KeyEventResult.handled;
     }
-    if (isControl && event.logicalKey == LogicalKeyboardKey.keyY) {
+    if (HardwareKeyboard.instance.isControlPressed && event.logicalKey == LogicalKeyboardKey.keyY) {
       redo();
       return KeyEventResult.handled;
     }
@@ -4654,8 +4675,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     if (_selectedNodeIds.isNotEmpty) {
       final targetIds = _selectedNodeIds.toList();
 
-      // Ctrl+B：加粗；Ctrl+I：斜体；Ctrl+U：下划线；Ctrl+Enter：删除线
-      if (isControl && !isAlt) {
+      // Ctrl/Cmd+B：加粗；Ctrl/Cmd+I：斜体；Ctrl/Cmd+U：下划线；Ctrl/Cmd+Enter：删除线
+      if (isCommand && !isAlt) {
         if (event.logicalKey == LogicalKeyboardKey.keyB) {
           _toggleTextStyle(targetIds, TextStyleFlags.toggleBold);
           return KeyEventResult.handled;
@@ -4675,7 +4696,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       }
 
       // Alt+数字：设置标题级别
-      if (isAlt && !isControl) {
+      if (isAlt && !isCommand) {
         final level = OutlineShortcutKeys.headingLevelFromKey(event.logicalKey);
         if (level != null) {
           _setHeadingLevel(targetIds, level);
@@ -4693,8 +4714,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
         }
       }
 
-      // Ctrl+Alt+字母：设置字底颜色（D 为清除）
-      if (isControl && isAlt && OutlineShortcutKeys.isColorLetterKey(event.logicalKey)) {
+      // Ctrl/Cmd+Alt+字母：设置字底颜色（D 为清除）
+      if (isCommand && isAlt && OutlineShortcutKeys.isColorLetterKey(event.logicalKey)) {
         if (OutlineShortcutKeys.isClearColorKey(event.logicalKey)) {
           _applyColor(targetIds, clearBackground: true);
         } else {
@@ -4714,8 +4735,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       return KeyEventResult.handled;
     }
 
-    // Ctrl+A：在主题选区与文档选区间切换
-    if (isControl && event.logicalKey == LogicalKeyboardKey.keyA) {
+    // Ctrl/Cmd+A：在主题选区与文档选区间切换
+    if (isCommand && event.logicalKey == LogicalKeyboardKey.keyA) {
       if (_selectAllLevel == 1) {
         // 主题已选 → 全选文档
         final flatList = _flatten();
@@ -4736,24 +4757,24 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       return KeyEventResult.ignored;
     }
 
-    // Ctrl+C：复制选中节点
-    if (isControl && event.logicalKey == LogicalKeyboardKey.keyC) {
+    // Ctrl/Cmd+C：复制选中节点
+    if (isCommand && event.logicalKey == LogicalKeyboardKey.keyC) {
       if (_selectedNodeIds.isNotEmpty) {
         _copySelectedNodes();
         return KeyEventResult.handled;
       }
     }
 
-    // Ctrl+X：剪切选中节点
-    if (isControl && event.logicalKey == LogicalKeyboardKey.keyX) {
+    // Ctrl/Cmd+X：剪切选中节点
+    if (isCommand && event.logicalKey == LogicalKeyboardKey.keyX) {
       if (_selectedNodeIds.isNotEmpty) {
         _cutSelectedNodes();
         return KeyEventResult.handled;
       }
     }
 
-    // Ctrl+V：粘贴节点
-    if (isControl && event.logicalKey == LogicalKeyboardKey.keyV) {
+    // Ctrl/Cmd+V：粘贴节点
+    if (isCommand && event.logicalKey == LogicalKeyboardKey.keyV) {
       if (_selectedNodeIds.isNotEmpty) {
         _pasteNodes();
         return KeyEventResult.handled;

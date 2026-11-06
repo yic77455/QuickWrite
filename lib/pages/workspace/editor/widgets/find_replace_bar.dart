@@ -5,6 +5,7 @@ import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
+import '../utils/shortcut_catalog.dart';
 
 /// 查找替换栏
 ///
@@ -239,11 +240,12 @@ class FindReplaceBarState extends State<FindReplaceBar> {
           const SingleActivator(LogicalKeyboardKey.escape): () {
             widget.onClose?.call();
           },
-          // Ctrl+H / Cmd+H：切换替换区域展开/收起
+          // Ctrl+H：切换替换区域展开/收起（Windows 习惯）
           const SingleActivator(LogicalKeyboardKey.keyH, control: true): () {
             _toggleReplace();
           },
-          const SingleActivator(LogicalKeyboardKey.keyH, meta: true): () {
+          // Cmd+Option+F：切换替换区域展开/收起（macOS 习惯）
+          const SingleActivator(LogicalKeyboardKey.keyF, meta: true, alt: true): () {
             _toggleReplace();
           },
         },
@@ -284,7 +286,7 @@ class FindReplaceBarState extends State<FindReplaceBar> {
           // 查找上一个
           _buildIconButton(
             icon: Icons.keyboard_arrow_up_rounded,
-            tooltip: '上一个 (Shift+Enter)',
+            tooltip: '上一个 (${formatShortcutKeys('Shift+Enter')})',
             onPressed: widget.onFindPrevious,
             colorScheme: colorScheme,
           ),

@@ -1,5 +1,6 @@
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/constants/constants.dart';
@@ -35,6 +36,22 @@ Widget _wrapWithAppFontScale(BuildContext context, Widget? child, double scale) 
   return MediaQuery(
     data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(scale)),
     child: child ?? const SizedBox.shrink(),
+  );
+}
+
+/// 为应用界面绑定 macOS 惯用的窗口快捷键
+///
+/// Command+W 关闭当前窗口时转交窗口关闭流程，
+/// 与点击窗口关闭按钮一致，保留未保存内容的确认步骤
+Widget _wrapWithWindowShortcuts(BuildContext context, Widget child) {
+  if (!PlatformCapabilities.isMacOS) return child;
+  return CallbackShortcuts(
+    bindings: {
+      const SingleActivator(LogicalKeyboardKey.keyW, meta: true): () {
+        context.read<WindowProvider>().close();
+      },
+    },
+    child: child,
   );
 }
 
@@ -98,8 +115,10 @@ class MyWriterApp extends StatelessWidget {
             debugShowCheckedModeBanner: false,
             routerConfig: appRouter,
             // 应用界面字号缩放：包裹整个界面，使界面文字按设定倍数显示
-            builder: (context, child) =>
-                _wrapWithAppFontScale(context, child, themeProvider.appFontScale),
+            builder: (context, child) => _wrapWithWindowShortcuts(
+              context,
+              _wrapWithAppFontScale(context, child, themeProvider.appFontScale),
+            ),
           );
         },
       ),
@@ -223,8 +242,10 @@ class _WorkspaceAppState extends State<WorkspaceApp> {
             debugShowCheckedModeBanner: false,
             home: WorkspacePage(bookId: widget.bookId, mainWindowId: widget.mainWindowId),
             // 应用界面字号缩放：包裹整个界面，使界面文字按设定倍数显示
-            builder: (context, child) =>
-                _wrapWithAppFontScale(context, child, themeProvider.appFontScale),
+            builder: (context, child) => _wrapWithWindowShortcuts(
+              context,
+              _wrapWithAppFontScale(context, child, themeProvider.appFontScale),
+            ),
           );
         },
       ),

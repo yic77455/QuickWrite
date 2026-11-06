@@ -31,5 +31,5 @@ flutter_launcher_icons:
     icon_size: 48 # min:48, max:256, default: 48
 
   macos:
-    generate: false
+    generate: true
     image_path: "assets/icon/icon_rounded.png"
