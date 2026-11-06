@@ -248,7 +248,7 @@ class OutlineTitleField extends StatelessWidget {
   /// 标题字号相对大纲基础字号的增量
   ///
   /// 大纲一级标题为基础字号 +6，标题在此基础上再大 4，形成比一级标题略高的层级
-  static const double _fontSizeOffset = 12.0;
+  static const double _fontSizeOffset = 10.0;
 
   /// 标题行高倍数
   static const double _lineHeightFactor = 1.4;
