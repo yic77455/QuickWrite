@@ -37,6 +37,21 @@ class AndroidNative {
     return await _invoke<bool>('installApk', {'path': path}) ?? false;
   }
 
+  /// 读取系统剪贴板中的 HTML 内容，无富文本时返回 null
+  static Future<String?> readClipboardHtml() async {
+    if (!PlatformCapabilities.isAndroid) return null;
+    return await _invoke<String>('readClipboardHtml');
+  }
+
+  /// 以 HTML 富文本写入系统剪贴板，返回是否写入成功
+  static Future<bool> writeClipboardHtml({
+    required String text,
+    required String html,
+  }) async {
+    if (!PlatformCapabilities.isAndroid) return false;
+    return await _invoke<bool>('writeClipboardHtml', {'text': text, 'html': html}) ?? false;
+  }
+
   /// 调用原生方法，并把通道异常统一降级为调用失败
   static Future<T?> _invoke<T>(String method, [Map<String, dynamic>? arguments]) async {
     try {

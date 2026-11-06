@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
-import 'dart:io';
 import 'package:ffi/ffi.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart';
+import 'package:quick_write/core/utils/android_native.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:win32/win32.dart';
 
 /// 剪贴板内容快照
@@ -24,7 +24,8 @@ class RichClipboardContent {
 
 /// 富文本剪贴板服务
 ///
-/// Windows 下通过系统 "HTML Format" 格式同时读写纯文本与 HTML，
+/// Windows 下通过系统 "HTML Format" 格式读写，
+/// 安卓下通过原生剪贴板的 `text/html` 读写，
 /// 其他平台退回 [Clipboard] 的纯文本能力。
 class RichClipboard {
   RichClipboard._();
@@ -38,35 +39,47 @@ class RichClipboard {
   /// Windows HTML 剪贴板格式名
   static const String _htmlFormatName = 'HTML Format';
 
-  /// 是否支持富文本剪贴板
-  static final bool _supported = !kIsWeb && Platform.isWindows;
-
   /// 缓存的 HTML 剪贴板格式 ID（0 表示尚未注册）
   static int _htmlFormatId = 0;
 
   /// 写入剪贴板
   ///
-  /// [htmlFragment] 非空且在 Windows 下时同时写入纯文本与 HTML，
+  /// [htmlFragment] 非空时优先写入纯文本与 HTML，
   /// 写入失败或平台不支持时仅写入纯文本。
   static Future<void> write({
     required String plainText,
     String? htmlFragment,
   }) async {
-    if (_supported && htmlFragment != null && htmlFragment.isNotEmpty) {
-      if (await _writeWithHtml(plainText, htmlFragment)) return;
+    if (htmlFragment != null && htmlFragment.isNotEmpty) {
+      if (PlatformCapabilities.isWindows &&
+          await _writeWithHtml(plainText, htmlFragment)) {
+        return;
+      }
+      if (PlatformCapabilities.isAndroid &&
+          await AndroidNative.writeClipboardHtml(
+            text: plainText,
+            html: htmlFragment,
+          )) {
+        return;
+      }
     }
     await Clipboard.setData(ClipboardData(text: plainText));
   }
 
   /// 读取剪贴板内容
   ///
-  /// 同时返回纯文本与（Windows 下的）HTML 片段。
+  /// 同时返回纯文本与（Windows / 安卓下的）HTML 片段。
   static Future<RichClipboardContent> read() async {
     final ClipboardData? data = await Clipboard.getData(Clipboard.kTextPlain);
-    return RichClipboardContent(
-      text: data?.text,
-      html: _supported ? await _readHtml() : null,
-    );
+
+    String? html;
+    if (PlatformCapabilities.isWindows) {
+      html = await _readHtml();
+    } else if (PlatformCapabilities.isAndroid) {
+      html = await AndroidNative.readClipboardHtml();
+    }
+
+    return RichClipboardContent(text: data?.text, html: html);
   }
 
   // ================= Windows 实现 =================

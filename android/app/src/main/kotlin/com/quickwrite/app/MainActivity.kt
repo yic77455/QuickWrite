@@ -1,8 +1,13 @@
 package com.quickwrite.app
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.text.Html
+import android.text.Spanned
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -36,6 +41,15 @@ class MainActivity : FlutterActivity() {
                     "openInstallPermissionSettings" -> result.success(openInstallPermissionSettings())
                     // 拉起系统安装程序安装指定路径的安装包
                     "installApk" -> result.success(installApk(call.argument("path")))
+                    // 读取剪贴板中的 HTML 富文本
+                    "readClipboardHtml" -> result.success(readClipboardHtml())
+                    // 以 HTML 富文本写入剪贴板
+                    "writeClipboardHtml" -> result.success(
+                        writeClipboardHtml(
+                            call.argument("text"),
+                            call.argument("html"),
+                        )
+                    )
                     else -> result.notImplemented()
                 }
             }
@@ -105,6 +119,55 @@ class MainActivity : FlutterActivity() {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             startActivity(intent)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    // ================= 剪贴板富文本 =================
+
+    /** 获取系统剪贴板服务 */
+    private fun clipboardManager(): ClipboardManager =
+        getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+
+    /**
+     * 读取剪贴板中的 HTML 内容。
+     *
+     * 优先使用 ClipData 自带的 text/html；没有 HTML 时，
+     * 若文本是带样式的 Spanned，则转换为 HTML 以尽量保留粗体、颜色等格式。
+     * 纯文本或无内容时返回 null，由 Dart 侧回退为纯文本解析。
+     */
+    private fun readClipboardHtml(): String? {
+        val clip = clipboardManager().primaryClip ?: return null
+        if (clip.itemCount == 0) return null
+
+        val item = clip.getItemAt(0)
+        val html = item.htmlText
+        if (!html.isNullOrEmpty()) return html
+
+        val text = item.text
+        if (text is Spanned && text.isNotEmpty()) {
+            return Html.toHtml(text, Html.TO_HTML_PARAGRAPH_LINES_CONSECUTIVE)
+        }
+        return null
+    }
+
+    /**
+     * 以 HTML 富文本写入剪贴板。
+     *
+     * 同时写入纯文本与 HTML，便于纯文本目标和富文本目标分别取用。
+     */
+    private fun writeClipboardHtml(text: String?, html: String?): Boolean {
+        if (text.isNullOrEmpty() && html.isNullOrEmpty()) return false
+
+        return try {
+            val clip = if (!html.isNullOrEmpty()) {
+                ClipData.newHtmlText("quick_write", text ?: "", html)
+            } else {
+                ClipData.newPlainText("quick_write", text)
+            }
+            clipboardManager().setPrimaryClip(clip)
             true
         } catch (e: Exception) {
             false
