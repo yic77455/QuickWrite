@@ -114,6 +114,12 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 圆点与文本间距缩减量
   static const double _dotTextGapReduction = 5.0;
 
+  /// 从空白区域拖拽唤起节点选区的最小上下移动距离（像素）
+  ///
+  /// 指针从按下位置上下移动超过该距离后才生成节点选区，
+  /// 避免鼠标轻微移动或纯水平移动就意外拉出节点选区
+  static const double _nodeSelectionDragThreshold = 20.0;
+
   // ================= 树结构数据 =================
 
   /// 根节点列表
@@ -2417,6 +2423,27 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     return index < flatList.length ? flatList[index].node.id : null;
   }
 
+  /// 判断全局坐标是否落在节点行的圆点与连接线指示区
+  ///
+  /// 指示区从一级节点竖线所在列的左边缘开始，到文本区起点为止；
+  /// 该区域内的按下不参与节点选区，避免点击圆点或竖线时误选节点。
+  bool _isPositionOnNodeIndicator(Offset globalPosition) {
+    final index = _findNodeIndexAtPosition(globalPosition);
+    if (index == null) return false;
+    final flatList = _flatten();
+    if (index < 0 || index >= flatList.length) return false;
+
+    final flat = flatList[index];
+    final renderBox = _nodeTileKeys[flat.node.id]?.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox == null || !renderBox.attached) return false;
+
+    final rect = MatrixUtils.transformRect(renderBox.getTransformTo(null), Offset.zero & renderBox.size);
+    // 节点行内容左内边距为 8，一级节点竖线所在的列 1 自缩进一列处开始
+    final indicatorLeft = rect.left + 8 + _indentWidth;
+    final textAreaStartX = rect.left + 8 + (flat.depth + 2) * _indentWidth - _dotTextGapReduction;
+    return globalPosition.dx >= indicatorLeft && globalPosition.dx < textAreaStartX;
+  }
+
   /// 判断全局坐标是否在指定节点的文本渲染区域内
   bool _isPositionWithinNodeText(String nodeId, Offset globalPosition) {
     final renderEditable = _findRenderEditable(nodeId);
@@ -2566,8 +2593,9 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 按指针位置更新拖拽选区
   ///
   /// 统一选区逻辑：
-  /// - 起始位置在文本内时先做文本选区，离开文本后切换到节点选区
-  /// - 起始位置不在文本内时直接做节点选区
+  /// - 起始位置在文本内时先做文本选区，指针移动到其他节点行后才切换为节点选区
+  /// - 起始位置在圆点、竖线之外的空白区域时，上下拖拽超过阈值后做节点选区
+  /// - 起始位置在圆点与竖线指示区内时不唤起节点选区
   void _updateDragSelection(Offset globalPosition) {
     // 起始索引尚未确定时，用当前位置确定
     if (_dragStartIndex == null) {
@@ -2581,22 +2609,26 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
     // 尚未确定拖拽模式时，根据起始位置判断
     if (_dragMode == _DragMode.none) {
-      final startInText =
-          _dragStartPosition != null && _isPositionWithinNodeText(_dragStartNodeId!, _dragStartPosition!);
+      final startPosition = _dragStartPosition;
+      final startInText = startPosition != null && _isPositionWithinNodeText(_dragStartNodeId!, startPosition);
       if (startInText) {
         // 起始位置在文本内：进入文本选区模式
         _dragMode = _DragMode.text;
         final renderEditable = _findRenderEditable(_dragStartNodeId!);
         if (renderEditable != null && renderEditable.attached) {
-          _dragTextAnchor = renderEditable.getPositionForPoint(_dragStartPosition!);
+          _dragTextAnchor = renderEditable.getPositionForPoint(startPosition);
         }
         // 让起始节点获得焦点，确保文本选区可见
         _focusNodes[_dragStartNodeId!]?.requestFocus();
-      } else {
-        // 起始位置不在文本内：进入节点选区模式
+      } else if (startPosition != null && !_isPositionOnNodeIndicator(startPosition)) {
+        // 起始位置在圆点与竖线之外的空白区域：上下拖拽距离达到阈值后才进入节点选区模式
+        if (!_hasReachedNodeSelectionDragThreshold(globalPosition)) return;
         _dragMode = _DragMode.node;
         _selectAllLevel = 0;
         _activateNodeSelectionFocus();
+      } else {
+        // 起始位置在圆点与竖线指示区内：不唤起节点选区
+        return;
       }
     }
 
@@ -2608,33 +2640,24 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
         _selectAllLevel = 0;
         _activateNodeSelectionFocus();
       } else {
-        // 综合判断是否仍在起始节点的文本区域内：
-        // 1. 当前位置在起始节点的 RenderEditable rect 内
-        // 2. 当前节点索引仍为起始索引（防止 RenderEditable rect 不准确时误判）
+        // 仅当指针移动到其他节点行时才从文本选区切换为节点选区，
+        // 停留在起始节点行内（含行内空白）时始终扩展文本选区
         final currentIndex = _findNodeIndexAtPosition(globalPosition);
-        final stillInStartNodeText =
-            currentIndex == _dragStartIndex && _isPositionWithinNodeText(_dragStartNodeId!, globalPosition);
-        if (stillInStartNodeText) {
-          // 仍在起始文本内：扩展文本选区
+        final movedToOtherNode = currentIndex != null && currentIndex != _dragStartIndex;
+        if (!movedToOtherNode) {
           _extendTextSelection(_dragStartNodeId!, _dragTextAnchor!, globalPosition);
         } else {
-          // 离开文本区域或进入其他节点：切换到节点选区
+          // 移动到其他节点行：切换到节点选区
           _dragMode = _DragMode.node;
           _selectAllLevel = 0;
           _activateNodeSelectionFocus();
-          if (currentIndex != null) {
-            _selectNodeRange(_dragStartIndex!, currentIndex);
-          }
+          _selectNodeRange(_dragStartIndex!, currentIndex);
         }
       }
     } else if (_dragMode == _DragMode.node) {
-      // 回到起始节点文本区域时，从节点选区恢复到文本选区
-      // 同时校验当前节点索引是否为起始索引，确保确实回到了起始节点
+      // 回到起始节点行时，从节点选区恢复到文本选区
       final currentIndex = _findNodeIndexAtPosition(globalPosition);
-      final backToStartText =
-          _dragTextAnchor != null &&
-          currentIndex == _dragStartIndex &&
-          _isPositionWithinNodeText(_dragStartNodeId!, globalPosition);
+      final backToStartText = _dragTextAnchor != null && currentIndex == _dragStartIndex;
       if (backToStartText) {
         _dragMode = _DragMode.text;
         _selectedNodeIds.clear();
@@ -2650,6 +2673,15 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
         }
       }
     }
+  }
+
+  /// 判断指针相对拖拽起点在垂直方向上的移动距离是否已达到唤起节点选区的阈值
+  ///
+  /// 仅统计上下移动，纯水平移动不会唤起节点选区
+  bool _hasReachedNodeSelectionDragThreshold(Offset globalPosition) {
+    final startPosition = _dragStartPosition;
+    if (startPosition == null) return false;
+    return (globalPosition.dy - startPosition.dy).abs() >= _nodeSelectionDragThreshold;
   }
 
   /// 拖拽结束：清理拖拽状态
@@ -2806,6 +2838,34 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     return flags;
   }
 
+  /// 获取光标所在字符的样式标记
+  ///
+  /// 光标落在两个字符之间时取右侧字符，落在文本末尾时取最后一个字符；
+  /// 文本为空时返回空样式。
+  TextStyleFlags _getCaretStyleFlags(OutlineNode node, TextSelection selection) {
+    if (node.text.isEmpty) return TextStyleFlags.none;
+    final int index = selection.start >= node.text.length ? node.text.length - 1 : selection.start;
+    var flags = TextStyleFlags.none;
+    for (final r in node.styleRanges) {
+      if (index >= r.start && index < r.end) {
+        flags = flags.merge(r.flags);
+      }
+    }
+    return flags;
+  }
+
+  /// 获取右键菜单展示用的文字样式标记
+  ///
+  /// 单节点且无选中文字时只取光标所在字符的样式，
+  /// 避免整段文本中其他区间的样式把菜单图标错误点亮；
+  /// 其余情况沿用 [_getSelectionFlags] 的合并逻辑。
+  TextStyleFlags _getContextMenuStyleFlags(List<OutlineNode> nodes, TextSelection? selection) {
+    if (nodes.length != 1 || selection == null || !selection.isValid || !selection.isCollapsed) {
+      return _getSelectionFlags(nodes, selection);
+    }
+    return _getCaretStyleFlags(nodes.first, selection);
+  }
+
   /// 获取选区或整个节点的当前颜色
   ///
   /// 遍历所有与目标范围重叠的样式区间，收集颜色值。
@@ -2846,6 +2906,24 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       return (isUniform: true, color: colors.first);
     }
     return (isUniform: false, color: null);
+  }
+
+  /// 获取右键菜单展示用的颜色
+  ///
+  /// 单节点且无选中文字时只取光标所在字符的颜色，
+  /// 避免整段文本中其他区间的颜色被错误标记为当前颜色；
+  /// 其余情况沿用 [_getCurrentColor] 的合并逻辑。
+  /// [isForeground] 为 true 时查询字体颜色，false 时查询字底颜色。
+  ({bool isUniform, Color? color}) _getContextMenuColor(
+    List<OutlineNode> nodes,
+    TextSelection? selection,
+    bool isForeground,
+  ) {
+    if (nodes.length != 1 || selection == null || !selection.isValid || !selection.isCollapsed) {
+      return _getCurrentColor(nodes, selection, isForeground);
+    }
+    final flags = _getCaretStyleFlags(nodes.first, selection);
+    return (isUniform: true, color: isForeground ? flags.foregroundColor : flags.backgroundColor);
   }
 
   /// 切换文字样式
@@ -3829,8 +3907,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     final targetIds = _getStyleTargetNodeIds(nodeId);
     final targetNodes = targetIds.map((id) => _findNode(id)).whereType<OutlineNode>().toList();
     final TextSelection? styleSelection = targetIds.length == 1 ? _controllers[targetIds.first]?.selection : null;
-    final currentFg = _getCurrentColor(targetNodes, styleSelection, true);
-    final currentBg = _getCurrentColor(targetNodes, styleSelection, false);
+    final currentFg = _getContextMenuColor(targetNodes, styleSelection, true);
+    final currentBg = _getContextMenuColor(targetNodes, styleSelection, false);
 
     return [
       // 标题/正文格式行
@@ -4043,7 +4121,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 按钮的初始状态由选区决定：
   /// - 节点选区状态下：合并所有选中节点的样式状态
   /// - 有选中文字时：根据选中文字的样式状态点亮
-  /// - 无选中文字时：根据整个节点文本的样式状态点亮
+  /// - 无选中文字时：根据光标所在字符的样式状态点亮
   Widget _buildFormatRow(String? nodeId) {
     final targetIds = _getStyleTargetNodeIds(nodeId);
     if (targetIds.isEmpty) {
@@ -4055,8 +4133,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     }
     // 节点选区状态下不使用文字选区，单节点时使用其文字选区
     final TextSelection? selection = targetIds.length == 1 ? _controllers[targetIds.first]?.selection : null;
-    // 合并所有目标节点的样式状态
-    final selectionFlags = _getSelectionFlags(targetNodes, selection);
+    // 计算目标节点在选区或光标位置的样式状态，作为按钮初始点亮状态
+    final selectionFlags = _getContextMenuStyleFlags(targetNodes, selection);
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
