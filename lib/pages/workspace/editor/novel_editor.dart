@@ -1203,7 +1203,7 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   ) {
     final SettingsService settings = SettingsService.instance;
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
-    final Color focusedSelectionColor = colorScheme.primary.withValues(alpha: 0.25);
+    final Color focusedSelectionColor = computeFocusedSelectionColor(colorScheme);
     final Color unfocusedSelectionColor = computePersistentSelectionColor(context, colorScheme.primary);
     // 行间线样式：仅在开启时传入，关闭时交由编辑器跳过绘制
     final CodeLineSeparatorStyle? lineSeparator = settings.showLineSeparator

@@ -202,6 +202,14 @@ Color computePersistentSelectionColor(BuildContext context, Color fallback) {
   return hsl.withSaturation(0.08).withLightness(targetLightness).toColor();
 }
 
+/// 计算获得焦点时的文本选区颜色
+///
+/// 以主题主色为基底叠加固定透明度，使正文编辑器与大纲编辑器的选区底色保持一致，
+/// 并随主题切换自动适配。
+Color computeFocusedSelectionColor(ColorScheme colorScheme) {
+  return colorScheme.primary.withValues(alpha: 0.25);
+}
+
 /// 将持久化选区 Painter 注入到 RenderEditable 的 painter（backgroundPainter）链中
 ///
 /// 在文字层之下绘制选区底色，并完成首次状态初始化。

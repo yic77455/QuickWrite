@@ -388,42 +388,46 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
       child: ImeCursorFixerWrapper(
         controller: widget.controller,
         focusNode: widget.focusNode,
-        child: TextField(
-          key: _textFieldKey,
-          controller: widget.controller,
-          focusNode: widget.focusNode,
-          readOnly: widget.readOnly,
-          maxLines: null,
-          minLines: 1,
-          // 基础样式：字号、字体、行高、默认文字颜色
-          // 加粗/斜体/下划线/删除线由 RichTextEditingController 的 buildTextSpan 根据 styleRanges 叠加
-          style: TextStyle(
-            fontFamily: SettingsService.instance.outlineFontFamily,
-            fontSize: _fontSize,
-            height: _lineHeightFactor,
-            color: node.foregroundColor ?? colorScheme.onSurface,
+        // 通过 DefaultSelectionStyle 注入选区底色，使节点文本选区与正文编辑器使用同一套配色
+        child: DefaultSelectionStyle.merge(
+          selectionColor: computeFocusedSelectionColor(colorScheme),
+          child: TextField(
+            key: _textFieldKey,
+            controller: widget.controller,
+            focusNode: widget.focusNode,
+            readOnly: widget.readOnly,
+            maxLines: null,
+            minLines: 1,
+            // 基础样式：字号、字体、行高、默认文字颜色
+            // 加粗/斜体/下划线/删除线由 RichTextEditingController 的 buildTextSpan 根据 styleRanges 叠加
+            style: TextStyle(
+              fontFamily: SettingsService.instance.outlineFontFamily,
+              fontSize: _fontSize,
+              height: _lineHeightFactor,
+              color: node.foregroundColor ?? colorScheme.onSurface,
+            ),
+            decoration: const InputDecoration(
+              border: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              filled: false,
+              isCollapsed: true,
+              // contentPadding: EdgeInsets.fromLTRB(6, _contentPaddingVertical - 2.5, 6, _contentPaddingVertical + 2.5),
+              isDense: true,
+            ),
+            cursorColor: colorScheme.primary,
+            // 折叠光标（单击定位产生的光标）不绘制拖动调整用的手柄，仅保留光标本身；
+            // 仅 Android 的默认控件会为折叠光标绘制手柄，故只在 Android 上替换，桌面端与 iOS 保持系统默认
+            selectionControls: Theme.of(context).platform == TargetPlatform.android
+                ? _outlineNodeSelectionControls
+                : null,
+            // 桌面端屏蔽 TextField 原生右键菜单，改用自定义右键菜单；
+            // 移动端长按选中文字后弹出文字选择工具栏
+            contextMenuBuilder: PlatformCapabilities.isMobile
+                ? _buildMobileSelectionToolbar
+                : (context, editableTextState) => const SizedBox.shrink(),
+            onChanged: widget.onChanged,
           ),
-          decoration: const InputDecoration(
-            border: InputBorder.none,
-            focusedBorder: InputBorder.none,
-            enabledBorder: InputBorder.none,
-            filled: false,
-            isCollapsed: true,
-            // contentPadding: EdgeInsets.fromLTRB(6, _contentPaddingVertical - 2.5, 6, _contentPaddingVertical + 2.5),
-            isDense: true,
-          ),
-          cursorColor: colorScheme.primary,
-          // 折叠光标（单击定位产生的光标）不绘制拖动调整用的手柄，仅保留光标本身；
-          // 仅 Android 的默认控件会为折叠光标绘制手柄，故只在 Android 上替换，桌面端与 iOS 保持系统默认
-          selectionControls: Theme.of(context).platform == TargetPlatform.android
-              ? _outlineNodeSelectionControls
-              : null,
-          // 桌面端屏蔽 TextField 原生右键菜单，改用自定义右键菜单；
-          // 移动端长按选中文字后弹出文字选择工具栏
-          contextMenuBuilder: PlatformCapabilities.isMobile
-              ? _buildMobileSelectionToolbar
-              : (context, editableTextState) => const SizedBox.shrink(),
-          onChanged: widget.onChanged,
         ),
       ),
     );
