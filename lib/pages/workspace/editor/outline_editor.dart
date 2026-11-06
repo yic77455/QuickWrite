@@ -19,9 +19,11 @@ import 'package:quick_write/core/utils/clipboard_state_cache.dart';
 import 'package:quick_write/core/utils/color_utils.dart';
 import 'package:quick_write/core/utils/editor_scroll_helper.dart';
 import 'package:quick_write/core/utils/find_replace_target.dart';
+import 'package:quick_write/core/utils/outline_html_codec.dart';
 import 'package:quick_write/core/utils/outline_markdown_codec.dart';
 import 'package:quick_write/core/utils/outline_undo_manager.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
+import 'package:quick_write/core/utils/rich_clipboard.dart';
 import 'package:quick_write/core/utils/rich_text_controller.dart';
 import 'package:quick_write/core/utils/text_style_range.dart';
 import 'package:quick_write/core/utils/word_count_utils.dart';
@@ -3290,45 +3292,85 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
   // ================= 剪贴板操作 =================
 
-  /// 剪切选中文本
-  void _handleCutText() {
-    final nodeId = _contextMenuNodeId;
-    if (nodeId == null) return;
+  /// 剪切指定节点内选中的文本（含文字样式）
+  ///
+  /// 返回是否存在可剪切的文本选区。
+  bool _cutNodeTextSelection(String nodeId) {
     final controller = _controllers[nodeId];
     final node = _findNode(nodeId);
-    if (controller == null || node == null) return;
+    if (controller == null || node == null) return false;
 
     final selection = controller.selection;
-    if (!selection.isValid || selection.isCollapsed) return;
+    if (!selection.isValid || selection.isCollapsed) return false;
+    final start = selection.start.clamp(0, controller.text.length);
+    final end = selection.end.clamp(0, controller.text.length);
+    if (start >= end) return false;
 
-    final selectedText = controller.text.substring(selection.start, selection.end);
-    Clipboard.setData(ClipboardData(text: selectedText));
+    final selectedText = controller.text.substring(start, end);
+    final selectedRanges = TextStyleRangeUtils.slice(node.styleRanges, start, end);
+    unawaited(RichClipboard.write(
+      plainText: selectedText,
+      htmlFragment: OutlineHtmlCodec.serializeInline(
+        selectedText,
+        selectedRanges,
+        headingLevel: node.headingLevel,
+      ),
+    ));
     // 同步标记剪贴板已有内容，避免下次右键菜单的"粘贴"项被错误禁用
     ClipboardStateCache.markHasContent();
 
-    final newText = controller.text.substring(0, selection.start) + controller.text.substring(selection.end);
+    // 删除选中文本并同步调整样式区间，使剩余文字的样式保持不变
+    final newText = controller.text.substring(0, start) + controller.text.substring(end);
+    node.styleRanges = TextStyleRangeUtils.adjustForDeletion(node.styleRanges, start, end);
+    (controller as RichTextEditingController).styleRanges = node.styleRanges;
     controller.value = TextEditingValue(
       text: newText,
-      selection: TextSelection.collapsed(offset: selection.start),
+      selection: TextSelection.collapsed(offset: start),
     );
     node.text = newText;
     _notifyContentChanged();
+    return true;
   }
 
-  /// 复制选中文本
-  void _handleCopyText() {
-    final nodeId = _contextMenuNodeId;
-    if (nodeId == null) return;
+  /// 复制指定节点内选中的文本（含文字样式）
+  ///
+  /// 返回是否存在可复制的文本选区。
+  bool _copyNodeTextSelection(String nodeId) {
     final controller = _controllers[nodeId];
-    if (controller == null) return;
+    final node = _findNode(nodeId);
+    if (controller == null || node == null) return false;
 
     final selection = controller.selection;
-    if (!selection.isValid || selection.isCollapsed) return;
+    if (!selection.isValid || selection.isCollapsed) return false;
+    final start = selection.start.clamp(0, controller.text.length);
+    final end = selection.end.clamp(0, controller.text.length);
+    if (start >= end) return false;
 
-    final selectedText = controller.text.substring(selection.start, selection.end);
-    Clipboard.setData(ClipboardData(text: selectedText));
+    final selectedText = controller.text.substring(start, end);
+    final selectedRanges = TextStyleRangeUtils.slice(node.styleRanges, start, end);
+    unawaited(RichClipboard.write(
+      plainText: selectedText,
+      htmlFragment: OutlineHtmlCodec.serializeInline(
+        selectedText,
+        selectedRanges,
+        headingLevel: node.headingLevel,
+      ),
+    ));
     // 同步标记剪贴板已有内容，避免下次右键菜单的"粘贴"项被错误禁用
     ClipboardStateCache.markHasContent();
+    return true;
+  }
+
+  /// 剪切右键菜单目标节点的选中文本
+  void _handleCutText() {
+    final nodeId = _contextMenuNodeId;
+    if (nodeId != null) _cutNodeTextSelection(nodeId);
+  }
+
+  /// 复制右键菜单目标节点的选中文本
+  void _handleCopyText() {
+    final nodeId = _contextMenuNodeId;
+    if (nodeId != null) _copyNodeTextSelection(nodeId);
   }
 
   /// 删除选中文本
@@ -3341,11 +3383,17 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
     final selection = controller.selection;
     if (!selection.isValid || selection.isCollapsed) return;
+    final start = selection.start.clamp(0, controller.text.length);
+    final end = selection.end.clamp(0, controller.text.length);
+    if (start >= end) return;
 
-    final newText = controller.text.substring(0, selection.start) + controller.text.substring(selection.end);
+    // 删除选中文本并同步调整样式区间，使剩余文字的样式保持不变
+    final newText = controller.text.substring(0, start) + controller.text.substring(end);
+    node.styleRanges = TextStyleRangeUtils.adjustForDeletion(node.styleRanges, start, end);
+    (controller as RichTextEditingController).styleRanges = node.styleRanges;
     controller.value = TextEditingValue(
       text: newText,
-      selection: TextSelection.collapsed(offset: selection.start),
+      selection: TextSelection.collapsed(offset: start),
     );
     node.text = newText;
     _notifyContentChanged();
@@ -3373,13 +3421,16 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     return buffer.toString();
   }
 
-  /// 复制选中节点到剪贴板
+  /// 复制选中节点到剪贴板（纯文本保留缩进，HTML 保留结构与文字样式）
   void _copySelectedNodes() {
     final selectedNodes = _getSelectedFlatNodes();
     if (selectedNodes.isEmpty) return;
 
     final text = _serializeNodes(selectedNodes);
-    Clipboard.setData(ClipboardData(text: text));
+    unawaited(RichClipboard.write(
+      plainText: text,
+      htmlFragment: OutlineHtmlCodec.serializeNodes(selectedNodes),
+    ));
     // 同步标记剪贴板已有内容，避免下次右键菜单的"粘贴"项被错误禁用
     ClipboardStateCache.markHasContent();
   }
@@ -3390,7 +3441,10 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     if (selectedNodes.isEmpty) return;
 
     final text = _serializeNodes(selectedNodes);
-    Clipboard.setData(ClipboardData(text: text));
+    unawaited(RichClipboard.write(
+      plainText: text,
+      htmlFragment: OutlineHtmlCodec.serializeNodes(selectedNodes),
+    ));
     // 同步标记剪贴板已有内容，避免下次右键菜单的"粘贴"项被错误禁用
     ClipboardStateCache.markHasContent();
     _deleteSelectedNodes();
@@ -3487,8 +3541,14 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
   /// 粘贴剪贴板内容，替换当前选中的节点
   ///
-  /// 先删除所有选中节点，在第一个选中节点的位置插入剪贴板解析出的新节点
-  void _pasteNodes() {
+  /// 优先读取剪贴板中的富文本 HTML，保留文字样式、标题级别与列表层级；
+  /// 无 HTML 时按带缩进的纯文本解析。先删除所有选中节点，
+  /// 在第一个选中节点的位置插入解析出的新节点。
+  Future<void> _pasteNodes() async {
+    if (_selectedNodeIds.isEmpty) return;
+
+    final pastedNodes = await _readClipboardNodes();
+    if (pastedNodes.isEmpty || !mounted) return;
     if (_selectedNodeIds.isEmpty) return;
 
     final selectedNodes = _getSelectedFlatNodes();
@@ -3498,211 +3558,224 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     final firstLocation = _findLocation(firstSelected.node.id);
     if (firstLocation == null) return;
 
-    Clipboard.getData('text/plain').then((data) {
-      if (data == null || data.text == null || data.text!.isEmpty) return;
+    // 在剪贴板数据可用后再开启批量操作，确保 beginBatch 与 endBatch 配对
+    _undoManager.beginBatch();
 
-      final lines = data.text!.split('\n').where((l) => l.isNotEmpty).toList();
-      if (lines.isEmpty) return;
+    // 记录选中节点所在兄弟列表和起始插入位置
+    final siblings = firstLocation.parent?.children ?? _roots;
+    var insertIndex = firstLocation.index;
 
-      // 在剪贴板数据可用后再开启批量操作，确保 beginBatch 与 endBatch 配对
-      _undoManager.beginBatch();
-
-      // 记录选中节点所在兄弟列表和起始插入位置
-      final siblings = firstLocation.parent?.children ?? _roots;
-      var insertIndex = firstLocation.index;
-
-      // 删除所有选中节点（连同子节点）
-      final idsToDelete = <String>{};
-      void collectIds(OutlineNode node) {
-        idsToDelete.add(node.id);
-        for (final child in node.children) {
-          collectIds(child);
-        }
+    // 删除所有选中节点（连同子节点）
+    final idsToDelete = <String>{};
+    void collectIds(OutlineNode node) {
+      idsToDelete.add(node.id);
+      for (final child in node.children) {
+        collectIds(child);
       }
+    }
 
-      for (final flat in selectedNodes) {
-        collectIds(flat.node);
+    for (final flat in selectedNodes) {
+      collectIds(flat.node);
+    }
+
+    void removeFromList(List<OutlineNode> nodes) {
+      nodes.removeWhere((n) => _selectedNodeIds.contains(n.id));
+      for (final node in nodes) {
+        removeFromList(node.children);
       }
+    }
 
-      void removeFromList(List<OutlineNode> nodes) {
-        nodes.removeWhere((n) => _selectedNodeIds.contains(n.id));
-        for (final node in nodes) {
-          removeFromList(node.children);
-        }
+    removeFromList(_roots);
+
+    // 释放被删除节点的资源
+    for (final id in idsToDelete) {
+      final controller = _controllers[id];
+      if (controller != null) {
+        _undoManager.unregisterController(id, controller);
+        controller.dispose();
+        _controllers.remove(id);
       }
+      _focusNodes[id]?.dispose();
+      _focusNodes.remove(id);
+      _nodeTileKeys.remove(id);
+    }
 
-      removeFromList(_roots);
+    _selectedNodeIds.clear();
+    _selectAllLevel = 0;
+    _selectionAnchorIndex = null;
 
-      // 释放被删除节点的资源
-      for (final id in idsToDelete) {
-        final controller = _controllers[id];
-        if (controller != null) {
-          _undoManager.unregisterController(id, controller);
-          controller.dispose();
-          _controllers.remove(id);
-        }
-        _focusNodes[id]?.dispose();
-        _focusNodes.remove(id);
-        _nodeTileKeys.remove(id);
-      }
+    for (final newNode in pastedNodes) {
+      _ensureResourcesForNode(newNode);
+      siblings.insert(insertIndex, newNode);
+      insertIndex++;
+    }
 
-      _selectedNodeIds.clear();
-      _selectAllLevel = 0;
-      _selectionAnchorIndex = null;
+    setState(() {});
 
-      // 解析带缩进的文本，重建节点层级结构
-      final newNodes = _parseNodesFromText(lines);
-
-      for (final newNode in newNodes) {
-        _ensureResourcesForNode(newNode);
-        siblings.insert(insertIndex, newNode);
-        insertIndex++;
-      }
-
-      setState(() {});
-
-      // 聚焦到第一个新节点
-      if (newNodes.isNotEmpty) {
-        final firstNodeId = newNodes.first.id;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _focusNodeWithSelection(firstNodeId, moveCursorToEnd: false);
-          _endBatchAndNotify(description: '粘贴节点', focusNodeId: firstNodeId, focusSelection: _selectionAtStart());
-        });
-      } else {
-        // 无新节点插入时仍需结束批量操作
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _endBatchAndNotify(description: '粘贴节点');
-        });
-      }
+    // 聚焦到第一个新节点
+    final firstNodeId = pastedNodes.first.id;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focusNodeWithSelection(firstNodeId, moveCursorToEnd: false);
+      _endBatchAndNotify(description: '粘贴节点', focusNodeId: firstNodeId, focusSelection: _selectionAtStart());
     });
   }
 
-  /// 粘贴文本到指定节点的光标位置
+  /// 粘贴内容到指定节点的光标位置
   ///
-  /// 多行文本按行分割创建新节点，缩进转换为子节点层级；
-  /// 单行文本直接插入到光标位置（替换选区）。
-  void _pasteIntoNode(String nodeId) {
+  /// 单个节点直接插入到光标位置（替换选区），文字样式随插入内容保留；
+  /// 多个节点按行创建新节点，层级随 HTML 列表结构或文本缩进还原。
+  Future<void> _pasteIntoNode(String nodeId) async {
+    final pastedNodes = await _readClipboardNodes();
+    if (pastedNodes.isEmpty || !mounted) return;
+
     final location = _findLocation(nodeId);
     if (location == null) return;
-
     final siblings = location.parent?.children ?? _roots;
+    if (location.index >= siblings.length) return;
     final currentNode = siblings[location.index];
     final controller = _controllers[nodeId];
-    if (controller == null) return;
+    if (controller is! RichTextEditingController) return;
 
-    Clipboard.getData('text/plain').then((data) {
-      if (data == null || data.text == null || data.text!.isEmpty) return;
+    // 单节点粘贴：文本插入光标位置，样式区间一并拼接
+    if (pastedNodes.length == 1 && pastedNodes.first.children.isEmpty) {
+      _insertNodeAtCursor(controller, currentNode, pastedNodes.first);
+      return;
+    }
 
-      // 统一换行符
-      final normalized = data.text!.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    // 多节点粘贴涉及节点结构变化，开启批量操作
+    _undoManager.beginBatch();
 
-      // 单行文本：直接插入到光标位置
-      if (!normalized.contains('\n')) {
-        _insertTextAtCursor(controller, normalized);
-        currentNode.text = controller.text;
-        return;
+    final selection = controller.selection;
+    final selStart = selection.start >= 0 ? selection.start : 0;
+    final selEnd = selection.end >= 0 ? selection.end : controller.text.length;
+    final textBefore = controller.text.substring(0, selStart);
+    final textAfter = controller.text.substring(selEnd);
+
+    // 光标前后的文本需要分别切分样式，避免样式随文字移动后错位
+    final prefixRanges = TextStyleRangeUtils.slice(currentNode.styleRanges, 0, selStart);
+    final tailRanges = TextStyleRangeUtils.slice(currentNode.styleRanges, selEnd, controller.text.length);
+
+    final firstNode = pastedNodes.first;
+
+    // 第一个节点的子节点追加为当前节点的子节点
+    if (firstNode.children.isNotEmpty) {
+      for (final child in firstNode.children) {
+        _ensureResourcesForNode(child);
       }
+      currentNode.children.addAll(firstNode.children);
+      currentNode.isExpanded = true;
+    }
 
-      // 多行文本：按行分割，过滤空白行
-      final lines = normalized.split('\n').where((l) => l.trim().isNotEmpty).toList();
-      if (lines.isEmpty) return;
+    // 其余根节点作为同级节点插入到当前节点之后
+    final pastedSiblings = <OutlineNode>[];
+    for (int i = 1; i < pastedNodes.length; i++) {
+      pastedSiblings.add(pastedNodes[i]);
+    }
 
-      // 解析为节点树，保留缩进层级
-      final newNodes = _parseNodesFromText(lines);
-      if (newNodes.isEmpty) return;
+    // 光标后的剩余文本作为新节点追加到末尾（不属于粘贴内容）
+    final nodesToInsert = <OutlineNode>[];
+    nodesToInsert.addAll(pastedSiblings);
+    if (textAfter.isNotEmpty) {
+      final tailNode = _createNode(textAfter);
+      tailNode.styleRanges = tailRanges;
+      nodesToInsert.add(tailNode);
+    }
 
-      // 多行粘贴涉及节点结构变化，开启批量操作
-      _undoManager.beginBatch();
+    var insertIndex = location.index + 1;
+    for (final newNode in nodesToInsert) {
+      _ensureResourcesForNode(newNode);
+      siblings.insert(insertIndex, newNode);
+      insertIndex++;
+    }
 
-      final selection = controller.selection;
-      final selStart = selection.start >= 0 ? selection.start : 0;
-      final selEnd = selection.end >= 0 ? selection.end : controller.text.length;
-      final textBefore = controller.text.substring(0, selStart);
-      final textAfter = controller.text.substring(selEnd);
+    // 确定最后一个粘贴节点（文档顺序最末的粘贴节点，排除 textAfter 节点）
+    final OutlineNode lastPastedNode;
+    if (pastedSiblings.isNotEmpty) {
+      // 存在同级粘贴节点：取最后一个的最深右子孙
+      lastPastedNode = _lastDescendant(pastedSiblings.last);
+    } else if (firstNode.children.isNotEmpty) {
+      // 仅第一个节点的子节点被追加为当前节点的子节点
+      lastPastedNode = _lastDescendant(firstNode.children.last);
+    } else {
+      // 无独立粘贴节点，仅文本合并到当前节点
+      lastPastedNode = currentNode;
+    }
 
-      final firstNode = newNodes.first;
-
-      // 第一个节点的子节点追加为当前节点的子节点
-      if (firstNode.children.isNotEmpty) {
-        for (final child in firstNode.children) {
-          _ensureResourcesForNode(child);
-        }
-        currentNode.children.addAll(firstNode.children);
-        currentNode.isExpanded = true;
+    // 在修改当前节点文本前，先把焦点切换到最后一个粘贴节点
+    // 这样当前节点失去焦点，光标不显示，避免光标先在当前节点末尾闪烁再跳到目标节点
+    if (lastPastedNode.id != nodeId) {
+      final lastFocusNode = _focusNodes[lastPastedNode.id];
+      if (lastFocusNode != null) {
+        lastFocusNode.requestFocus();
       }
+    }
 
-      // 其余根节点作为同级节点插入到当前节点之后
-      final pastedSiblings = <OutlineNode>[];
-      for (int i = 1; i < newNodes.length; i++) {
-        pastedSiblings.add(newNodes[i]);
-      }
+    // 第一个节点的文本合并到当前节点光标位置，样式按插入位置拼接
+    // 空节点接收带标题级别的内容时沿用其标题级别
+    if (controller.text.isEmpty && firstNode.headingLevel > 0) {
+      currentNode.headingLevel = firstNode.headingLevel;
+    }
+    final currentNewText = textBefore + firstNode.text;
+    currentNode.styleRanges = TextStyleRangeUtils.mergeAdjacent(<TextStyleRange>[
+      ...prefixRanges,
+      ...TextStyleRangeUtils.shift(firstNode.styleRanges, selStart),
+    ]);
+    controller.text = currentNewText;
+    controller.styleRanges = currentNode.styleRanges;
+    currentNode.text = currentNewText;
 
-      // 光标后的剩余文本作为新节点追加到末尾（不属于粘贴内容）
-      final nodesToInsert = <OutlineNode>[];
-      nodesToInsert.addAll(pastedSiblings);
-      if (textAfter.isNotEmpty) {
-        nodesToInsert.add(_createNode(textAfter));
-      }
+    setState(() {});
 
-      var insertIndex = location.index + 1;
-      for (final newNode in nodesToInsert) {
-        _ensureResourcesForNode(newNode);
-        siblings.insert(insertIndex, newNode);
-        insertIndex++;
-      }
-
-      // 确定最后一个粘贴节点（文档顺序最末的粘贴节点，排除 textAfter 节点）
-      final OutlineNode lastPastedNode;
-      if (pastedSiblings.isNotEmpty) {
-        // 存在同级粘贴节点：取最后一个的最深右子孙
-        lastPastedNode = _lastDescendant(pastedSiblings.last);
-      } else if (firstNode.children.isNotEmpty) {
-        // 仅第一个节点的子节点被追加为当前节点的子节点
-        lastPastedNode = _lastDescendant(firstNode.children.last);
-      } else {
-        // 无独立粘贴节点，仅文本合并到当前节点
-        lastPastedNode = currentNode;
-      }
-
-      // 在修改当前节点文本前，先把焦点切换到最后一个粘贴节点
-      // 这样当前节点失去焦点，光标不显示，避免光标先在当前节点末尾闪烁再跳到目标节点
-      if (lastPastedNode.id != nodeId) {
-        final lastFocusNode = _focusNodes[lastPastedNode.id];
-        if (lastFocusNode != null) {
-          lastFocusNode.requestFocus();
-        }
-      }
-
-      // 第一个解析节点的文本合并到当前节点光标位置
-      final currentNewText = textBefore + firstNode.text;
-      controller.text = currentNewText;
-      currentNode.text = currentNewText;
-
-      setState(() {});
-
-      // 聚焦到最后一个粘贴节点并滚动到可见
-      final lastPastedId = lastPastedNode.id;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _focusAndScrollToNode(lastPastedId, moveCursorToEnd: true);
-        _endBatchAndNotify(
-          description: '粘贴文本到节点',
-          focusNodeId: lastPastedId,
-          focusSelection: _selectionAtEnd(lastPastedId),
-        );
-      });
+    // 聚焦到最后一个粘贴节点并滚动到可见
+    final lastPastedId = lastPastedNode.id;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _focusAndScrollToNode(lastPastedId, moveCursorToEnd: true);
+      _endBatchAndNotify(
+        description: '粘贴文本到节点',
+        focusNodeId: lastPastedId,
+        focusSelection: _selectionAtEnd(lastPastedId),
+      );
     });
   }
 
-  /// 在控制器光标位置插入文本（替换当前选区）
-  void _insertTextAtCursor(TextEditingController controller, String text) {
+  /// 在控制器光标位置插入粘贴节点的文本（替换当前选区），保留文字样式
+  void _insertNodeAtCursor(
+    RichTextEditingController controller,
+    OutlineNode node,
+    OutlineNode pasted,
+  ) {
+    final text = controller.text;
     final selection = controller.selection;
     final start = selection.start >= 0 ? selection.start : 0;
-    final end = selection.end >= 0 ? selection.end : controller.text.length;
-    final newText = controller.text.substring(0, start) + text + controller.text.substring(end);
+    final end = selection.end >= 0 ? selection.end : text.length;
+
+    final newText = text.substring(0, start) + pasted.text + text.substring(end);
+    // 原文本前缀/后缀样式与粘贴内容样式按插入位置拼接
+    final ranges = TextStyleRangeUtils.mergeAdjacent(<TextStyleRange>[
+      ...TextStyleRangeUtils.slice(node.styleRanges, 0, start),
+      ...TextStyleRangeUtils.shift(pasted.styleRanges, start),
+      ...TextStyleRangeUtils.shift(
+        TextStyleRangeUtils.slice(node.styleRanges, end, text.length),
+        start + pasted.text.length,
+      ),
+    ]);
+
+    // 空节点接收带标题级别的内容时沿用其标题级别
+    final bool headingChanged = text.isEmpty && pasted.headingLevel > 0;
+    if (headingChanged) {
+      node.headingLevel = pasted.headingLevel;
+    }
+
+    node.styleRanges = ranges;
+    node.text = newText;
     controller.value = TextEditingValue(
       text: newText,
-      selection: TextSelection.collapsed(offset: start + text.length),
+      selection: TextSelection.collapsed(offset: start + pasted.text.length),
     );
+    controller.styleRanges = ranges;
+    // 标题级别影响节点整行的字号，需要重建节点行
+    if (headingChanged) setState(() {});
+    _notifyContentChanged();
   }
 
   /// 从带缩进的文本行解析出节点列表（保留层级结构）
@@ -3747,6 +3820,43 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     }
 
     return roots;
+  }
+
+  /// 读取剪贴板并转换为节点列表
+  ///
+  /// 优先使用剪贴板中的富文本 HTML，保留文字样式、标题级别和列表层级；
+  /// 剪贴板不含 HTML 时回退为按缩进解析的纯文本。
+  Future<List<OutlineNode>> _readClipboardNodes() async {
+    final content = await RichClipboard.read();
+
+    final html = content.html;
+    if (html != null && html.isNotEmpty) {
+      final parsed = OutlineHtmlCodec.parseHtml(html, maxDepth: _maxDepth);
+      if (parsed.isNotEmpty) return _buildNodesFromParsed(parsed);
+    }
+
+    final text = content.text;
+    if (text == null || text.isEmpty) return const [];
+    // 统一换行符后按行分割，过滤空白行
+    final normalized = text.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+    final lines = normalized.split('\n').where((line) => line.trim().isNotEmpty).toList();
+    if (lines.isEmpty) return const [];
+    return _parseNodesFromText(lines);
+  }
+
+  /// 将解析结果批量转换为编辑器节点
+  List<OutlineNode> _buildNodesFromParsed(List<ParsedOutlineNode> parsed) =>
+      parsed.map(_buildNodeFromParsed).toList();
+
+  /// 将单个解析结果递归转换为编辑器节点
+  OutlineNode _buildNodeFromParsed(ParsedOutlineNode parsed) {
+    final node = _createNode(parsed.text);
+    node.headingLevel = parsed.headingLevel;
+    node.styleRanges = List.of(parsed.styleRanges);
+    for (final child in parsed.children) {
+      node.children.add(_buildNodeFromParsed(child));
+    }
+    return node;
   }
 
   // ================= 右键菜单 =================
@@ -4265,8 +4375,18 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       }
     }
 
+    // Ctrl+C：复制节点内选中的文本（含文字样式）
+    if (isControl && !isAlt && event.logicalKey == LogicalKeyboardKey.keyC) {
+      if (_copyNodeTextSelection(nodeId)) return KeyEventResult.handled;
+    }
+
     // 只读模式下仅允许导航，禁用所有修改操作
     if (widget.readOnly) return KeyEventResult.ignored;
+
+    // Ctrl+X：剪切节点内选中的文本（含文字样式）
+    if (isControl && !isAlt && event.logicalKey == LogicalKeyboardKey.keyX) {
+      if (_cutNodeTextSelection(nodeId)) return KeyEventResult.handled;
+    }
 
     // Ctrl+Z：撤销；Ctrl+Shift+Z 或 Ctrl+Y：重做
     if (isControl && event.logicalKey == LogicalKeyboardKey.keyZ) {

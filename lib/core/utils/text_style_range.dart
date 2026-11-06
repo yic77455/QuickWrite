@@ -344,6 +344,49 @@ class TextStyleRangeUtils {
     return _mergeAdjacent(result);
   }
 
+  /// 截取样式区间中与 [start, end) 重叠的部分，并将位置归零
+  ///
+  /// 用于复制或拆分文本片段：返回的区间以片段起点为 0 计算位置。
+  static List<TextStyleRange> slice(
+    List<TextStyleRange> ranges,
+    int start,
+    int end,
+  ) {
+    if (start >= end) return const [];
+    final result = <TextStyleRange>[];
+    for (final r in ranges) {
+      final s = math.max(r.start, start);
+      final e = math.min(r.end, end);
+      if (s < e && !r.flags.isEmpty) {
+        result.add(TextStyleRange(
+          start: s - start,
+          end: e - start,
+          flags: r.flags,
+        ));
+      }
+    }
+    return _mergeAdjacent(result);
+  }
+
+  /// 将区间整体平移 [offset]
+  ///
+  /// 用于把一段文本的样式拼接到目标文本的指定位置。
+  static List<TextStyleRange> shift(
+    List<TextStyleRange> ranges,
+    int offset,
+  ) {
+    if (offset == 0 || ranges.isEmpty) return List.of(ranges);
+    return ranges
+        .map((r) => r.copyWith(start: r.start + offset, end: r.end + offset))
+        .toList();
+  }
+
+  /// 合并相邻且样式相同的区间
+  ///
+  /// 用于拼接多段样式后消除冗余的相邻区间。
+  static List<TextStyleRange> mergeAdjacent(List<TextStyleRange> ranges) =>
+      _mergeAdjacent(ranges);
+
   /// 根据文本变化调整样式区间
   ///
   /// 比较旧文本和新文本，找到变化区间（公共前缀和后缀之间的部分），
