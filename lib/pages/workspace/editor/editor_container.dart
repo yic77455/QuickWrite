@@ -459,6 +459,8 @@ class _EditorContainerState extends State<EditorContainer> {
                 tab.isModified = true;
                 provider.notifyTabModified(tab.id);
               }
+              // 文本或节点结构变化后重新计算查找匹配，使高亮始终基于当前文本
+              provider.refreshFindIfVisible();
               // 触发自动保存
               provider.triggerAutoSave();
             },

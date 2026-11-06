@@ -1,5 +1,7 @@
 import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 /// 查找匹配高亮工具
 ///
@@ -106,5 +108,73 @@ class FindMatchHighlighter {
     return isDark
         ? const Color(0xFFFFC107) // amber 500 实色
         : const Color(0xFFFFA000); // amber 700 实色
+  }
+}
+
+/// 当前查找匹配高亮绘制器
+///
+/// 注入到 RenderEditable 的背景层，按绘制器链的顺序排在选区之后、
+/// 文字之前绘制，使当前匹配项的背景色不被文本选区遮盖。
+class CurrentMatchHighlightPainter extends RenderEditablePainter {
+  /// 本节点内的查找匹配范围列表（偏移量相对于节点文本）
+  List<TextSelection> matches = const [];
+
+  /// 当前选中匹配在 [matches] 中的索引（-1 表示无选中）
+  int currentMatchIndex = -1;
+
+  /// 当前匹配项的背景色
+  Color? color;
+
+  @override
+  bool shouldRepaint(covariant RenderEditablePainter oldDelegate) {
+    return oldDelegate is! CurrentMatchHighlightPainter ||
+        !listEquals(oldDelegate.matches, matches) ||
+        oldDelegate.currentMatchIndex != currentMatchIndex ||
+        oldDelegate.color != color;
+  }
+
+  @override
+  void paint(Canvas canvas, Size size, RenderEditable renderEditable) {
+    final Color? effectiveColor = color;
+    final int index = currentMatchIndex;
+    if (effectiveColor == null) return;
+    if (index < 0 || index >= matches.length) return;
+
+    final TextSelection match = matches[index];
+    if (!match.isValid || match.isCollapsed) return;
+
+    // 裁剪到当前文本长度范围内，防止文本变化后残留的旧区间越界
+    final int textLength = renderEditable.plainText.length;
+    final int start = match.start.clamp(0, textLength);
+    final int end = match.end.clamp(0, textLength);
+    if (start >= end) return;
+
+    final Paint paint = Paint()
+      ..color = effectiveColor
+      ..style = PaintingStyle.fill;
+
+    // 匹配范围可能跨行，逐行绘制对应的矩形
+    for (final TextBox box in renderEditable.getBoxesForSelection(TextSelection(baseOffset: start, extentOffset: end))) {
+      final Rect rect = box.toRect();
+      if (rect.width <= 0.1) continue;
+      // 左右略微外扩，抹平抗锯齿产生的缝隙
+      canvas.drawRect(Rect.fromLTRB(rect.left - 0.2, rect.top, rect.right + 0.2, rect.bottom), paint);
+    }
+  }
+
+  /// 更新绘制状态，状态变化时触发重绘
+  void update({
+    required List<TextSelection> matches,
+    required int currentMatchIndex,
+    required Color color,
+  }) {
+    // 内容未变化时不触发重绘，避免每帧无谓刷新
+    if (listEquals(this.matches, matches) && this.currentMatchIndex == currentMatchIndex && this.color == color) {
+      return;
+    }
+    this.matches = matches;
+    this.currentMatchIndex = currentMatchIndex;
+    this.color = color;
+    notifyListeners();
   }
 }

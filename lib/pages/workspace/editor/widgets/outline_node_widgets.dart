@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/services/settings_service.dart';
+import 'package:quick_write/core/utils/find_match_highlighter.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/persistent_selection.dart';
+import 'package:quick_write/core/utils/rich_text_controller.dart';
 import 'package:quick_write/core/models/outline_models.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_connection_painter.dart';
@@ -177,6 +179,11 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
   /// 失焦时绘制持久化选区的 Painter
   final PersistentSelectionOverlayPainter _persistentSelectionPainter = PersistentSelectionOverlayPainter();
 
+  /// 当前查找匹配高亮绘制器
+  ///
+  /// 与持久化选区绘制器组合注入 RenderEditable，绘制在选区之上、文字之下。
+  final CurrentMatchHighlightPainter _currentMatchPainter = CurrentMatchHighlightPainter();
+
   /// TextField 的 GlobalKey，用于查找 RenderEditable 注入 Painter
   final GlobalKey _textFieldKey = GlobalKey();
 
@@ -198,6 +205,7 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
     widget.focusNode.removeListener(_onFocusChanged);
     widget.controller.removeListener(_onSelectionChanged);
     _persistentSelectionPainter.dispose();
+    _currentMatchPainter.dispose();
     super.dispose();
   }
 
@@ -230,6 +238,19 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
       focusNode: widget.focusNode,
       context: context,
       fallbackColor: widget.colorScheme.primary,
+      // 当前匹配高亮排在选区绘制器之后，避免被选区遮盖
+      overlayPainter: _currentMatchPainter,
+    );
+  }
+
+  /// 将节点的查找匹配状态同步给当前匹配高亮绘制器
+  void _syncCurrentMatchPainter(BuildContext context) {
+    final controller = widget.controller;
+    if (controller is! RichTextEditingController) return;
+    _currentMatchPainter.update(
+      matches: controller.findMatches,
+      currentMatchIndex: controller.currentMatchIndex,
+      color: FindMatchHighlighter.getCurrentMatchColor(context),
     );
   }
 
@@ -262,6 +283,9 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
         final colorScheme = widget.colorScheme;
         final indentWidth = widget.indentWidth;
         final lineColor = colorScheme.outlineVariant.withValues(alpha: 0.4);
+
+        // 同步当前节点的查找匹配状态，供高亮绘制器使用
+        _syncCurrentMatchPainter(context);
 
         // 移动端折叠入口位于行尾，行首不再为折叠箭头预留列，指示区整体左移一列
         final bool isMobile = PlatformCapabilities.isMobile;

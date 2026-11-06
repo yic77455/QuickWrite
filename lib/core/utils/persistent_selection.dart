@@ -124,6 +124,31 @@ class PersistentSelectionOverlayPainter extends RenderEditablePainter {
   }
 }
 
+/// 背景层绘制器组合
+///
+/// RenderEditable 只提供一个自定义 painter 插槽，通过该类把多个绘制器
+/// 按顺序绘制在同一背景层，并把子绘制器的重绘通知转发给宿主。
+class _CompositeBackgroundPainter extends RenderEditablePainter {
+  _CompositeBackgroundPainter(this._painters) {
+    for (final painter in _painters) {
+      painter.addListener(notifyListeners);
+    }
+  }
+
+  /// 按顺序绘制的子绘制器
+  final List<RenderEditablePainter> _painters;
+
+  @override
+  void paint(Canvas canvas, Size size, RenderEditable renderEditable) {
+    for (final painter in _painters) {
+      painter.paint(canvas, size, renderEditable);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant RenderEditablePainter oldDelegate) => true;
+}
+
 // ================= 持久化选区共享工具函数 =================
 //
 // 以下函数供正文编辑器和大纲编辑器共用，避免查找 RenderEditable、计算失焦颜色、
@@ -180,6 +205,8 @@ Color computePersistentSelectionColor(BuildContext context, Color fallback) {
 /// 将持久化选区 Painter 注入到 RenderEditable 的 painter（backgroundPainter）链中
 ///
 /// 在文字层之下绘制选区底色，并完成首次状态初始化。
+/// [overlayPainter] 不为空时与其组合，按顺序绘制在选区绘制器之后，
+/// 用于绘制需要覆盖选区的额外高亮。
 void attachPersistentSelectionPainter({
   required GlobalKey textFieldKey,
   required PersistentSelectionOverlayPainter painter,
@@ -187,10 +214,13 @@ void attachPersistentSelectionPainter({
   required FocusNode focusNode,
   required BuildContext context,
   required Color fallbackColor,
+  RenderEditablePainter? overlayPainter,
 }) {
   final renderEditable = findPersistentRenderEditable(textFieldKey);
   if (renderEditable != null) {
-    renderEditable.painter = painter;
+    renderEditable.painter = overlayPainter == null
+        ? painter
+        : _CompositeBackgroundPainter(<RenderEditablePainter>[painter, overlayPainter]);
     painter.update(
       isUnfocused: !focusNode.hasFocus,
       selection: controller.selection,

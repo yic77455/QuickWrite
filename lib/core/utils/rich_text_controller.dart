@@ -38,25 +38,12 @@ class RichTextEditingController extends TextEditingController {
   /// 查找匹配范围列表（相对于本节点控制器文本的偏移量）
   ///
   /// 由外部（大纲编辑器）设置，用于在节点文本上叠加查找匹配高亮。
-  List<TextSelection> _findMatches = const [];
+  /// 该属性通常在父组件的 build 阶段赋值，父组件重建会带动内部 TextField 重建，
+  /// 从而调用 [buildTextSpan] 读取最新值，因此赋值时无需通知监听者。
+  List<TextSelection> findMatches = const [];
 
-  /// 当前选中匹配在 [_findMatches] 中的索引（-1 表示无选中）
-  int _currentMatchIndex = -1;
-
-  /// 设置查找匹配列表
-  ///
-  /// 不调用 [notifyListeners]，因为此属性通常在父组件的 build 阶段设置，
-  /// 父组件重建会带动内部 TextField 重建，从而调用 [buildTextSpan] 读取最新值。
-  set findMatches(List<TextSelection> value) {
-    _findMatches = value;
-  }
-
-  /// 设置当前选中匹配索引
-  ///
-  /// 不调用 [notifyListeners]，原因同 [findMatches]。
-  set currentMatchIndex(int value) {
-    _currentMatchIndex = value;
-  }
+  /// 当前选中匹配在 [findMatches] 中的索引（-1 表示无选中）
+  int currentMatchIndex = -1;
 
   @override
   TextSpan buildTextSpan({
@@ -66,7 +53,7 @@ class RichTextEditingController extends TextEditingController {
   }) {
     final text = this.text;
     final baseStyle = style ?? const TextStyle();
-    final hasFindMatches = _findMatches.isNotEmpty;
+    final hasFindMatches = findMatches.isNotEmpty;
 
     // 无样式区间且无查找匹配时，使用默认构建
     if (_styleRanges.isEmpty && !hasFindMatches) {
@@ -139,8 +126,8 @@ class RichTextEditingController extends TextEditingController {
     if (hasFindMatches) {
       final highlightedChildren = FindMatchHighlighter.apply(
         spans: children,
-        matches: _findMatches,
-        currentMatchIndex: _currentMatchIndex,
+        matches: findMatches,
+        currentMatchIndex: currentMatchIndex,
         matchColor: FindMatchHighlighter.getMatchColor(context),
         currentMatchColor: FindMatchHighlighter.getCurrentMatchColor(context),
       );
