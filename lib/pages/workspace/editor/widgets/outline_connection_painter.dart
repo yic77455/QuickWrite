@@ -16,10 +16,15 @@ class OutlineConnectionMetrics {
   /// 圆点中心相对于第一行文字中线的垂直偏移
   static const double dotVerticalOffset = 5.0;
 
-  /// 折叠态圆点背景半径
+  /// 圆点外轮廓的基础半径
   ///
-  /// 比圆点半径大，在圆点底部衬出一圈背景，用于提示该节点存在被折叠的子节点
+  /// 比圆点半径大，折叠态常显一圈轮廓，用于提示该节点存在被折叠的子节点
   static const double collapsedDotBackgroundRadius = 8.0;
+
+  /// 圆点外轮廓在鼠标悬停时放大到的半径
+  ///
+  /// 比基础半径更大，悬停时轮廓从基础半径（或圆点内部）向外扩大，提示该圆点可拖拽
+  static const double hoverDotBackgroundRadius = 10.0;
 }
 
 /// 同级连接线的高亮列
@@ -71,11 +76,17 @@ class OutlineConnectionPainter extends CustomPainter {
   /// 圆点中心相对第一行文字中线的垂直偏移
   final double dotVerticalOffset;
 
-  /// 折叠态圆点背景色
+  /// 圆点外轮廓颜色
   ///
-  /// 非空时在圆点位置额外绘制一层背景圆，用于提示该节点存在被折叠的子节点；
-  /// 展开态与无子节点的节点传 null，不绘制背景
-  final Color? collapsedDotBackgroundColor;
+  /// 非空时在圆点外绘制一圈轮廓：折叠态常显，悬停时由外部动画放大，
+  /// 不显示轮廓时传 null
+  final Color? dotOutlineColor;
+
+  /// 圆点外轮廓半径
+  ///
+  /// 折叠态取基础半径，鼠标悬停时由外部动画放大到悬停半径；
+  /// 展开态且未悬停时取 0，轮廓收进圆点内部不可见
+  final double dotOutlineRadius;
 
   /// 当前编辑节点的圆点高亮色
   ///
@@ -97,7 +108,8 @@ class OutlineConnectionPainter extends CustomPainter {
     required this.lineColor,
     required this.dotColor,
     this.dotVerticalOffset = OutlineConnectionMetrics.dotVerticalOffset,
-    this.collapsedDotBackgroundColor,
+    required this.dotOutlineColor,
+    required this.dotOutlineRadius,
     this.activeDotColor,
     this.siblingLineHighlight,
   });
@@ -140,12 +152,15 @@ class OutlineConnectionPainter extends CustomPainter {
     final dotCenterX = (depth + 1 + columnOffset) * indentWidth + indentWidth / 2;
     final dotCenter = Offset(dotCenterX, dotCenterY);
 
-    // 折叠态：先在圆点处绘制一圈背景，作为子节点被折叠的视觉标记
-    if (collapsedDotBackgroundColor != null) {
-      final backgroundPaint = Paint()
-        ..color = collapsedDotBackgroundColor!
-        ..style = PaintingStyle.fill;
-      canvas.drawCircle(dotCenter, OutlineConnectionMetrics.collapsedDotBackgroundRadius, backgroundPaint);
+    // 圆点外轮廓：折叠态常显，悬停时由外部动画放大；半径收进圆点内部时不绘制
+    if (dotOutlineColor != null && dotOutlineRadius > OutlineConnectionMetrics.dotRadius) {
+      canvas.drawCircle(
+        dotCenter,
+        dotOutlineRadius,
+        Paint()
+          ..color = dotOutlineColor!
+          ..style = PaintingStyle.fill,
+      );
     }
 
     final dotPaint = Paint()
@@ -166,7 +181,8 @@ class OutlineConnectionPainter extends CustomPainter {
         oldDelegate.lineColor != lineColor ||
         oldDelegate.dotColor != dotColor ||
         oldDelegate.dotVerticalOffset != dotVerticalOffset ||
-        oldDelegate.collapsedDotBackgroundColor != collapsedDotBackgroundColor ||
+        oldDelegate.dotOutlineColor != dotOutlineColor ||
+        oldDelegate.dotOutlineRadius != dotOutlineRadius ||
         oldDelegate.activeDotColor != activeDotColor ||
         oldHighlight?.column != highlight?.column ||
         oldHighlight?.color != highlight?.color;

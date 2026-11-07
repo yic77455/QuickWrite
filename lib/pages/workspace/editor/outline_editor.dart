@@ -257,6 +257,22 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 拖拽起始节点ID
   String? _dragStartNodeId;
 
+  // ================= 圆点拖拽排序 =================
+
+  /// 正在拖拽排序的节点ID（null 表示没有拖拽排序进行中）
+  String? _reorderNodeId;
+
+  /// 拖拽排序的落点（null 表示当前没有可放置的落点）
+  _OutlineReorderTarget? _reorderTarget;
+
+  /// 拖拽排序时指针的全局坐标（null 表示没有拖拽排序进行中）
+  ///
+  /// 供跟随鼠标的圆点使用；单独以可监听值维护，避免指针每移动一次就重建整个编辑器
+  final ValueNotifier<Offset?> _reorderPointerPosition = ValueNotifier<Offset?>(null);
+
+  /// 编辑区内容层叠区域的全局键，用于把拖拽指示线的全局坐标换算为本地坐标
+  final GlobalKey _editorStackKey = GlobalKey();
+
   // ================= 边缘自动滚动 =================
 
   /// 指针进入视口上下边缘的触发区高度（像素）
@@ -368,6 +384,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     _titleFocusNode.dispose();
     _scrollController.dispose();
     _batchRevision.dispose();
+    _reorderPointerPosition.dispose();
     super.dispose();
   }
 
@@ -1935,6 +1952,236 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     _saveFoldState();
   }
 
+  // ================= 圆点拖拽排序 =================
+
+  /// 圆点长按：开始拖拽排序
+  ///
+  /// 记录被拖拽的节点与指针位置，后续移动由 [_onDotDragMove] 刷新落点；
+  /// 移动端给出震动反馈，提示已进入拖拽状态
+  void _onDotDragStart(String nodeId, Offset globalPosition) {
+    if (widget.readOnly || _isBatchSelectionMode) return;
+
+    _reorderPointerPosition.value = globalPosition;
+    setState(() {
+      _reorderNodeId = nodeId;
+      _reorderTarget = null;
+    });
+    if (PlatformCapabilities.isMobile) HapticFeedback.mediumImpact();
+  }
+
+  /// 圆点拖拽移动：刷新落点，并在指针进入视口上下边缘时自动滚动
+  void _onDotDragMove(Offset globalPosition) {
+    _reorderPointerPosition.value = globalPosition;
+    _refreshReorderTarget(globalPosition);
+    _updateEdgeAutoScroll(globalPosition, selectionUpdater: _refreshReorderTarget);
+  }
+
+  /// 按指针位置刷新拖拽落点
+  ///
+  /// 指针停住不动、仅视口自动滚动时同样按最新位置重新计算落点
+  void _refreshReorderTarget(Offset globalPosition) {
+    final draggedNodeId = _reorderNodeId;
+    if (draggedNodeId == null) return;
+
+    final target = _resolveReorderTarget(draggedNodeId, globalPosition);
+    final previous = _reorderTarget;
+    // 落点未变化时不重建，避免拖拽过程中无意义的刷新
+    if (target == null && previous == null) return;
+    if (target != null &&
+        previous != null &&
+        target.targetNodeId == previous.targetNodeId &&
+        target.placement == previous.placement &&
+        target.depth == previous.depth &&
+        target.indicatorNodeId == previous.indicatorNodeId &&
+        target.indicatorAbove == previous.indicatorAbove) {
+      return;
+    }
+    setState(() => _reorderTarget = target);
+  }
+
+  /// 计算拖拽落点
+  ///
+  /// 纵向优先：指针位于目标行上半区时只有一种落点，即插到该行之前且层级不变；
+  /// 指针位于下半区时，该行下方的间隙允许的层级从“下一可见行层级”到“该行的子级”，
+  /// 再按指针的水平位置在这些层级中选择：落在该行圆点所在列时为该行层级，
+  /// 每右移一列深一层，每左移一列浅一层，最终夹在允许范围内。
+  /// 落点为被拖拽节点自身或其后代、放置后超出最大层级时返回 null
+  _OutlineReorderTarget? _resolveReorderTarget(String draggedNodeId, Offset globalPosition) {
+    final flatList = _flatten();
+    if (flatList.isEmpty) return null;
+
+    final index = _findNodeIndexAtPosition(globalPosition);
+    if (index == null || index >= flatList.length) return null;
+
+    final FlatNode hovered = flatList[index];
+    final Rect? hoveredRect = _nodeTileGlobalRect(hovered.node.id);
+
+    // 上半区：只有插到该行之前、层级不变这一种可能，横向位置不参与判定
+    if (hoveredRect != null && globalPosition.dy < hoveredRect.center.dy) {
+      if (!_isValidReorderTarget(draggedNodeId, hovered.node.id, hovered.depth)) return null;
+      return _OutlineReorderTarget(
+        targetNodeId: hovered.node.id,
+        placement: _OutlineReorderPlacement.before,
+        depth: hovered.depth,
+        indicatorNodeId: hovered.node.id,
+        indicatorAbove: true,
+      );
+    }
+
+    // 下半区：间隙可选的层级范围从下一可见行层级（最浅）到该行的子级（最深）
+    final int nextIndex = index + 1;
+    final int shallowestDepth = nextIndex < flatList.length ? flatList[nextIndex].depth : 0;
+    final int deepestDepth = hovered.depth + 1;
+    final int desiredDepth = hovered.depth + _depthOffsetFromPointer(hovered, globalPosition);
+    final int depth = desiredDepth < shallowestDepth
+        ? shallowestDepth
+        : (desiredDepth > deepestDepth ? deepestDepth : desiredDepth);
+
+    // 最深一档：作为该行的第一个子节点
+    if (depth == deepestDepth) {
+      if (!_isValidReorderTarget(draggedNodeId, hovered.node.id, depth)) return null;
+      return _OutlineReorderTarget(
+        targetNodeId: hovered.node.id,
+        placement: _OutlineReorderPlacement.firstChild,
+        depth: depth,
+        indicatorNodeId: hovered.node.id,
+        indicatorAbove: false,
+      );
+    }
+
+    // 其余档位：插到该层级的祖先行之后
+    final FlatNode? ancestor = _ancestorAtDepth(flatList, index, depth);
+    if (ancestor == null) return null;
+    if (!_isValidReorderTarget(draggedNodeId, ancestor.node.id, depth)) return null;
+    return _OutlineReorderTarget(
+      targetNodeId: ancestor.node.id,
+      placement: _OutlineReorderPlacement.after,
+      depth: depth,
+      indicatorNodeId: hovered.node.id,
+      indicatorAbove: false,
+    );
+  }
+
+  /// 按指针水平位置计算相对目标行的层级偏移
+  ///
+  /// 以该行圆点所在列的左边缘为基准，指针落在该列内偏移为 0（层级不变），
+  /// 每右移一列深一层，每左移一列浅一层
+  int _depthOffsetFromPointer(FlatNode row, Offset globalPosition) {
+    final double? dotCenterX = _dotCenterGlobalX(row.node.id, row.depth, row.depth);
+    if (dotCenterX == null) return 0;
+    final double dotColumnLeft = dotCenterX - _indentWidth / 2;
+    return ((globalPosition.dx - dotColumnLeft) / _indentWidth).floor();
+  }
+
+  /// 查找指定行在给定层级上的祖先行
+  ///
+  /// 行自身层级等于目标层级时返回该行，否则沿扁平列表向上找到最近的同层级行
+  FlatNode? _ancestorAtDepth(List<FlatNode> flatList, int index, int depth) {
+    for (int i = index; i >= 0; i--) {
+      if (flatList[i].depth == depth) return flatList[i];
+    }
+    return null;
+  }
+
+  /// 判断落点是否有效
+  ///
+  /// 目标行不能是被拖拽节点自身或其后代，且放置后不能超出最大层级
+  bool _isValidReorderTarget(String draggedNodeId, String targetNodeId, int depth) {
+    if (targetNodeId == draggedNodeId) return false;
+    if (_isDescendantNode(targetNodeId, draggedNodeId)) return false;
+    return _canPlaceAtDepth(draggedNodeId, depth);
+  }
+
+  /// 判断被拖拽节点的子树放到指定深度后是否超出最大层级
+  bool _canPlaceAtDepth(String nodeId, int depth) {
+    final node = _findNode(nodeId);
+    if (node == null) return false;
+    return depth + _subtreeHeight(node) <= _maxDepth;
+  }
+
+  /// 判断节点是否为指定祖先节点的后代（不含自身）
+  bool _isDescendantNode(String nodeId, String ancestorId) {
+    final ancestor = _findNode(ancestorId);
+    if (ancestor == null) return false;
+
+    bool contains(OutlineNode parent) {
+      for (final child in parent.children) {
+        if (child.id == nodeId || contains(child)) return true;
+      }
+      return false;
+    }
+
+    return contains(ancestor);
+  }
+
+  /// 将节点移动到拖拽落点（不处理撤销记录与通知）
+  void _applyReorder(String nodeId, _OutlineReorderTarget target) {
+    final location = _findLocation(nodeId);
+    if (location == null) return;
+
+    final siblings = location.parent?.children ?? _roots;
+    final node = siblings.removeAt(location.index);
+
+    // 摘除节点后同级列表可能发生位移，按目标节点 ID 重新查找落点
+    final targetLocation = _findLocation(target.targetNodeId);
+    if (targetLocation == null) {
+      // 目标节点已不存在，把节点放回原位置
+      siblings.insert(location.index, node);
+      return;
+    }
+
+    switch (target.placement) {
+      case _OutlineReorderPlacement.before:
+        final targetSiblings = targetLocation.parent?.children ?? _roots;
+        targetSiblings.insert(targetLocation.index, node);
+      case _OutlineReorderPlacement.after:
+        final targetSiblings = targetLocation.parent?.children ?? _roots;
+        targetSiblings.insert(targetLocation.index + 1, node);
+      case _OutlineReorderPlacement.firstChild:
+        final targetNode = (targetLocation.parent?.children ?? _roots)[targetLocation.index];
+        targetNode.children.insert(0, node);
+        // 放入子节点后展开目标节点，使新子节点可见
+        targetNode.isExpanded = true;
+    }
+  }
+
+  /// 圆点拖拽结束：存在有效落点时把节点移动到落点位置
+  void _onDotDragEnd() {
+    _stopEdgeAutoScroll();
+    final draggedNodeId = _reorderNodeId;
+    final target = _reorderTarget;
+    _reorderPointerPosition.value = null;
+    if (draggedNodeId == null) return;
+
+    if (target == null) {
+      setState(() {
+        _reorderNodeId = null;
+        _reorderTarget = null;
+      });
+      return;
+    }
+
+    // 拖拽排序属于结构变更，记录为一步可撤销操作
+    _undoManager.beginBatch();
+    _applyReorder(draggedNodeId, target);
+    setState(() {
+      _reorderNodeId = null;
+      _reorderTarget = null;
+    });
+    _endBatchAndNotify(description: '拖拽排序节点');
+  }
+
+  /// 圆点拖拽取消：清理拖拽状态，不改变节点结构
+  void _onDotDragCancel() {
+    _stopEdgeAutoScroll();
+    _reorderPointerPosition.value = null;
+    if (_reorderNodeId == null && _reorderTarget == null) return;
+    setState(() {
+      _reorderNodeId = null;
+      _reorderTarget = null;
+    });
+  }
+
   // ================= 选区管理 =================
 
   /// 清除多节点选区（仅清除视觉选区，不改变焦点）
@@ -2365,6 +2612,35 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
     visit(root);
     return result;
+  }
+
+  /// 获取节点瓦片的全局矩形
+  ///
+  /// 节点尚未构建或不在渲染树中时返回 null
+  Rect? _nodeTileGlobalRect(String nodeId) {
+    final renderBox = _nodeTileKeys[nodeId]?.currentContext?.findRenderObject() as RenderBox?;
+    if (renderBox == null || !renderBox.attached) return null;
+    return MatrixUtils.transformRect(renderBox.getTransformTo(null), Offset.zero & renderBox.size);
+  }
+
+  /// 判断全局坐标是否落在某节点行的圆点上
+  ///
+  /// 圆点处仅响应长按拖拽排序，编辑器级的拖拽选区不参与该指针，
+  /// 避免指针的轻微移动先于长按识别被判定为拖拽而中断长按
+  bool _isPositionOnNodeDot(Offset globalPosition) {
+    final index = _findNodeIndexAtPosition(globalPosition);
+    if (index == null) return false;
+
+    final flatList = _flatten();
+    if (index >= flatList.length) return false;
+
+    final FlatNode flat = flatList[index];
+    final Rect? tileRect = _nodeTileGlobalRect(flat.node.id);
+    if (tileRect == null) return false;
+
+    // 圆点位于列 (深度 + 1) 的中心，横向按半列宽判定热区
+    final double dotCenterX = tileRect.left + 8 + (flat.depth + 1.5) * _indentWidth;
+    return (globalPosition.dx - dotCenterX).abs() <= _indentWidth / 2;
   }
 
   /// 判断全局坐标是否落在大纲标题区域
@@ -5530,6 +5806,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
           // 大纲列表
           Expanded(
             child: Stack(
+              key: _editorStackKey,
               fit: StackFit.expand,
               children: [
                 // 主内容区域：可滚动的大纲列表
@@ -5563,7 +5840,9 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
                                       instance.onEnd = _onPanEnd;
                                       instance.onCancel = _onPanCancel;
                                       instance.shouldYieldPointer = (position) =>
-                                          _isPositionOnScrollbar(position) || _isPositionOnTitle(position);
+                                          _isPositionOnScrollbar(position) ||
+                                          _isPositionOnTitle(position) ||
+                                          _isPositionOnNodeDot(position);
                                     },
                                   ),
                             }
@@ -5601,6 +5880,13 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
                     ),
                   ),
                 ),
+                // 拖拽排序的落点指示：浮在节点列表之上，不参与指针交互
+                ?_buildReorderIndicator(colorScheme),
+                // 拖拽排序时跟随指针的圆点，模拟被鼠标抓起的圆点
+                _buildReorderPointerDot(colorScheme, editorBackgroundColor),
+                // 拖拽排序期间覆盖整个编辑区，让鼠标全程保持手型光标
+                if (!PlatformCapabilities.isMobile && _reorderNodeId != null)
+                  Positioned.fill(child: MouseRegion(cursor: SystemMouseCursors.click)),
                 // 底部快捷键提示：仅桌面端且设置中开启时显示
                 // 移动端没有物理键盘，隐藏提示，底部预留高度保持为 0
                 if (!PlatformCapabilities.isMobile && SettingsService.instance.outlineBottomHintEnabled)
@@ -5638,6 +5924,135 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
         ],
       ),
     );
+  }
+
+  /// 构建拖拽排序的落点指示
+  ///
+  /// 插入线贴在指针所在行的上边界（插到其之前）或下边界（落点在其后的间隙），
+  /// 横向缩进按落点层级绘制，提示松手后节点将出现的层级与位置；
+  /// 未处于拖拽排序或没有有效落点时返回 null
+  Widget? _buildReorderIndicator(ColorScheme colorScheme) {
+    final target = _reorderTarget;
+    if (target == null || _reorderNodeId == null) return null;
+
+    final flatList = _flatten();
+    final int anchorIndex = flatList.indexWhere((flat) => flat.node.id == target.indicatorNodeId);
+    if (anchorIndex < 0) return null;
+
+    final FlatNode anchor = flatList[anchorIndex];
+    final Rect? anchorRect = _nodeTileGlobalRect(anchor.node.id);
+    final RenderBox? stackBox = _editorStackKey.currentContext?.findRenderObject() as RenderBox?;
+    if (anchorRect == null || stackBox == null || !stackBox.attached) return null;
+
+    // 按落点层级计算插入线横向起点，使用指针所在行作为换算基准
+    final double? dotCenterGlobalX = _dotCenterGlobalX(anchor.node.id, anchor.depth, target.depth);
+    if (dotCenterGlobalX == null) return null;
+
+    // 插入线纵向位置：贴指针所在行的上边界或下边界
+    final double lineGlobalY = target.indicatorAbove ? anchorRect.top : anchorRect.bottom;
+
+    // 换算到编辑区内容层叠区域内的本地坐标
+    final double lineY = stackBox.globalToLocal(Offset(0, lineGlobalY)).dy;
+    final double lineStartX = stackBox.globalToLocal(Offset(dotCenterGlobalX, 0)).dx - _indentWidth / 2;
+    final double lineEndX = stackBox.globalToLocal(anchorRect.topRight).dx;
+    final double trailingWidth = lineStartX + 4 < lineEndX ? lineEndX - lineStartX - 4 : 0.0;
+    final Color indicatorColor = colorScheme.primary;
+
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: Stack(
+          children: [
+            // 插入位置指示：左端圆点 + 横向指示线
+            Positioned(
+              left: lineStartX,
+              top: lineY - 2,
+              width: 4,
+              height: 4,
+              child: DecoratedBox(
+                decoration: BoxDecoration(color: indicatorColor, shape: BoxShape.circle),
+              ),
+            ),
+            Positioned(
+              left: lineStartX + 4,
+              top: lineY - 1,
+              width: trailingWidth,
+              height: 2,
+              child: ColoredBox(color: indicatorColor),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 构建拖拽排序时跟随指针的圆点
+  ///
+  /// 外观与节点圆点保持一致（外轮廓 + 中心圆点），位于指针右下方，
+  /// 模拟被鼠标抓起来的效果；未处于拖拽排序时不显示
+  Widget _buildReorderPointerDot(ColorScheme colorScheme, Color backgroundColor) {
+    // 与节点圆点相同的配色，先与编辑区底色合成再绘制：
+    // 避免半透明圆点叠在文字上显得发糊，同时保持与节点圆点一致的观感
+    final Color outlineColor =
+        Color.alphaBlend(colorScheme.onSurfaceVariant.withValues(alpha: 0.1), backgroundColor);
+    final Color dotColor = Color.alphaBlend(colorScheme.onSurfaceVariant.withValues(alpha: 0.4), backgroundColor);
+
+    final double outlineRadius = OutlineConnectionMetrics.hoverDotBackgroundRadius;
+    final double ghostSize = outlineRadius * 2;
+    // 圆点中心相对指针热点的偏移，使圆点落在指针右下方
+    const double centerOffset = 20.0;
+
+    return ValueListenableBuilder<Offset?>(
+      valueListenable: _reorderPointerPosition,
+      builder: (context, position, _) {
+        if (position == null) return const SizedBox.shrink();
+
+        final RenderBox? stackBox = _editorStackKey.currentContext?.findRenderObject() as RenderBox?;
+        if (stackBox == null || !stackBox.attached) return const SizedBox.shrink();
+
+        // 换算到编辑区内容层叠区域内的本地坐标
+        final Offset local = stackBox.globalToLocal(position);
+        return Positioned(
+          left: local.dx + centerOffset - outlineRadius,
+          top: local.dy + centerOffset - outlineRadius,
+          child: IgnorePointer(
+            child: Container(
+              width: ghostSize,
+              height: ghostSize,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: outlineColor,
+                shape: BoxShape.circle,
+              ),
+              // 中心圆点，与节点圆点同色同大小
+              child: Container(
+                width: OutlineConnectionMetrics.dotRadius * 2,
+                height: OutlineConnectionMetrics.dotRadius * 2,
+                decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// 计算指定节点行上某一层级圆点中心的全局横坐标
+  ///
+  /// 以该行文本区左边缘为基准换算：同层圆点中心比文字起点左移
+  /// (半列宽 - 圆点与文本的间距缩减量)，每深一层再右移一列，
+  /// 从而与连接线绘制器中的圆点位置保持一致
+  double? _dotCenterGlobalX(String nodeId, int anchorDepth, int depth) {
+    final renderEditable = _findRenderEditable(nodeId);
+    if (renderEditable != null && renderEditable.attached) {
+      final rect = MatrixUtils.transformRect(renderEditable.getTransformTo(null), Offset.zero & renderEditable.size);
+      return rect.left - (_indentWidth / 2 - _dotTextGapReduction) + (depth - anchorDepth) * _indentWidth;
+    }
+
+    // 文本区尚未构建时退回按节点行左边缘估算
+    final Rect? tileRect = _nodeTileGlobalRect(nodeId);
+    if (tileRect == null) return null;
+    final int columnOffset = PlatformCapabilities.isMobile ? -1 : 0;
+    return tileRect.left + 8 + (depth + 1 + columnOffset) * _indentWidth + _indentWidth / 2;
   }
 
   /// 构建编辑器的懒加载滚动视图
@@ -5820,6 +6235,9 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     // 当前编辑节点的圆点高亮
     final bool isActiveNode = flatNode.node.id == activeNodeId;
 
+    // 是否允许通过长按圆点拖拽排序：只读模式与批量选择模式下不修改节点结构
+    final bool canReorderByDot = !widget.readOnly && !_isBatchSelectionMode;
+
     // 当前编辑节点到下一个同级节点之间的连接线高亮列：
     // 该连接线位于当前节点圆点所在的列，由两者之间的子孙节点行整行点亮
     final int? highlightedLineColumn =
@@ -5854,6 +6272,12 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
         _autoScrollSelectionUpdater = _batchSelectionController.onPointerMoveTo;
       },
       onTrailingBarDragEnd: _batchSelectionController.onPointerUp,
+      // 圆点拖拽排序：只读模式与批量选择模式下不启用
+      onDotDragStart: canReorderByDot ? (position) => _onDotDragStart(flatNode.node.id, position) : null,
+      onDotDragMove: canReorderByDot ? _onDotDragMove : null,
+      onDotDragEnd: canReorderByDot ? _onDotDragEnd : null,
+      onDotDragCancel: canReorderByDot ? _onDotDragCancel : null,
+      isDragging: _reorderNodeId == flatNode.node.id,
       onChanged: (newText) {
         final oldText = flatNode.node.text;
         if (oldText != newText) {
@@ -5879,6 +6303,46 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
 /// 拖拽选区模式：无、文本选区、节点选区
 enum _DragMode { none, text, node }
+
+/// 拖拽排序的放置方式
+enum _OutlineReorderPlacement {
+  /// 插入到目标行之前，层级与目标行相同
+  before,
+
+  /// 插入到目标行之后，层级与目标行相同
+  after,
+
+  /// 作为目标行的第一个子节点插入
+  firstChild,
+}
+
+/// 拖拽排序的落点
+class _OutlineReorderTarget {
+  /// 实际插入的目标节点ID
+  final String targetNodeId;
+
+  /// 放置方式
+  final _OutlineReorderPlacement placement;
+
+  /// 插入后的层级
+  final int depth;
+
+  /// 插入指示线所依附的节点ID（指针所在行）
+  final String indicatorNodeId;
+
+  /// 指示线是否贴在依附节点的上边界
+  ///
+  /// 为 true 表示贴上行顶（插到其之前），为 false 表示贴行底（插到其后的间隙）
+  final bool indicatorAbove;
+
+  const _OutlineReorderTarget({
+    required this.targetNodeId,
+    required this.placement,
+    required this.depth,
+    required this.indicatorNodeId,
+    required this.indicatorAbove,
+  });
+}
 
 /// 自定义平移手势识别器，以极小的移动阈值接受手势
 ///

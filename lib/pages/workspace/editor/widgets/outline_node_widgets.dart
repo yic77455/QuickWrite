@@ -93,6 +93,25 @@ class OutlineNodeTile extends StatefulWidget {
   /// 批量选择模式下行尾竖条滑动选择结束的回调
   final VoidCallback onTrailingBarDragEnd;
 
+  /// 圆点长按开始拖拽排序回调（传入长按位置的全局坐标）
+  ///
+  /// 为空时不注册圆点长按手势，节点圆点不可拖拽
+  final ValueChanged<Offset>? onDotDragStart;
+
+  /// 圆点拖拽移动回调（传入指针当前的全局坐标）
+  final ValueChanged<Offset>? onDotDragMove;
+
+  /// 圆点拖拽结束回调（松手时触发，由调用方按落点执行移动）
+  final VoidCallback? onDotDragEnd;
+
+  /// 圆点拖拽取消回调
+  final VoidCallback? onDotDragCancel;
+
+  /// 是否正在被拖拽排序
+  ///
+  /// 为 true 时整行降低不透明度，提示该节点正在被移动
+  final bool isDragging;
+
   /// 失焦时是否应保留选区（传入节点ID，仅右键菜单目标节点为 true）
   final bool Function(String nodeId) shouldPersistSelectionOnFocusLoss;
 
@@ -120,6 +139,11 @@ class OutlineNodeTile extends StatefulWidget {
     required this.onTrailingBarLongPressMove,
     required this.onTrailingBarDragStart,
     required this.onTrailingBarDragEnd,
+    this.onDotDragStart,
+    this.onDotDragMove,
+    this.onDotDragEnd,
+    this.onDotDragCancel,
+    this.isDragging = false,
     required this.shouldPersistSelectionOnFocusLoss,
   });
 
@@ -153,6 +177,9 @@ class OutlineNodeTile extends StatefulWidget {
 class _OutlineNodeTileState extends State<OutlineNodeTile> {
   /// 鼠标是否悬停在节点行上
   bool _isHovered = false;
+
+  /// 鼠标是否悬停在圆点热区上
+  bool _isDotHovered = false;
 
   /// 文字行高倍数
   static const double _lineHeightFactor = 1.5;
@@ -304,7 +331,7 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
         // 当前编辑节点的点亮色
         final activeColor = colorScheme.primary.withValues(alpha: 0.6);
 
-        // 折叠态圆点背景色：与圆点同色但更透明，作为子节点被收起的视觉提示
+        // 折叠态圆点外轮廓色：与圆点同色但更透明，作为子节点被收起的视觉提示
         final collapsedDotBackground = colorScheme.onSurfaceVariant.withValues(alpha: 0.1);
 
         // 节点行内容：文本输入区
@@ -324,29 +351,47 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
               top: 0,
               bottom: 0,
               width: connectionWidth,
-              child: CustomPaint(
-                painter: OutlineConnectionPainter(
-                  depth: depth,
-                  columnOffset: columnOffset,
-                  indentWidth: indentWidth,
-                  textLineHeight: _textLineHeight,
-                  lineColor: lineColor,
-                  dotColor: dotColor,
-                  // 移动端圆点整体上移两个像素，与行尾竖条折叠三角的视觉重心对齐
-                  dotVerticalOffset: OutlineConnectionMetrics.dotVerticalOffset - (isMobile ? 2.0 : 0.0),
-                  // 有子节点且处于折叠态时，为圆点绘制背景以提示子节点被收起
-                  collapsedDotBackgroundColor: hasChildren && !node.isExpanded ? collapsedDotBackground : null,
-                  // 当前编辑节点的圆点点亮
-                  activeDotColor: widget.isActiveNode ? activeColor : null,
-                  // 当前编辑节点圆点下方连接线的点亮
-                  siblingLineHighlight: widget.highlightedLineColumn == null
-                      ? null
-                      : OutlineSiblingLineHighlight(column: widget.highlightedLineColumn!, color: activeColor),
-                ),
+              // 圆点外轮廓的悬停动效：折叠态从基础半径向外扩大，展开态从圆点内部向外扩大
+              child: TweenAnimationBuilder<double>(
+                tween: Tween<double>(begin: 0.0, end: _isDotHovered ? 1.0 : 0.0),
+                duration: const Duration(milliseconds: 160),
+                curve: Curves.easeOut,
+                builder: (context, hoverProgress, _) {
+                  final bool collapsed = hasChildren && !node.isExpanded;
+                  // 折叠态以基础半径为起点，展开态从 0 开始，最终都放大到悬停半径
+                  final double baseRadius =
+                      collapsed ? OutlineConnectionMetrics.collapsedDotBackgroundRadius : 0.0;
+                  final double outlineRadius = baseRadius +
+                      (OutlineConnectionMetrics.hoverDotBackgroundRadius - baseRadius) * hoverProgress;
+
+                  return CustomPaint(
+                    painter: OutlineConnectionPainter(
+                      depth: depth,
+                      columnOffset: columnOffset,
+                      indentWidth: indentWidth,
+                      textLineHeight: _textLineHeight,
+                      lineColor: lineColor,
+                      dotColor: dotColor,
+                      // 移动端圆点整体上移两个像素，与行尾竖条折叠三角的视觉重心对齐
+                      dotVerticalOffset: OutlineConnectionMetrics.dotVerticalOffset - (isMobile ? 2.0 : 0.0),
+                      // 折叠态与悬停态共用同一圈轮廓，只改变半径大小
+                      dotOutlineColor: collapsedDotBackground,
+                      dotOutlineRadius: outlineRadius,
+                      // 当前编辑节点的圆点点亮
+                      activeDotColor: widget.isActiveNode ? activeColor : null,
+                      // 当前编辑节点圆点下方连接线的点亮
+                      siblingLineHighlight: widget.highlightedLineColumn == null
+                          ? null
+                          : OutlineSiblingLineHighlight(column: widget.highlightedLineColumn!, color: activeColor),
+                    ),
+                  );
+                },
               ),
             ),
             // 箭头交互层（桌面端有子节点时叠加在连接线上方）
             if (hasChildren && !isMobile) _buildArrowButton(node, colorScheme, indentWidth),
+            // 圆点拖拽热区：长按圆点进入拖拽排序，位于箭头之上以便优先响应
+            if (widget.onDotDragStart != null) _buildDotDragHandle(columnOffset),
           ],
         );
 
@@ -363,16 +408,20 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
               : row,
         );
 
-        return MouseRegion(
-          onEnter: (_) => setState(() => _isHovered = true),
-          onExit: (_) => setState(() => _isHovered = false),
-          child: ColoredBox(
-            // 选中节点时显示高亮背景
-            color: widget.isSelected ? colorScheme.primary.withValues(alpha: 0.12) : Colors.transparent,
-            child: isMobile
-                // 行尾竖条叠加在内容区之上并贴到编辑区右边缘，不随左右边距设置移动
-                ? Stack(children: [content, _buildTrailingBar(node, colorScheme)])
-                : content,
+        return Opacity(
+          // 拖拽排序时整行变淡，提示该节点正在被移动
+          opacity: widget.isDragging ? 0.4 : 1.0,
+          child: MouseRegion(
+            onEnter: (_) => setState(() => _isHovered = true),
+            onExit: (_) => setState(() => _isHovered = false),
+            child: ColoredBox(
+              // 选中节点时显示高亮背景
+              color: widget.isSelected ? colorScheme.primary.withValues(alpha: 0.12) : Colors.transparent,
+              child: isMobile
+                  // 行尾竖条叠加在内容区之上并贴到编辑区右边缘，不随左右边距设置移动
+                  ? Stack(children: [content, _buildTrailingBar(node, colorScheme)])
+                  : content,
+            ),
           ),
         );
       },
@@ -514,6 +563,41 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// 构建圆点拖拽热区
+  ///
+  /// 热区以圆点为中心覆盖圆点周边的小块区域，长按进入拖拽排序；
+  /// 按住移动时把指针的全局坐标交给调用方，由调用方按位置计算落点
+  Widget _buildDotDragHandle(int columnOffset) {
+    // 热区边长：需覆盖圆点周边的空白，同时避免过度侵入右侧文本输入区
+    const double hitSize = 26.0;
+
+    // 圆点中心在节点行内的坐标，与连接线绘制器使用同一坐标系
+    final double dotCenterX = (widget.depth + 1 + columnOffset) * widget.indentWidth + widget.indentWidth / 2;
+    final double dotCenterY =
+        _textLineHeight / 2 + OutlineConnectionMetrics.dotVerticalOffset - (PlatformCapabilities.isMobile ? 2.0 : 0.0);
+
+    return Positioned(
+      left: dotCenterX - hitSize / 2,
+      top: dotCenterY - hitSize / 2,
+      width: hitSize,
+      height: hitSize,
+      child: MouseRegion(
+        // 桌面端使用手型光标，提示圆点可交互；移动端不显示光标
+        cursor: PlatformCapabilities.isMobile ? MouseCursor.defer : SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _isDotHovered = true),
+        onExit: (_) => setState(() => _isDotHovered = false),
+        child: GestureDetector(
+          // 空白处同样响应手势，保证整个热区都是有效的长按热区
+          behavior: HitTestBehavior.opaque,
+          onLongPressStart: (details) => widget.onDotDragStart?.call(details.globalPosition),
+          onLongPressMoveUpdate: (details) => widget.onDotDragMove?.call(details.globalPosition),
+          onLongPressEnd: (_) => widget.onDotDragEnd?.call(),
+          onLongPressCancel: () => widget.onDotDragCancel?.call(),
         ),
       ),
     );
