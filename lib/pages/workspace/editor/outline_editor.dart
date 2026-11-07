@@ -191,6 +191,12 @@ class OutlineEditorState extends State<OutlineEditor>
   /// 待补偿的额外顶边距变化量
   double? _pendingExtraPaddingDelta;
 
+  /// 待在本帧布局阶段补足底部安全间距的节点 ID
+  ///
+  /// 插入新节点后记录该节点，布局完成时在绘制之前修正滚动偏移，
+  /// 避免节点先渲染在视口底部、随后才被滚动上移造成的闪烁。
+  String? _pendingRevealNodeId;
+
   /// 上下边距换算所依据的编辑区高度
   ///
   /// 上下边距按编辑区高度的百分比换算，而软键盘升降会压缩编辑区高度；
@@ -208,6 +214,11 @@ class OutlineEditorState extends State<OutlineEditor>
   /// 由用户设置的底边距按编辑区高度百分比换算而来，随布局一并更新。
   /// 节点定位时以该值作为节点底部与视口底部之间应保留的安全间距。
   double _bottomContentPadding = 0;
+
+  /// 底部快捷键提示的预留高度（像素）
+  ///
+  /// 位于底边距之下，随内容一起参与滚动，定位列表末尾节点时需从可滚动范围中扣除。
+  double _bottomHintReserved = 0;
 
   // ================= 选区状态 =================
 
@@ -258,6 +269,11 @@ class OutlineEditorState extends State<OutlineEditor>
 
   /// 拖拽选区模式：无、文本选区、节点选区
   _DragMode _dragMode = _DragMode.none;
+
+  /// 本次指针序列中编辑器级拖拽手势是否已赢得竞技场
+  ///
+  /// 用于在拖拽手势抢占了节点输入框的点击时，按点击位置补上光标定位
+  bool _panGestureAccepted = false;
 
   /// 文本选区锚点（拖拽起始处在文本中的位置）
   TextPosition? _dragTextAnchor;
@@ -350,7 +366,10 @@ class OutlineEditorState extends State<OutlineEditor>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _scrollController = SyncScrollController(onApplyContentDimensions: _onApplyContentDimensions);
+    _scrollController = SyncScrollController(
+      onApplyContentDimensions: _onApplyContentDimensions,
+      onCorrectScrollOffset: _onCorrectScrollOffset,
+    );
     _scrollGuard = EditorScrollGuard(_scrollController);
     // 标题初始内容取自外部传入的大纲标题
     _titleController = TextEditingController(text: widget.title);
@@ -473,6 +492,34 @@ class OutlineEditorState extends State<OutlineEditor>
       }
       _pendingExtraPaddingDelta = null;
     }
+  }
+
+  /// 在 Layout 阶段为插入到列表末尾的新节点补足底部安全间距
+  ///
+  /// 内容尺寸变化时由 [SyncScrollPosition.correctForNewDimensions] 调用，
+  /// 此时可滚动范围已包含新节点，可在绘制之前把滚动偏移修正到位；
+  /// 返回 true 时 Viewport 会在本帧内重新布局，节点不会先渲染再被移上去。
+  bool _onCorrectScrollOffset(ScrollPosition position) {
+    final nodeId = _pendingRevealNodeId;
+    if (nodeId == null) return false;
+    _pendingRevealNodeId = null;
+
+    // 仅处理列表末尾的节点：其底边到滚动内容底边只隔着底部预留，
+    // 因此可由可滚动范围直接推出节点底边的位置，无需在布局阶段读取节点尺寸
+    final flatList = _flatten();
+    if (flatList.isEmpty || flatList.last.node.id != nodeId) return false;
+
+    // 节点底边对齐视口底部安全线所需的最小滚动偏移
+    final targetOffset = (position.maxScrollExtent - _bottomHintReserved).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    if (position.pixels >= targetOffset - 0.5) return false;
+
+    position.correctPixels(targetOffset);
+    // 同步更新滚动保护的目标偏移量，避免保护器把滚动位置拉回修正前的值
+    _scrollGuard.retarget();
+    return true;
   }
 
   /// 处理设置变化
@@ -1599,6 +1646,11 @@ class OutlineEditorState extends State<OutlineEditor>
   }) {
     if (!mounted) return;
 
+    // 首次进入滚动定位时，布局阶段的预修正机会已过，清除待修正标记
+    if (retryCount == 0 && _pendingRevealNodeId == nodeId) {
+      _pendingRevealNodeId = null;
+    }
+
     final key = _nodeTileKeys[nodeId];
     final context = key?.currentContext;
 
@@ -1708,6 +1760,7 @@ class OutlineEditorState extends State<OutlineEditor>
       _ensureResources(newNode);
       siblings.insert(location.index, newNode);
 
+      _scheduleRevealBeforePaint(newNode.id);
       setState(() {});
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1731,6 +1784,8 @@ class OutlineEditorState extends State<OutlineEditor>
         controller.text = textAfter;
         currentNode.text = textAfter;
 
+        // 新节点插入在当前节点上方，需保证当前节点插入后仍满足底部安全间距
+        _scheduleRevealBeforePaint(currentNode.id);
         setState(() {});
 
         // 聚焦当前节点开头（光标后内容）
@@ -1749,6 +1804,7 @@ class OutlineEditorState extends State<OutlineEditor>
       _ensureResources(newNode);
       siblings.insert(location.index + 1, newNode);
 
+      _scheduleRevealBeforePaint(newNode.id);
       setState(() {});
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1767,6 +1823,7 @@ class OutlineEditorState extends State<OutlineEditor>
         currentNode.children.insert(0, newNode);
         currentNode.isExpanded = true;
 
+        _scheduleRevealBeforePaint(newNode.id);
         setState(() {});
 
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1781,6 +1838,7 @@ class OutlineEditorState extends State<OutlineEditor>
       _ensureResources(newNode);
       siblings.insert(location.index + 1, newNode);
 
+      _scheduleRevealBeforePaint(newNode.id);
       setState(() {});
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -1795,6 +1853,7 @@ class OutlineEditorState extends State<OutlineEditor>
     _ensureResources(newNode);
     siblings.insert(location.index + 1, newNode);
 
+    _scheduleRevealBeforePaint(newNode.id);
     setState(() {});
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -2158,6 +2217,7 @@ class OutlineEditorState extends State<OutlineEditor>
     } else {
       _roots.add(newNode);
     }
+    _scheduleRevealBeforePaint(newNode.id);
     setState(() {});
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -2932,6 +2992,34 @@ class OutlineEditorState extends State<OutlineEditor>
     return (globalPosition.dx - dotCenterX).abs() <= _indentWidth / 2;
   }
 
+  /// 判断全局坐标是否落在某节点行的折叠箭头上
+  ///
+  /// 折叠箭头仅存在于有子节点的行，是切换展开/折叠的入口；
+  /// 编辑器级的拖拽选区不参与该区域，避免指针的轻微移动抢走箭头的点击
+  bool _isPositionOnNodeArrow(Offset globalPosition) {
+    final index = _findNodeIndexAtPosition(globalPosition);
+    if (index == null) return false;
+
+    final flatList = _flatten();
+    if (index >= flatList.length) return false;
+
+    final FlatNode flat = flatList[index];
+    if (flat.node.children.isEmpty) return false;
+
+    final Rect? tileRect = _nodeTileGlobalRect(flat.node.id);
+    if (tileRect == null) return false;
+
+    // 箭头矩形按节点行内布局计算，左内边距 8 由节点行内容区施加
+    final renderEditable = _findRenderEditable(flat.node.id);
+    if (renderEditable == null || !renderEditable.attached) return false;
+    final Rect arrowRect = OutlineNodeTile.foldArrowLocalRect(
+      depth: flat.depth,
+      indentWidth: _indentWidth,
+      textLineHeight: renderEditable.preferredLineHeight,
+    ).shift(Offset(tileRect.left + 8, tileRect.top));
+    return arrowRect.contains(globalPosition);
+  }
+
   /// 判断全局坐标是否落在大纲标题区域
   ///
   /// 标题不属于节点，位于其上的指针交互交由标题输入框自身处理，
@@ -3109,6 +3197,9 @@ class OutlineEditorState extends State<OutlineEditor>
     // 指针按下会重新定位光标，之前按方向键记录的横向坐标不再适用
     _preferredCaretX = null;
 
+    // 新的指针序列开始，重置上一次手势的竞技场结果
+    _panGestureAccepted = false;
+
     // 标题区域不参与节点选区与编辑器级焦点处理，交互交由标题输入框自身处理
     if (_isPositionOnTitle(event.position)) {
       _dragStartPosition = null;
@@ -3158,17 +3249,54 @@ class OutlineEditorState extends State<OutlineEditor>
     }
 
     if (_dragMode == _DragMode.none && _dragStartPosition != null) {
+      final startPosition = _dragStartPosition!;
       // 批量选择模式下节点选中由节点行自身处理，不在此处清除节点选区
-      if (!_isBatchSelectionMode && !_isPositionOnTextField(event.position)) {
-        _clearSelection();
-        // 点击空白区域时，若无输入框持有焦点，则请求编辑器级焦点
-        // 确保撤销/恢复等快捷键在空白区域也能正常响应
-        if (!_focusNodes.values.any((fn) => fn.hasFocus)) {
-          _editorFocusNode.requestFocus();
+      if (!_isBatchSelectionMode) {
+        if (_isPositionOnTextField(startPosition)) {
+          // 拖拽手势赢得竞技场时输入框收不到点击，按按下位置补上光标定位
+          if (_panGestureAccepted) {
+            _placeCaretAtPosition(startPosition);
+          }
+        } else {
+          _clearSelection();
+          // 点击空白区域时，若无输入框持有焦点，则请求编辑器级焦点
+          // 确保撤销/恢复等快捷键在空白区域也能正常响应
+          if (!_focusNodes.values.any((fn) => fn.hasFocus)) {
+            _editorFocusNode.requestFocus();
+          }
         }
       }
     }
     _dragStartPosition = null;
+  }
+
+  /// 将光标定位到指定全局坐标并聚焦对应节点
+  ///
+  /// 按坐标命中目标节点后，将其文本偏移换算为折叠选区，
+  /// 节点未持有焦点时一并请求焦点
+  void _placeCaretAtPosition(Offset globalPosition) {
+    final index = _findNodeIndexAtPosition(globalPosition);
+    if (index == null) return;
+    final flatList = _flatten();
+    if (index >= flatList.length) return;
+
+    final nodeId = flatList[index].node.id;
+    final controller = _controllers[nodeId];
+    final focusNode = _focusNodes[nodeId];
+    final renderEditable = _findRenderEditable(nodeId);
+    if (controller == null ||
+        focusNode == null ||
+        renderEditable == null ||
+        !renderEditable.attached) {
+      return;
+    }
+
+    controller.selection = TextSelection.collapsed(
+      offset: renderEditable.getPositionForPoint(globalPosition).offset,
+    );
+    if (!focusNode.hasFocus) {
+      focusNode.requestFocus();
+    }
   }
 
   /// 批量选择模式下的指针移动
@@ -3198,6 +3326,9 @@ class OutlineEditorState extends State<OutlineEditor>
 
     // 标题区域不参与节点拖拽选区
     if (_isPositionOnTitle(details.globalPosition)) return;
+
+    // 拖拽手势已赢得竞技场，输入框本次收不到点击
+    _panGestureAccepted = true;
 
     _dragStartPosition = details.globalPosition;
     _dragMode = _DragMode.none;
@@ -3324,6 +3455,7 @@ class OutlineEditorState extends State<OutlineEditor>
   /// 拖拽结束：清理拖拽状态
   void _onPanEnd(DragEndDetails details) {
     _stopEdgeAutoScroll();
+    _panGestureAccepted = false;
     _dragStartPosition = null;
     _dragMode = _DragMode.none;
     _dragTextAnchor = null;
@@ -3334,6 +3466,7 @@ class OutlineEditorState extends State<OutlineEditor>
   /// 拖拽取消：清理拖拽状态
   void _onPanCancel() {
     _stopEdgeAutoScroll();
+    _panGestureAccepted = false;
     _dragStartPosition = null;
     _dragMode = _DragMode.none;
     _dragTextAnchor = null;
@@ -5503,8 +5636,19 @@ class OutlineEditorState extends State<OutlineEditor>
   /// 默认为用户设置的底边距。
   void _scrollToNode(String nodeId, {double? margin}) {
     if (!mounted) return;
+    // 已进入滚动定位阶段，布局阶段的预修正机会已过，清除待修正标记
+    if (_pendingRevealNodeId == nodeId) _pendingRevealNodeId = null;
     _ensureAncestorsExpanded(nodeId);
     _scrollToNodeWithRetry(nodeId, 0, null, margin: margin ?? _bottomContentPadding);
+  }
+
+  /// 安排节点在下一次布局阶段完成底部安全间距修正
+  ///
+  /// 需在插入节点并触发重建之前调用：下一帧内容尺寸变化时，
+  /// 若该节点位于列表末尾，会在绘制之前补足底部安全间距，
+  /// 节点不会先出现在视口底部再被移上去。
+  void _scheduleRevealBeforePaint(String nodeId) {
+    _pendingRevealNodeId = nodeId;
   }
 
   /// 滚动到节点的重试实现
@@ -6150,7 +6294,8 @@ class OutlineEditorState extends State<OutlineEditor>
                                       instance.shouldYieldPointer = (position) =>
                                           _isPositionOnScrollbar(position) ||
                                           _isPositionOnTitle(position) ||
-                                          _isPositionOnNodeDot(position);
+                                          _isPositionOnNodeDot(position) ||
+                                          _isPositionOnNodeArrow(position);
                                     },
                                   ),
                             }
@@ -6396,6 +6541,8 @@ class OutlineEditorState extends State<OutlineEditor>
     final double bottomHintHeight = (!PlatformCapabilities.isMobile && settings.outlineBottomHintEnabled)
         ? _bottomHintHeight
         : 0.0;
+    // 记录进入滚动内容的底部预留高度，供列表末尾节点的定位使用
+    _bottomHintReserved = bottomHintHeight;
 
     // 内容按 A4 宽度居中的额外内缩量；宽度不足以容纳 A4 时取 0；
     // 纸张模式与移动端在整个视口宽度内居中，桌面端非纸张模式先施加左右边距再居中
@@ -6721,7 +6868,8 @@ class _OutlineReorderTarget {
 /// 自定义平移手势识别器，以极小的移动阈值接受手势
 ///
 /// 确保在输入框内部开始拖拽时，能优先于输入框自带的手势识别器赢得竞技场。
-/// 当指针落在滚动条区域或大纲标题区域时则不参与竞技场，把交互让给目标控件。
+/// 当指针落在滚动条、大纲标题或节点交互控件（圆点、折叠箭头）上时则不参与竞技场，
+/// 把交互让给目标控件。
 class _EagerPanGestureRecognizer extends PanGestureRecognizer {
   /// 判断指针是否应交由其他控件处理
   ///

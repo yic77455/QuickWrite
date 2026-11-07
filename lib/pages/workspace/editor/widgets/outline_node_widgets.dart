@@ -195,6 +195,34 @@ class OutlineNodeTile extends StatefulWidget {
     return dotCenterX - OutlineConnectionMetrics.dotRadius;
   }
 
+  /// 计算折叠箭头在节点行内的矩形
+  ///
+  /// 箭头占据列 [depth] 的整列宽度，纵向自半行高上移固定偏移量处开始，
+  /// 高度为图标边长加四周内边距。命中检测与布局共用此定义。
+  static Rect foldArrowLocalRect({
+    required int depth,
+    required double indentWidth,
+    required double textLineHeight,
+  }) {
+    return Rect.fromLTWH(
+      depth * indentWidth,
+      textLineHeight / 2 - foldArrowTopOffset,
+      indentWidth,
+      foldArrowIconSize + foldArrowPadding * 2,
+    );
+  }
+
+  /// 折叠箭头图标的边长
+  static const double foldArrowIconSize = 16.0;
+
+  /// 折叠箭头四周的内边距
+  static const double foldArrowPadding = 2.0;
+
+  /// 折叠箭头相对行顶的垂直内缩偏移
+  ///
+  /// 箭头位于半行高再上移该偏移量处，使其视觉重心与首行文字居中对齐。
+  static const double foldArrowTopOffset = 5.0;
+
   @override
   State<OutlineNodeTile> createState() => _OutlineNodeTileState();
 }
@@ -626,7 +654,7 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            SizedBox(width: indentWidth, height: _textLineHeight / 2 - 5),
+            SizedBox(width: indentWidth, height: _textLineHeight / 2 - OutlineNodeTile.foldArrowTopOffset),
             Opacity(
               opacity: _isHovered ? 1.0 : 0.0,
               child: Material(
@@ -637,13 +665,13 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
                   borderRadius: BorderRadius.circular(10),
                   hoverColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.1),
                   child: Padding(
-                    padding: const EdgeInsets.all(2),
+                    padding: const EdgeInsets.all(OutlineNodeTile.foldArrowPadding),
                     child: AnimatedRotation(
                       turns: node.isExpanded ? 0.25 : 0,
                       duration: const Duration(milliseconds: 150),
                       child: Icon(
                         Icons.chevron_right_rounded,
-                        size: 16,
+                        size: OutlineNodeTile.foldArrowIconSize,
                         color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
                       ),
                     ),

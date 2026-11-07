@@ -85,6 +85,12 @@ class EditorScrollGuard {
 
 typedef ApplyContentDimensionsCallback = void Function(ScrollPosition position, double minScrollExtent, double maxScrollExtent);
 
+/// 布局阶段修正滚动像素的回调
+///
+/// 返回 true 表示已通过 [ScrollPosition.correctPixels] 修改了滚动偏移，
+/// 需要在本帧内重新布局以应用新的偏移。
+typedef CorrectScrollOffsetCallback = bool Function(ScrollPosition position);
+
 /// 自定义的 ScrollPosition，用于在 Layout 阶段同步拦截并修正滚动像素
 class SyncScrollPosition extends ScrollPositionWithSingleContext {
   SyncScrollPosition({
@@ -95,15 +101,27 @@ class SyncScrollPosition extends ScrollPositionWithSingleContext {
     super.oldPosition,
     super.debugLabel,
     required this.onApplyContentDimensions,
+    this.onCorrectScrollOffset,
   });
 
   final ApplyContentDimensionsCallback onApplyContentDimensions;
+
+  /// 内容尺寸变化时按需修正滚动偏移的回调
+  final CorrectScrollOffsetCallback? onCorrectScrollOffset;
 
   @override
   bool applyContentDimensions(double minScrollExtent, double maxScrollExtent) {
     // 在这里触发回调，允许在 Viewport 确定最终尺寸前，通过 correctPixels() 同步修改像素
     onApplyContentDimensions(this, minScrollExtent, maxScrollExtent);
     return super.applyContentDimensions(minScrollExtent, maxScrollExtent);
+  }
+
+  @override
+  bool correctForNewDimensions(ScrollMetrics oldPosition, ScrollMetrics newPosition) {
+    // 内容尺寸变化后优先执行使用方的偏移修正；返回 false 使 Viewport 在本帧内重新布局，
+    // 修正结果随本帧一起绘制，避免先按旧偏移渲染再滚动造成的视觉闪烁
+    if (onCorrectScrollOffset?.call(this) ?? false) return false;
+    return super.correctForNewDimensions(oldPosition, newPosition);
   }
 }
 
@@ -114,9 +132,13 @@ class SyncScrollController extends ScrollController {
     super.keepScrollOffset = true,
     super.debugLabel,
     required this.onApplyContentDimensions,
+    this.onCorrectScrollOffset,
   });
 
   final ApplyContentDimensionsCallback onApplyContentDimensions;
+
+  /// 内容尺寸变化时按需修正滚动偏移的回调
+  final CorrectScrollOffsetCallback? onCorrectScrollOffset;
 
   @override
   ScrollPosition createScrollPosition(
@@ -132,6 +154,7 @@ class SyncScrollController extends ScrollController {
       oldPosition: oldPosition,
       debugLabel: debugLabel,
       onApplyContentDimensions: onApplyContentDimensions,
+      onCorrectScrollOffset: onCorrectScrollOffset,
     );
   }
 }
