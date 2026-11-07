@@ -105,7 +105,9 @@ class OutlineEditor extends StatefulWidget {
   State<OutlineEditor> createState() => OutlineEditorState();
 }
 
-class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserver implements FindReplaceTarget {
+class OutlineEditorState extends State<OutlineEditor>
+    with WidgetsBindingObserver, TickerProviderStateMixin
+    implements FindReplaceTarget {
   // ================= 常量 =================
 
   /// 每级缩进的像素宽度
@@ -306,6 +308,12 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 因内容与结构变化都会刷新折叠状态，多次保存按此链顺序执行，避免并发写同一文件
   Future<void> _foldStateWriteChain = Future.value();
 
+  /// 节点折叠动画控制器（节点ID -> 控制器）
+  ///
+  /// 值从 1 收敛到 0 表示子节点收进圆点，从 0 增长到 1 表示子节点从圆点展开；
+  /// 动画结束后移除对应控制器，节点重新按展开状态直接渲染
+  final Map<String, AnimationController> _foldAnimations = {};
+
   /// 底部快捷键提示的高度（为滚动列表预留底部内边距，避免末节点被浮动提示遮挡）
   double _bottomHintHeight = 0;
 
@@ -379,6 +387,10 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     for (final focusNode in _focusNodes.values) {
       focusNode.dispose();
     }
+    for (final controller in _foldAnimations.values) {
+      controller.dispose();
+    }
+    _foldAnimations.clear();
     _editorFocusNode.dispose();
     _titleController.dispose();
     _titleFocusNode.dispose();
@@ -496,6 +508,50 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       walk(root, 0, null);
     }
     return result;
+  }
+
+  /// 构建节点列表的展示数据
+  ///
+  /// 与 [_flatten] 的可见节点一致，另外保留正处于折叠动画中的子节点行，
+  /// 使这些行在动画期间仍参与布局并绘制收进圆点的过渡效果；
+  /// 动画结束后移除对应控制器，子节点行随即从列表中消失。
+  List<_OutlineDisplayRow> _buildDisplayRows() {
+    final List<_OutlineDisplayRow> rows = [];
+
+    // rowFoldProgress 为该节点行所属祖先的收拢动画进度，
+    // foldDotDepth 为收拢目标圆点所在节点的深度
+    void walk(
+      OutlineNode node,
+      int depth,
+      OutlineNode? parent,
+      Animation<double>? rowFoldProgress,
+      int foldDotDepth,
+    ) {
+      final Animation<double>? ownFold = _foldAnimations[node.id];
+      rows.add(
+        _OutlineDisplayRow(
+          flatNode: FlatNode(node: node, depth: depth, parent: parent),
+          foldProgress: rowFoldProgress,
+          foldDotDepth: rowFoldProgress == null ? null : foldDotDepth,
+          dotFoldProgress: ownFold,
+        ),
+      );
+
+      // 展开的节点正常展示子节点；处于折叠动画中的节点在动画期间也需要展示子节点行
+      if (!node.isExpanded && ownFold == null) return;
+
+      // 当前节点自身有动画时，子节点统一收进当前节点的圆点；否则沿用祖先动画的目标圆点
+      final Animation<double>? childFoldProgress = ownFold ?? rowFoldProgress;
+      final int childFoldDotDepth = ownFold != null ? depth : foldDotDepth;
+      for (final child in node.children) {
+        walk(child, depth + 1, node, childFoldProgress, childFoldDotDepth);
+      }
+    }
+
+    for (final root in _roots) {
+      walk(root, 0, null, null, 0);
+    }
+    return rows;
   }
 
   /// 计算当前编辑节点下方连接线的高亮范围
@@ -1893,13 +1949,74 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     });
   }
 
+  /// 获取节点的折叠动画控制器，不存在时按起始进度创建
+  ///
+  /// [startCollapsed] 为 true 表示从完全收起的状态（进度 0）开始播放展开动画，
+  /// 否则从进度 1 开始播放收起动画
+  AnimationController _ensureFoldController(String nodeId, {required bool startCollapsed}) {
+    final existing = _foldAnimations[nodeId];
+    if (existing != null) return existing;
+
+    final controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 220),
+      value: startCollapsed ? 0.0 : 1.0,
+    );
+    controller.addStatusListener((status) {
+      // 动画到达两端后回归静态渲染，子节点行重新由展开状态决定是否展示
+      if (status == AnimationStatus.completed || status == AnimationStatus.dismissed) {
+        _finishFoldAnimation(nodeId, controller);
+      }
+    });
+    _foldAnimations[nodeId] = controller;
+    return controller;
+  }
+
+  /// 结束节点的折叠动画
+  ///
+  /// 先移除动画记录并重建列表，再在下一帧释放控制器，
+  /// 避免节点行仍在监听已被销毁的控制器
+  void _finishFoldAnimation(String nodeId, AnimationController controller) {
+    if (_foldAnimations[nodeId] != controller) return;
+    _foldAnimations.remove(nodeId);
+    if (mounted) setState(() {});
+    WidgetsBinding.instance.addPostFrameCallback((_) => controller.dispose());
+  }
+
+  /// 停止并释放全部折叠动画
+  ///
+  /// 整体展开/折叠时不逐个播放过渡，直接丢弃正在进行的折叠动画，
+  /// 避免动画中的子节点行残留在列表里
+  void _clearFoldAnimations() {
+    final controllers = _foldAnimations.values.toList();
+    _foldAnimations.clear();
+    // 等本帧重建移除监听后再释放控制器
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      for (final controller in controllers) {
+        controller.dispose();
+      }
+    });
+  }
+
   /// 切换节点展开/折叠状态
   void _toggleExpand(String nodeId) {
     final node = _findNode(nodeId);
     if (node == null) return;
+    final bool willExpand = !node.isExpanded;
     setState(() {
-      node.isExpanded = !node.isExpanded;
+      node.isExpanded = willExpand;
     });
+
+    // 有子节点时以动画呈现子节点收进圆点或从圆点展开；
+    // 动画期间子节点行仍参与布局，结束后再按展开状态直接渲染
+    if (node.children.isNotEmpty) {
+      final controller = _ensureFoldController(nodeId, startCollapsed: willExpand);
+      if (willExpand) {
+        controller.forward();
+      } else {
+        controller.reverse();
+      }
+    }
     _saveFoldState();
   }
 
@@ -1933,6 +2050,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       walk(root);
     }
     setState(() {});
+    // 整体展开时丢弃进行中的折叠动画，子节点直接按展开状态渲染
+    _clearFoldAnimations();
     _saveFoldState();
   }
 
@@ -1949,6 +2068,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       walk(root);
     }
     setState(() {});
+    // 整体折叠时丢弃进行中的折叠动画，避免折叠中的子节点行残留
+    _clearFoldAnimations();
     _saveFoldState();
   }
 
@@ -5764,7 +5885,8 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       );
     }
 
-    final flatList = _flatten();
+    // 展示数据包含折叠动画中的子节点行，用于呈现子节点收进圆点的过渡
+    final displayRows = _buildDisplayRows();
 
     // 编辑区底色：默认跟随主题，自定义时使用配置的颜色；纸张模式下纸张外背景由淡化设置决定
     final bool isPaperMode = SettingsService.instance.outlinePageViewMode == 'paper';
@@ -5858,7 +5980,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
                               pageViewMode: settings.outlinePageViewMode,
                               colorScheme: colorScheme,
                               paperColor: editorBackgroundColor,
-                              flatList: flatList,
+                              displayRows: displayRows,
                             ),
                           );
 
@@ -6071,7 +6193,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     required String pageViewMode,
     required ColorScheme colorScheme,
     required Color paperColor,
-    required List<FlatNode> flatList,
+    required List<_OutlineDisplayRow> displayRows,
   }) {
     final settings = SettingsService.instance;
     final bool isPaperMode = pageViewMode == 'paper';
@@ -6098,6 +6220,7 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
 
     // 当前编辑节点，及其到下一个同级节点之间连接线的高亮范围
     final String? activeNodeId = _activeNodeId;
+    final List<FlatNode> flatList = displayRows.map((row) => row.flatNode).toList(growable: false);
     final ({int column, int startIndex, int endIndex})? siblingLineRange = _resolveActiveSiblingLine(
       flatList,
       activeNodeId,
@@ -6106,14 +6229,14 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
     // 构建节点列表，每个节点都用右键菜单包装；
     // 移动端长按交还系统原生选择行为，不注册长按识别器
     final Widget nodeList = SliverList.builder(
-      itemCount: flatList.length,
+      itemCount: displayRows.length,
       itemBuilder: (context, index) => ContextMenu(
         getMenuItems: _buildContextMenuItems,
         onSecondaryTapDown: _handleSecondaryTapDown,
         onDismissed: _handleContextMenuDismissed,
         enableMobileLongPress: !PlatformCapabilities.isMobile,
         child: _buildNodeTile(
-          flatList[index],
+          displayRows[index],
           index: index,
           activeNodeId: activeNodeId,
           siblingLineRange: siblingLineRange,
@@ -6221,14 +6344,17 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
   /// 桌面端由滚动容器内边距统一施加，移动端则由节点行内容承担。
   /// [index] 为该节点在扁平列表中的行索引，
   /// [activeNodeId] 为当前编辑节点 ID，[siblingLineRange] 为连接线高亮范围，
-  /// 二者共同决定该行圆点与同级连接线是否点亮
+  /// 二者共同决定该行圆点与同级连接线是否点亮。
+  /// [displayRow] 额外携带折叠动画进度，用于让子节点行收进父节点圆点
   Widget _buildNodeTile(
-    FlatNode flatNode, {
+    _OutlineDisplayRow displayRow, {
     required int index,
     required String? activeNodeId,
     required ({int column, int startIndex, int endIndex})? siblingLineRange,
     required double horizontalMargin,
   }) {
+    final FlatNode flatNode = displayRow.flatNode;
+
     // 获取或创建节点瓦片的全局键，用于拖拽选区的命中检测
     final key = _nodeTileKeys.putIfAbsent(flatNode.node.id, () => GlobalKey());
 
@@ -6278,6 +6404,10 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       onDotDragEnd: canReorderByDot ? _onDotDragEnd : null,
       onDotDragCancel: canReorderByDot ? _onDotDragCancel : null,
       isDragging: _reorderNodeId == flatNode.node.id,
+      // 折叠动画进度：子节点行据此收进父节点圆点，节点自身据此同步圆点轮廓
+      subtreeFoldProgress: displayRow.foldProgress,
+      foldTargetDotDepth: displayRow.foldDotDepth,
+      dotFoldProgress: displayRow.dotFoldProgress,
       onChanged: (newText) {
         final oldText = flatNode.node.text;
         if (oldText != newText) {
@@ -6299,6 +6429,31 @@ class OutlineEditorState extends State<OutlineEditor> with WidgetsBindingObserve
       shouldPersistSelectionOnFocusLoss: (nodeId) => _isContextMenuOpening && nodeId == _contextMenuNodeId,
     );
   }
+}
+
+/// 展示用的节点行
+///
+/// 在可见节点基础上携带折叠动画信息：收起/展开过程中，
+/// 子节点行按动画进度向目标圆点缩放淡出，动画结束后不再出现在列表中
+class _OutlineDisplayRow {
+  /// 节点行数据
+  final FlatNode flatNode;
+
+  /// 本行的收拢动画进度（1 为完全展开，0 为完全收进圆点），无动画时为 null
+  final Animation<double>? foldProgress;
+
+  /// 收拢目标圆点所在节点的深度，无动画时为 null
+  final int? foldDotDepth;
+
+  /// 本节点圆点自身的折叠动画进度，非空表示该节点正在收起或展开子节点
+  final Animation<double>? dotFoldProgress;
+
+  _OutlineDisplayRow({
+    required this.flatNode,
+    this.foldProgress,
+    this.foldDotDepth,
+    this.dotFoldProgress,
+  });
 }
 
 /// 拖拽选区模式：无、文本选区、节点选区

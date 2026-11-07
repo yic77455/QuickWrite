@@ -112,6 +112,22 @@ class OutlineNodeTile extends StatefulWidget {
   /// 为 true 时整行降低不透明度，提示该节点正在被移动
   final bool isDragging;
 
+  /// 子节点收进圆点的动画进度
+  ///
+  /// 非空时整行随进度向目标圆点缩放、淡出，同时高度收缩，
+  /// 使下方节点行平滑上移填补空出的位置；为 null 时按普通节点行渲染
+  final Animation<double>? subtreeFoldProgress;
+
+  /// 子节点收拢动画的目标圆点所在深度
+  ///
+  /// 收起过程中整行向该深度对应的圆点缩放；无动画时为 null
+  final int? foldTargetDotDepth;
+
+  /// 本节点圆点自身的折叠动画进度
+  ///
+  /// 非空时圆点外轮廓半径随进度变化，与子节点收进圆点的过程同步
+  final Animation<double>? dotFoldProgress;
+
   /// 失焦时是否应保留选区（传入节点ID，仅右键菜单目标节点为 true）
   final bool Function(String nodeId) shouldPersistSelectionOnFocusLoss;
 
@@ -144,6 +160,9 @@ class OutlineNodeTile extends StatefulWidget {
     this.onDotDragEnd,
     this.onDotDragCancel,
     this.isDragging = false,
+    this.subtreeFoldProgress,
+    this.foldTargetDotDepth,
+    this.dotFoldProgress,
     required this.shouldPersistSelectionOnFocusLoss,
   });
 
@@ -358,32 +377,45 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
                 curve: Curves.easeOut,
                 builder: (context, hoverProgress, _) {
                   final bool collapsed = hasChildren && !node.isExpanded;
-                  // 折叠态以基础半径为起点，展开态从 0 开始，最终都放大到悬停半径
-                  final double baseRadius =
-                      collapsed ? OutlineConnectionMetrics.collapsedDotBackgroundRadius : 0.0;
-                  final double outlineRadius = baseRadius +
-                      (OutlineConnectionMetrics.hoverDotBackgroundRadius - baseRadius) * hoverProgress;
 
-                  return CustomPaint(
-                    painter: OutlineConnectionPainter(
-                      depth: depth,
-                      columnOffset: columnOffset,
-                      indentWidth: indentWidth,
-                      textLineHeight: _textLineHeight,
-                      lineColor: lineColor,
-                      dotColor: dotColor,
-                      // 移动端圆点整体上移两个像素，与行尾竖条折叠三角的视觉重心对齐
-                      dotVerticalOffset: OutlineConnectionMetrics.dotVerticalOffset - (isMobile ? 2.0 : 0.0),
-                      // 折叠态与悬停态共用同一圈轮廓，只改变半径大小
-                      dotOutlineColor: collapsedDotBackground,
-                      dotOutlineRadius: outlineRadius,
-                      // 当前编辑节点的圆点点亮
-                      activeDotColor: widget.isActiveNode ? activeColor : null,
-                      // 当前编辑节点圆点下方连接线的点亮
-                      siblingLineHighlight: widget.highlightedLineColumn == null
-                          ? null
-                          : OutlineSiblingLineHighlight(column: widget.highlightedLineColumn!, color: activeColor),
-                    ),
+                  // 折叠动画期间圆点外轮廓半径随进度连续变化：
+                  // 收起时轮廓由小到大展开，展开时反向收拢，与子节点行的收放过程同步
+                  Widget paintConnection(double foldProgress) {
+                    final double baseRadius = widget.dotFoldProgress != null
+                        ? OutlineConnectionMetrics.collapsedDotBackgroundRadius * (1 - foldProgress)
+                        : (collapsed ? OutlineConnectionMetrics.collapsedDotBackgroundRadius : 0.0);
+                    final double outlineRadius = baseRadius +
+                        (OutlineConnectionMetrics.hoverDotBackgroundRadius - baseRadius) * hoverProgress;
+
+                    return CustomPaint(
+                      painter: OutlineConnectionPainter(
+                        depth: depth,
+                        columnOffset: columnOffset,
+                        indentWidth: indentWidth,
+                        textLineHeight: _textLineHeight,
+                        lineColor: lineColor,
+                        dotColor: dotColor,
+                        // 移动端圆点整体上移两个像素，与行尾竖条折叠三角的视觉重心对齐
+                        dotVerticalOffset: OutlineConnectionMetrics.dotVerticalOffset - (isMobile ? 2.0 : 0.0),
+                        // 折叠态与悬停态共用同一圈轮廓，只改变半径大小
+                        dotOutlineColor: collapsedDotBackground,
+                        dotOutlineRadius: outlineRadius,
+                        // 当前编辑节点的圆点点亮
+                        activeDotColor: widget.isActiveNode ? activeColor : null,
+                        // 当前编辑节点圆点下方连接线的点亮
+                        siblingLineHighlight: widget.highlightedLineColumn == null
+                            ? null
+                            : OutlineSiblingLineHighlight(column: widget.highlightedLineColumn!, color: activeColor),
+                      ),
+                    );
+                  }
+
+                  final Animation<double>? dotFold = widget.dotFoldProgress;
+                  if (dotFold == null) return paintConnection(1.0);
+                  // 折叠动画期间逐帧刷新圆点轮廓半径
+                  return AnimatedBuilder(
+                    animation: dotFold,
+                    builder: (context, _) => paintConnection(dotFold.value.clamp(0.0, 1.0)),
                   );
                 },
               ),
@@ -408,7 +440,7 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
               : row,
         );
 
-        return Opacity(
+        final Widget tile = Opacity(
           // 拖拽排序时整行变淡，提示该节点正在被移动
           opacity: widget.isDragging ? 0.4 : 1.0,
           child: MouseRegion(
@@ -423,6 +455,57 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
                   : content,
             ),
           ),
+        );
+
+        // 折叠动画中的子节点行向父节点圆点收拢
+        return _buildFoldAnimatedRow(tile);
+      },
+    );
+  }
+
+  /// 构建节点行的折叠动画包装
+  ///
+  /// 子节点行收起时整行向目标圆点缩放并淡出，同时把高度收缩为 0，
+  /// 使下方节点行平滑上移填补空出的位置；展开时按相反方向播放同一进度。
+  /// 未处于折叠动画中时原样返回 [child]。
+  Widget _buildFoldAnimatedRow(Widget child) {
+    final Animation<double>? fold = widget.subtreeFoldProgress;
+    if (fold == null) return child;
+
+    return AnimatedBuilder(
+      animation: fold,
+      // 动画期间节点行不响应交互，避免收缩中的行抢占点击
+      child: IgnorePointer(child: child),
+      builder: (context, child) {
+        // 缓动后的进度同时驱动高度收缩、缩放与淡出，使收拢过程先慢后快
+        final double progress = Curves.easeInOutCubic.transform(fold.value.clamp(0.0, 1.0));
+
+        return LayoutBuilder(
+          builder: (context, constraints) {
+            // 缩放中心落在目标圆点上：横向取圆点所在列，纵向取行顶部（收起方向的上方）
+            final int dotDepth = widget.foldTargetDotDepth ?? widget.depth;
+            final int columnOffset = PlatformCapabilities.isMobile ? -1 : 0;
+            final double dotCenterX = (dotDepth + 1 + columnOffset) * widget.indentWidth + widget.indentWidth / 2;
+            final double rowWidth = constraints.maxWidth;
+            final Alignment target = Alignment(rowWidth > 0 ? (dotCenterX / rowWidth) * 2 - 1 : -1.0, -1.0);
+            // 收起完成时本行顶部恰好落在父节点行底部，再向上偏移即可到达父节点圆点
+            final double targetOffsetY =
+                -(_textLineHeight / 2 - OutlineConnectionMetrics.dotVerticalOffset + widget.nodeSpacing);
+
+            return Align(
+              alignment: Alignment.topLeft,
+              heightFactor: progress,
+              child: Transform.translate(
+                // 收拢过程中内容逐渐上移，末端汇聚到父节点圆点
+                offset: Offset(0, targetOffsetY * (1 - progress)),
+                child: Transform.scale(
+                  scale: 0.2 + 0.8 * progress,
+                  alignment: target,
+                  child: Opacity(opacity: progress, child: child),
+                ),
+              ),
+            );
+          },
         );
       },
     );
