@@ -1677,12 +1677,11 @@ class OutlineEditorState extends State<OutlineEditor>
   /// - 光标在中段：分割文本，有子节点时新节点在上方承载前半部分（保留子节点随当前节点下移），
   ///   无子节点时新节点在下方承载后半部分；
   /// - 光标在末尾：有子节点时在子节点列表开头插入新子节点，无子节点时在下方插入同级空节点。
+  ///
+  /// 空白且无子节点的节点位于同级末尾时，换行改为提升该节点的层级。
   void _createSibling(String nodeId) {
     final location = _findLocation(nodeId);
     if (location == null) return;
-
-    // 开启批量操作，在操作完成后记录撤销项
-    _undoManager.beginBatch();
 
     final siblings = location.parent?.children ?? _roots;
     final currentNode = siblings[location.index];
@@ -1690,6 +1689,18 @@ class OutlineEditorState extends State<OutlineEditor>
     final selection = controller.selection;
     final text = controller.text;
     final hasChildren = currentNode.children.isNotEmpty;
+
+    // 空白节点位于同级末尾时，换行视为提升该空行的层级，而不是继续新增同级空节点
+    if (text.isEmpty && !hasChildren && location.index == siblings.length - 1) {
+      final canOutdent = location.parent != null && !_isTopicTopLevelNode(nodeId);
+      if (canOutdent) {
+        _outdentNode(nodeId);
+        return;
+      }
+    }
+
+    // 开启批量操作，在操作完成后记录撤销项
+    _undoManager.beginBatch();
 
     // 光标在文本开头（且非空）：在当前节点上方插入空节点，将当前行下推
     if (selection.isCollapsed && selection.baseOffset == 0 && text.isNotEmpty) {
@@ -1984,7 +1995,8 @@ class OutlineEditorState extends State<OutlineEditor>
   /// 合并当前节点到上一节点
   ///
   /// 将当前节点的文本追加到同级上一节点末尾，并删除当前节点，
-  /// 光标定位到合并处。只有当前节点和同级上一节点都没有子节点时才允许合并。
+  /// 两段文字的样式区间一并拼接保留，光标定位到合并处。
+  /// 只有当前节点和同级上一节点都没有子节点时才允许合并。
   void _mergeWithPreviousNode(String nodeId) {
     final currentLocation = _findLocation(nodeId);
     // 没有同级上一节点时无法合并
@@ -2004,10 +2016,22 @@ class OutlineEditorState extends State<OutlineEditor>
     // 将当前节点的文本追加到上一节点末尾，记录合并位置（即上一节点原文本长度）
     final mergeOffset = previousNode.text.length;
     final mergedText = previousNode.text + currentNode.text;
+
+    // 合并样式区间：上一节点的区间保持原位，当前节点的区间按合并位置整体后移
+    final mergedStyleRanges = TextStyleRangeUtils.mergeAdjacent(<TextStyleRange>[
+      ...previousNode.styleRanges,
+      ...TextStyleRangeUtils.shift(currentNode.styleRanges, mergeOffset),
+    ]);
+
     final previousController = _controllers[previousNode.id];
     if (previousController != null) {
+      // 先同步样式区间再写入文本，避免合并后的文字丢失样式
+      if (previousController is RichTextEditingController) {
+        previousController.styleRanges = mergedStyleRanges;
+      }
       previousController.text = mergedText;
     }
+    previousNode.styleRanges = mergedStyleRanges;
     previousNode.text = mergedText;
 
     // 删除当前节点，子节点提升到当前位置
@@ -2439,6 +2463,9 @@ class OutlineEditorState extends State<OutlineEditor>
   }
 
   /// 选择指定索引范围的节点（包含两端）
+  ///
+  /// 选区以子树为单位：范围内节点的全部子孙节点一并选中，
+  /// 折叠状态下不可见的子节点同样包含在内。
   void _selectNodeRange(int startIndex, int endIndex) {
     final flatList = _flatten();
     if (flatList.isEmpty) return;
@@ -2446,10 +2473,14 @@ class OutlineEditorState extends State<OutlineEditor>
     final start = startIndex < endIndex ? startIndex : endIndex;
     final end = startIndex < endIndex ? endIndex : startIndex;
 
-    _selectedNodeIds.clear();
+    final rangeIds = <String>{};
     for (int i = start; i <= end && i < flatList.length; i++) {
-      _selectedNodeIds.add(flatList[i].node.id);
+      rangeIds.add(flatList[i].node.id);
     }
+
+    _selectedNodeIds
+      ..clear()
+      ..addAll(_expandWithDescendants(rangeIds));
     _selectAllLevel = 0;
     setState(() {});
     _notifyBatchChanged();
@@ -2457,19 +2488,31 @@ class OutlineEditorState extends State<OutlineEditor>
 
   /// 收集节点及其全部子节点（含各级子孙）的 ID
   ///
-  /// 依据扁平列表中的深度判断子树范围，折叠状态下不可见的子孙节点不在其中
-  List<String> _collectSubtreeIds(String nodeId) {
-    final flatList = _flatten();
-    final index = flatList.indexWhere((f) => f.node.id == nodeId);
-    if (index == -1) return const [];
+  /// 遍历树结构收集子树，折叠状态下不可见的子孙节点同样包含在内。
+  List<String> _collectSubtreeIds(String nodeId) => _expandWithDescendants([nodeId]).toList();
 
-    final ids = <String>[flatList[index].node.id];
-    final depth = flatList[index].depth;
-    for (int i = index + 1; i < flatList.length; i++) {
-      if (flatList[i].depth <= depth) break;
-      ids.add(flatList[i].node.id);
+  /// 将节点集合扩展为包含其全部子孙节点的集合
+  ///
+  /// 深度优先遍历整棵树：集合中的节点连同各级子孙节点一并加入结果，
+  /// 存在已包含祖先的节点同样加入，用于让节点选区始终覆盖完整子树。
+  Set<String> _expandWithDescendants(Iterable<String> ids) {
+    final seeds = ids.toSet();
+    final result = <String>{};
+
+    void walk(OutlineNode node, bool ancestorSelected) {
+      final included = ancestorSelected || seeds.contains(node.id);
+      if (included) {
+        result.add(node.id);
+      }
+      for (final child in node.children) {
+        walk(child, included);
+      }
     }
-    return ids;
+
+    for (final root in _roots) {
+      walk(root, false);
+    }
+    return result;
   }
 
   /// 清除指定节点的文本选区，光标停在选区尾部
@@ -2559,6 +2602,29 @@ class OutlineEditorState extends State<OutlineEditor>
     return flatList.where((f) => _selectedNodeIds.contains(f.node.id)).toList();
   }
 
+  /// 获取按文档顺序排列的选中节点（包含折叠状态下不可见的子孙节点）
+  ///
+  /// 深度优先遍历整棵树：选中的节点连同其全部子孙节点一并收集，
+  /// 存在选中祖先的节点同样收集，用于复制时保留完整的子树结构。
+  List<FlatNode> _getSelectedFlatNodesWithDescendants() {
+    final result = <FlatNode>[];
+
+    void walk(OutlineNode node, int depth, OutlineNode? parent, bool ancestorSelected) {
+      final selected = ancestorSelected || _selectedNodeIds.contains(node.id);
+      if (selected) {
+        result.add(FlatNode(node: node, depth: depth, parent: parent));
+      }
+      for (final child in node.children) {
+        walk(child, depth + 1, node, selected);
+      }
+    }
+
+    for (final root in _roots) {
+      walk(root, 0, null, false);
+    }
+    return result;
+  }
+
   /// 处理 Ctrl/Cmd+A 全选操作
   ///
   /// 状态循环：未选区 → 全选当前主题 → 全选整个文档 → 取消全选
@@ -2568,28 +2634,22 @@ class OutlineEditorState extends State<OutlineEditor>
     if (flatList.isEmpty) return;
 
     if (_selectAllLevel == 0) {
-      // 全选当前节点及其子节点
+      // 全选当前节点及其全部子孙节点
       final focusIndex = flatList.indexWhere((f) => f.node.id == focusedNodeId);
       if (focusIndex == -1) return;
-      final focusDepth = flatList[focusIndex].depth;
 
-      _selectedNodeIds.clear();
-      _selectedNodeIds.add(flatList[focusIndex].node.id);
-      // 遍历后续节点，选择所有深度大于当前节点的子节点
-      for (int i = focusIndex + 1; i < flatList.length; i++) {
-        if (flatList[i].depth <= focusDepth) break;
-        _selectedNodeIds.add(flatList[i].node.id);
-      }
+      _selectedNodeIds
+        ..clear()
+        ..addAll(_collectSubtreeIds(focusedNodeId));
       _selectAllLevel = 1;
       // 记录选区的起始锚点
       _selectionAnchorIndex = focusIndex;
       _activateNodeSelectionFocus();
     } else if (_selectAllLevel == 1) {
       // 全选整个文档
-      _selectedNodeIds.clear();
-      for (final flat in flatList) {
-        _selectedNodeIds.add(flat.node.id);
-      }
+      _selectedNodeIds
+        ..clear()
+        ..addAll(_expandWithDescendants(flatList.map((f) => f.node.id)));
       _selectAllLevel = 2;
       _selectionAnchorIndex = 0;
     } else {
@@ -2608,10 +2668,9 @@ class OutlineEditorState extends State<OutlineEditor>
 
     // 存在节点选区 → 全选所有节点
     if (_selectedNodeIds.isNotEmpty) {
-      _selectedNodeIds.clear();
-      for (final flat in flatList) {
-        _selectedNodeIds.add(flat.node.id);
-      }
+      _selectedNodeIds
+        ..clear()
+        ..addAll(_expandWithDescendants(flatList.map((f) => f.node.id)));
       _selectAllLevel = 2;
       _selectionAnchorIndex = 0;
       _activateNodeSelectionFocus();
@@ -2621,9 +2680,7 @@ class OutlineEditorState extends State<OutlineEditor>
 
     // 无目标节点 → 全选所有节点
     if (nodeId == null) {
-      for (final flat in flatList) {
-        _selectedNodeIds.add(flat.node.id);
-      }
+      _selectedNodeIds.addAll(_expandWithDescendants(flatList.map((f) => f.node.id)));
       _selectAllLevel = 2;
       _selectionAnchorIndex = 0;
       setState(() {});
@@ -2641,17 +2698,13 @@ class OutlineEditorState extends State<OutlineEditor>
       // 文字未全选 → 全选当前节点文字
       controller.selection = TextSelection(baseOffset: 0, extentOffset: controller.text.length);
     } else {
-      // 文字已全选 → 选择当前节点及其所有子节点
+      // 文字已全选 → 选择当前节点及其全部子孙节点
       final focusIndex = flatList.indexWhere((f) => f.node.id == nodeId);
       if (focusIndex == -1) return;
-      final focusDepth = flatList[focusIndex].depth;
 
-      _selectedNodeIds.clear();
-      _selectedNodeIds.add(nodeId);
-      for (int i = focusIndex + 1; i < flatList.length; i++) {
-        if (flatList[i].depth <= focusDepth) break;
-        _selectedNodeIds.add(flatList[i].node.id);
-      }
+      _selectedNodeIds
+        ..clear()
+        ..addAll(_collectSubtreeIds(nodeId));
       _selectAllLevel = 1;
       _selectionAnchorIndex = focusIndex;
       _activateNodeSelectionFocus();
@@ -2673,13 +2726,14 @@ class OutlineEditorState extends State<OutlineEditor>
   /// 是否已选中全部可见节点
   bool get isAllNodesSelected {
     final flatList = _flatten();
-    return flatList.isNotEmpty && _selectedNodeIds.length >= flatList.length;
+    return flatList.isNotEmpty && flatList.every((f) => _selectedNodeIds.contains(f.node.id));
   }
 
   /// 是否仅选中了部分可见节点（有选中项但未全选）
   bool get isPartialNodesSelected {
     final flatList = _flatten();
-    return _selectedNodeIds.isNotEmpty && _selectedNodeIds.length < flatList.length;
+    final selectedVisibleCount = flatList.where((f) => _selectedNodeIds.contains(f.node.id)).length;
+    return selectedVisibleCount > 0 && selectedVisibleCount < flatList.length;
   }
 
   /// 通知批量选择状态发生变化
@@ -2741,9 +2795,7 @@ class OutlineEditorState extends State<OutlineEditor>
         _selectAllLevel = 0;
         _selectionAnchorIndex = null;
       } else {
-        for (final flat in _flatten()) {
-          _selectedNodeIds.add(flat.node.id);
-        }
+        _selectedNodeIds.addAll(_expandWithDescendants(_flatten().map((f) => f.node.id)));
         _selectAllLevel = 2;
         _selectionAnchorIndex = 0;
       }
@@ -4005,8 +4057,10 @@ class OutlineEditorState extends State<OutlineEditor>
   }
 
   /// 复制选中节点到剪贴板（纯文本保留缩进，HTML 保留结构与文字样式）
+  ///
+  /// 复制内容包含选中节点的全部子孙节点，折叠状态下不可见的子节点同样会被复制。
   void _copySelectedNodes() {
-    final selectedNodes = _getSelectedFlatNodes();
+    final selectedNodes = _getSelectedFlatNodesWithDescendants();
     if (selectedNodes.isEmpty) return;
 
     final text = _serializeNodes(selectedNodes);
@@ -4019,8 +4073,10 @@ class OutlineEditorState extends State<OutlineEditor>
   }
 
   /// 剪切选中节点：复制后删除
+  ///
+  /// 复制内容包含选中节点的全部子孙节点，折叠状态下不可见的子节点同样会被复制。
   void _cutSelectedNodes() {
-    final selectedNodes = _getSelectedFlatNodes();
+    final selectedNodes = _getSelectedFlatNodesWithDescendants();
     if (selectedNodes.isEmpty) return;
 
     final text = _serializeNodes(selectedNodes);
@@ -5297,10 +5353,9 @@ class OutlineEditorState extends State<OutlineEditor>
       if (_selectAllLevel == 1) {
         // 主题已选 → 全选文档
         final flatList = _flatten();
-        _selectedNodeIds.clear();
-        for (final flat in flatList) {
-          _selectedNodeIds.add(flat.node.id);
-        }
+        _selectedNodeIds
+          ..clear()
+          ..addAll(_expandWithDescendants(flatList.map((f) => f.node.id)));
         _selectAllLevel = 2;
         _selectionAnchorIndex = 0;
         setState(() {});
