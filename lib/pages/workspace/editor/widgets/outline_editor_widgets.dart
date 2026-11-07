@@ -72,6 +72,16 @@ class OutlineEditorTopBar extends StatelessWidget {
   /// 打开布局设置卡片回调
   final VoidCallback onOpenSettings;
 
+  /// 当前主题路径名称列表（不含固定在最前面的“全部”）
+  ///
+  /// 为空时标题显示“大纲编辑器”，非空时按“全部 / 层级… / 当前主题”展示面包屑。
+  final List<String> topicPath;
+
+  /// 点击面包屑项回调
+  ///
+  /// 索引 0 表示“全部”，其余索引对应 [topicPath] 中同位置的层级。
+  final ValueChanged<int> onTopicPathTap;
+
   const OutlineEditorTopBar({
     super.key,
     required this.colorScheme,
@@ -91,6 +101,8 @@ class OutlineEditorTopBar extends StatelessWidget {
     required this.settingsButtonKey,
     required this.isSettingsCardVisible,
     required this.onOpenSettings,
+    required this.topicPath,
+    required this.onTopicPathTap,
   });
 
   @override
@@ -106,21 +118,36 @@ class OutlineEditorTopBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // 标题
+          // 标题图标
           Icon(Icons.account_tree_outlined, size: 18, color: colorScheme.primary),
           const SizedBox(width: 8),
-          Text('大纲编辑器', style: context.titleSmall?.copyWith(fontWeight: FontWeight.w600)),
-          const SizedBox(width: 2),
-          // 设置入口：在标题后提供齿轮图标，弹出大纲编辑器设置卡片
-          _buildIconButton(
-            key: settingsButtonKey,
-            icon: Icons.settings_outlined,
-            tooltip: '设置',
-            onTap: onOpenSettings,
-            isSelected: isSettingsCardVisible,
-            showSelectedBackground: false,
+          // 标题区域：未进入主题时显示编辑器名称，进入主题后显示层级面包屑
+          Expanded(
+            child: Row(
+              children: [
+                Flexible(
+                  child: topicPath.isEmpty
+                      ? Text(
+                          '大纲编辑器',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: context.titleSmall?.copyWith(fontWeight: FontWeight.w600),
+                        )
+                      : _buildBreadcrumb(context),
+                ),
+                const SizedBox(width: 2),
+                // 设置入口：在标题后提供齿轮图标，弹出大纲编辑器设置卡片
+                _buildIconButton(
+                  key: settingsButtonKey,
+                  icon: Icons.settings_outlined,
+                  tooltip: '设置',
+                  onTap: onOpenSettings,
+                  isSelected: isSettingsCardVisible,
+                  showSelectedBackground: false,
+                ),
+              ],
+            ),
           ),
-          const Spacer(),
           if (isBatchMode) ...[
             // 批量选择模式：全选/取消全选
             // 图标随选中情况变化：全选为实心勾选框，部分选中为中间态，未选中为空心框
@@ -164,6 +191,192 @@ class OutlineEditorTopBar extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// 面包屑项的水平内边距总量（左右各 2）
+  static const double _breadcrumbItemPadding = 4.0;
+
+  /// 面包屑分隔符的水平内边距总量（左右各 3）
+  static const double _breadcrumbSeparatorPadding = 6.0;
+
+  /// 构建主题层级面包屑
+  ///
+  /// 始终显示“全部”和当前主题；中间层级依据可用宽度保留离当前主题最近的若干级，
+  /// 省略的层级用“…”表示。名称过长时以省略号截断，窄屏下也能准确显示关键层级。
+  Widget _buildBreadcrumb(BuildContext context) {
+    final List<String> labels = ['全部', ...topicPath];
+    final TextStyle? itemStyle = context.titleSmall?.copyWith(
+      fontWeight: FontWeight.w400,
+      color: colorScheme.onSurfaceVariant,
+    );
+    final TextStyle? currentStyle = context.titleSmall?.copyWith(
+      fontWeight: FontWeight.w600,
+      color: colorScheme.onSurface,
+    );
+    final TextStyle? separatorStyle = context.titleSmall?.copyWith(
+      fontWeight: FontWeight.w400,
+      color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 按可用宽度决定实际展示的层级，必要时插入省略项
+        final List<int> visibleIndexes = _resolveVisibleBreadcrumbIndexes(
+          context,
+          labels,
+          itemStyle,
+          currentStyle,
+          separatorStyle,
+          constraints.maxWidth,
+        );
+
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (int i = 0; i < visibleIndexes.length; i++) ...[
+              if (i > 0) _buildBreadcrumbSeparator(separatorStyle),
+              _buildBreadcrumbEntry(
+                context,
+                index: visibleIndexes[i],
+                labels: labels,
+                itemStyle: itemStyle,
+                currentStyle: currentStyle,
+                allowFlexible: constraints.hasBoundedWidth,
+              ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+
+  /// 计算面包屑实际展示的层级索引
+  ///
+  /// 索引 -1 表示被省略的中间层级；在保证“全部”和当前主题可见的前提下，
+  /// 从离当前主题最近的层级开始尝试加入中间层级，直到可用宽度放不下为止。
+  List<int> _resolveVisibleBreadcrumbIndexes(
+    BuildContext context,
+    List<String> labels,
+    TextStyle? itemStyle,
+    TextStyle? currentStyle,
+    TextStyle? separatorStyle,
+    double maxWidth,
+  ) {
+    final int last = labels.length - 1;
+    // 宽度不受限时直接展示全部层级
+    if (!maxWidth.isFinite || maxWidth <= 0) {
+      return [for (int i = 0; i <= last; i++) i];
+    }
+
+    final TextScaler textScaler = MediaQuery.textScalerOf(context);
+    final TextDirection textDirection = Directionality.of(context);
+
+    // 测量单行文本的显示宽度，用于判断面包屑能否放入可用空间
+    double measure(String text, TextStyle? style) {
+      final TextPainter painter = TextPainter(
+        text: TextSpan(text: text, style: style),
+        textDirection: textDirection,
+        textScaler: textScaler,
+        maxLines: 1,
+      )..layout();
+      final double width = painter.width;
+      painter.dispose();
+      return width;
+    }
+
+    final double ellipsisWidth = measure('…', itemStyle) + _breadcrumbItemPadding;
+    final double separatorWidth = measure('/', separatorStyle) + _breadcrumbSeparatorPadding;
+    // 空文字节点展示为占位名称，测量时需按实际展示文本计算
+    String displayText(int index) => labels[index].trim().isEmpty ? '未命名主题' : labels[index].trim();
+    double itemWidth(int index) =>
+        measure(displayText(index), index == last ? currentStyle : itemStyle) + _breadcrumbItemPadding;
+
+    // 预留少量安全空间，抵消测量与实际布局的差异
+    final double availableWidth = maxWidth - 8;
+
+    bool fits(List<int> indexes) {
+      double width = 0;
+      for (final index in indexes) {
+        width += index < 0 ? ellipsisWidth : itemWidth(index);
+      }
+      width += separatorWidth * (indexes.length - 1);
+      return width <= availableWidth;
+    }
+
+    // 最小集合为“全部”和当前主题；两者都放不下时交由文本截断当前主题
+    final List<int> minimal = last == 0 ? [0] : [0, last];
+    if (!fits(minimal)) return minimal;
+
+    List<int> result = minimal;
+    // 从最近的一级开始向上保留中间层级，放不下时用省略项替代更早的层级
+    for (int keep = 1; keep <= last - 1; keep++) {
+      final int start = last - keep;
+      final List<int> candidate = [
+        0,
+        if (start > 1) -1,
+        for (int index = start; index < last; index++) index,
+        last,
+      ];
+      if (fits(candidate)) result = candidate;
+    }
+    return result;
+  }
+
+  /// 构建面包屑分隔符
+  Widget _buildBreadcrumbSeparator(TextStyle? style) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: _breadcrumbSeparatorPadding / 2),
+      child: Text('/', maxLines: 1, style: style),
+    );
+  }
+
+  /// 构建单个面包屑项
+  ///
+  /// 当前主题以加粗的主色文字展示且不可点击，其余层级可点击切换；
+  /// 节点文字为空时显示为“未命名主题”。
+  Widget _buildBreadcrumbEntry(
+    BuildContext context, {
+    required int index,
+    required List<String> labels,
+    required TextStyle? itemStyle,
+    required TextStyle? currentStyle,
+    required bool allowFlexible,
+  }) {
+    // 省略项用于提示中间还有未展示的层级，不响应点击
+    if (index < 0) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: _breadcrumbItemPadding / 2),
+        child: Text('…', maxLines: 1, style: itemStyle),
+      );
+    }
+
+    final bool isCurrent = index == labels.length - 1;
+    // 空文字节点没有可辨识的名称，用占位名称提示其存在
+    final String text = labels[index].trim().isEmpty ? '未命名主题' : labels[index].trim();
+    final TextStyle? style = isCurrent ? currentStyle : itemStyle;
+
+    final Widget padded = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: _breadcrumbItemPadding / 2, vertical: 2),
+      child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: style),
+    );
+
+    if (isCurrent) {
+      // 当前主题始终显示且不可点击；空间不足时截断名称，避免挤压其他层级
+      return allowFlexible ? Flexible(fit: FlexFit.loose, child: padded) : padded;
+    }
+
+    final Widget item = MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        // 空白处同样响应点击，扩大面包屑项的可点击范围
+        behavior: HitTestBehavior.opaque,
+        onTap: () => onTopicPathTap(index),
+        child: padded,
+      ),
+    );
+
+    // 中间层级已按测量结果确认可以完整显示，保持固定宽度即可
+    return item;
   }
 
   /// 构建工具栏中的垂直分隔线
@@ -297,6 +510,56 @@ class OutlineTitleField extends StatelessWidget {
                     onChanged: onChanged,
                   ),
                 ),
+        );
+      },
+    );
+  }
+}
+
+/// 主题标题
+///
+/// 进入主题后以纯文本标签展示当前主题节点的文本，不可编辑、不可选中；
+/// 需要修改主题内容时先返回上一级，在对应节点中输入。
+class OutlineTopicTitleLabel extends StatelessWidget {
+  /// 当前主题节点
+  final OutlineNode node;
+
+  /// 颜色方案
+  final ColorScheme colorScheme;
+
+  /// 标题左侧内缩量，用于与一级节点的圆点左边缘对齐
+  final double leftPadding;
+
+  const OutlineTopicTitleLabel({super.key, required this.node, required this.colorScheme, required this.leftPadding});
+
+  /// 标题字号相对大纲基础字号的增量
+  ///
+  /// 与文件标题保持相同量级，使主题标题在视觉上明显高于节点内容
+  static const double _fontSizeOffset = 10.0;
+
+  /// 标题行高倍数
+  static const double _lineHeightFactor = 1.4;
+
+  @override
+  Widget build(BuildContext context) {
+    // 监听设置变化，字体或字号调整时同步更新标题样式
+    return ListenableBuilder(
+      listenable: SettingsService.instance,
+      builder: (context, _) {
+        final settings = SettingsService.instance;
+        final TextStyle style = TextStyle(
+          fontFamily: settings.outlineFontFamily,
+          fontSize: settings.outlineFontSize + _fontSizeOffset,
+          fontWeight: FontWeight.bold,
+          height: _lineHeightFactor,
+          color: colorScheme.onSurface,
+        );
+
+        return Padding(
+          // 右侧留白与节点内容保持一致，底部留白分隔标题与第一个节点
+          padding: EdgeInsets.only(left: leftPadding, right: 8, bottom: PlatformCapabilities.isMobile ? 12 : 20),
+          // 纯标签不可编辑、不可选中，长文本按单行省略
+          child: Text(node.text, style: style, maxLines: 1, overflow: TextOverflow.ellipsis),
         );
       },
     );

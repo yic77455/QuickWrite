@@ -130,6 +130,12 @@ class OutlineEditorState extends State<OutlineEditor>
   /// 根节点列表
   final List<OutlineNode> _roots = [];
 
+  /// 当前进入的主题节点 ID
+  ///
+  /// 为 null 时编辑区显示全部根节点；非空时只显示该节点的子节点，
+  /// 该节点本身不在列表中展示，由顶部面包屑标识当前所在层级。
+  String? _focusNodeId;
+
   /// 节点ID计数器（用于生成唯一ID）
   int _idCounter = 0;
 
@@ -491,6 +497,40 @@ class OutlineEditorState extends State<OutlineEditor>
     return OutlineNode(id: _generateId(), text: text);
   }
 
+  /// 当前进入的主题节点（未进入主题时为 null）
+  OutlineNode? get _focusNode {
+    final nodeId = _focusNodeId;
+    return nodeId == null ? null : _findNode(nodeId);
+  }
+
+  /// 编辑区当前展示的顶级节点列表
+  ///
+  /// 主题模式下为当前主题的子节点，否则为大纲的全部根节点。
+  List<OutlineNode> get _visibleRoots => _focusNode?.children ?? _roots;
+
+  /// 当前主题从根到自身的节点路径（未进入主题时为空）
+  List<OutlineNode> get _focusPath {
+    final node = _focusNode;
+    if (node == null) return const [];
+    return [..._findAncestors(node.id), node];
+  }
+
+  /// 节点是否为当前主题视图的顶层节点
+  ///
+  /// 主题模式下当前主题的子节点构成视图的根级节点，
+  /// 反缩进会把它们移出当前主题，因此需要限制该操作。
+  bool _isTopicTopLevelNode(String nodeId) {
+    final focus = _focusNode;
+    if (focus == null) return false;
+    return _findLocation(nodeId)?.parent?.id == focus.id;
+  }
+
+  /// 顶部面包屑展示的主题名称列表（不含固定在最前面的“全部”）
+  List<String> get _breadcrumbTitles => _focusPath.map(_nodeDisplayText).toList();
+
+  /// 节点的展示文本，优先取输入框中的实时内容
+  String _nodeDisplayText(OutlineNode node) => _controllers[node.id]?.text ?? node.text;
+
   /// 扁平化树形结构为一维列表（仅包含可见的展开节点）
   List<FlatNode> _flatten() {
     final result = <FlatNode>[];
@@ -504,7 +544,7 @@ class OutlineEditorState extends State<OutlineEditor>
       }
     }
 
-    for (final root in _roots) {
+    for (final root in _visibleRoots) {
       walk(root, 0, null);
     }
     return result;
@@ -548,7 +588,7 @@ class OutlineEditorState extends State<OutlineEditor>
       }
     }
 
-    for (final root in _roots) {
+    for (final root in _visibleRoots) {
       walk(root, 0, null, null, 0);
     }
     return rows;
@@ -634,6 +674,59 @@ class OutlineEditorState extends State<OutlineEditor>
       node = node.children.last;
     }
     return node;
+  }
+
+  // ================= 主题导航 =================
+
+  /// 进入指定节点的主题视图
+  ///
+  /// 进入后只展示该节点的子节点；节点暂无子节点时展示空主题提示，
+  /// 可继续通过顶部“添加节点”创建子主题。
+  void _enterNodeTopic(String nodeId) {
+    final node = _findNode(nodeId);
+    if (node == null) return;
+    _switchFocusTheme(nodeId);
+  }
+
+  /// 点击顶部面包屑切换主题层级
+  ///
+  /// [depth] 为 0 时回到显示全部节点，否则进入路径中对应层的节点。
+  void _onBreadcrumbTap(int depth) {
+    if (depth <= 0) {
+      _switchFocusTheme(null);
+      return;
+    }
+    final path = _focusPath;
+    if (depth > path.length) return;
+    _switchFocusTheme(path[depth - 1].id);
+  }
+
+  /// 切换主题视图的聚焦节点
+  ///
+  /// [nodeId] 为 null 时退出主题视图；切换后释放文本输入焦点并回到视口顶部。
+  void _switchFocusTheme(String? nodeId) {
+    if (nodeId == _focusNodeId) return;
+
+    // 切换视图前退出批量选择模式，避免选区状态残留在不可见的节点上
+    if (_isBatchSelectionMode) exitBatchSelectionMode();
+    _releaseTextInputFocus();
+
+    setState(() {
+      _focusNodeId = nodeId;
+      // 清除旧的节点选区与焦点记录，避免工具栏或选区继续作用于已不可见的节点
+      _selectedNodeIds.clear();
+      _selectAllLevel = 0;
+      _selectionAnchorIndex = null;
+      _lastFocusedNodeId = null;
+    });
+    // 主题切换改变了可见节点行，丢弃进行中的折叠动画，避免残留过渡
+    _clearFoldAnimations();
+
+    // 等待新列表完成布局后再回到顶部
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      _scrollController.jumpTo(0);
+    });
   }
 
   // ================= 资源管理 =================
@@ -822,6 +915,8 @@ class OutlineEditorState extends State<OutlineEditor>
   /// 节点内容支持 Markdown 格式，解析标题级别和内联样式标记。
   void parseFromText(String text) {
     _roots.clear();
+    // 重新解析内容后旧的主题节点可能已不存在，回到显示全部节点的视图
+    _focusNodeId = null;
     // 栈中保存 (节点, 深度) 对
     final stack = <(OutlineNode, int)>[];
 
@@ -1218,6 +1313,11 @@ class OutlineEditorState extends State<OutlineEditor>
       ..addAll(snapshot.selectedNodeIds);
     _selectAllLevel = snapshot.selectAllLevel;
     _selectionAnchorIndex = snapshot.selectionAnchorIndex;
+
+    // 撤销后当前主题节点可能已不存在，回退到显示全部节点的视图
+    if (_focusNodeId != null && _findNode(_focusNodeId!) == null) {
+      _focusNodeId = null;
+    }
 
     setState(() {});
 
@@ -1778,6 +1878,8 @@ class OutlineEditorState extends State<OutlineEditor>
   void _outdentNode(String nodeId) {
     final location = _findLocation(nodeId);
     if (location == null || location.parent == null) return;
+    // 主题视图的顶层节点不能移出当前主题
+    if (_isTopicTopLevelNode(nodeId)) return;
 
     // 开启批量操作，在操作完成后记录撤销项
     _undoManager.beginBatch();
@@ -1798,6 +1900,7 @@ class OutlineEditorState extends State<OutlineEditor>
   void _applyOutdentNode(String nodeId) {
     final location = _findLocation(nodeId);
     if (location == null || location.parent == null) return;
+    if (_isTopicTopLevelNode(nodeId)) return;
 
     final parent = location.parent!;
     final grandparentLocation = _findLocation(parent.id);
@@ -1880,29 +1983,23 @@ class OutlineEditorState extends State<OutlineEditor>
 
   /// 合并当前节点到上一节点
   ///
-  /// 将当前节点的文本追加到同级上一节点末尾，并删除当前节点。
-  /// 子节点提升到当前节点的位置。光标定位到合并处。
-  /// 上一节点与当前节点非同级时不处理。
+  /// 将当前节点的文本追加到同级上一节点末尾，并删除当前节点，
+  /// 光标定位到合并处。只有当前节点和同级上一节点都没有子节点时才允许合并。
   void _mergeWithPreviousNode(String nodeId) {
-    final flatList = _flatten();
-    final currentIndex = flatList.indexWhere((f) => f.node.id == nodeId);
-    // 没有上一节点时无法合并
-    if (currentIndex <= 0) return;
-
-    final currentFlat = flatList[currentIndex];
-    final previousFlat = flatList[currentIndex - 1];
-    // 上一节点与当前节点非同级时不合并
-    if (currentFlat.depth != previousFlat.depth) return;
-
-    final previousNode = previousFlat.node;
     final currentLocation = _findLocation(nodeId);
-    if (currentLocation == null) return;
+    // 没有同级上一节点时无法合并
+    if (currentLocation == null || currentLocation.index <= 0) return;
+
+    // 按树结构直接取同级上一节点，不依赖扁平列表中的相邻行
+    final siblings = currentLocation.parent?.children ?? _roots;
+    final previousNode = siblings[currentLocation.index - 1];
+    final currentNode = siblings[currentLocation.index];
+
+    // 只允许两个没有子节点的节点合并，避免把节点合并进有子节点的节点
+    if (previousNode.children.isNotEmpty || currentNode.children.isNotEmpty) return;
 
     // 开启批量操作，在操作完成后记录撤销项
     _undoManager.beginBatch();
-
-    final siblings = currentLocation.parent?.children ?? _roots;
-    final currentNode = siblings[currentLocation.index];
 
     // 将当前节点的文本追加到上一节点末尾，记录合并位置（即上一节点原文本长度）
     final mergeOffset = previousNode.text.length;
@@ -2021,23 +2118,36 @@ class OutlineEditorState extends State<OutlineEditor>
   }
 
   /// 添加根节点
+  ///
+  /// 主题模式下新节点添加到当前主题的子节点末尾，否则添加到大纲根节点末尾。
   void _addRootNode() {
     // 开启批量操作，在操作完成后记录撤销项
     _undoManager.beginBatch();
 
+    final OutlineNode? focusNode = _focusNode;
     final newNode = _createNode('');
     _ensureResources(newNode);
-    _roots.add(newNode);
+    if (focusNode != null) {
+      // 主题视图中的“添加节点”即添加子主题，并展开父节点以便立即看到新节点
+      focusNode.children.add(newNode);
+      focusNode.isExpanded = true;
+    } else {
+      _roots.add(newNode);
+    }
     setState(() {});
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // 滚动使新节点可见
       _focusAndScrollToNode(newNode.id, moveCursorToEnd: false);
-      _endBatchAndNotify(description: '添加根节点', focusNodeId: newNode.id, focusSelection: _selectionAtStart());
+      _endBatchAndNotify(
+        description: focusNode == null ? '添加根节点' : '添加子主题',
+        focusNodeId: newNode.id,
+        focusSelection: _selectionAtStart(),
+      );
     });
   }
 
-  /// 展开所有节点
+  /// 展开当前视图中的所有节点
   void _expandAll() {
     void walk(OutlineNode node) {
       node.isExpanded = true;
@@ -2046,7 +2156,7 @@ class OutlineEditorState extends State<OutlineEditor>
       }
     }
 
-    for (final root in _roots) {
+    for (final root in _visibleRoots) {
       walk(root);
     }
     setState(() {});
@@ -2055,7 +2165,7 @@ class OutlineEditorState extends State<OutlineEditor>
     _saveFoldState();
   }
 
-  /// 折叠所有节点（仅保留根级节点可见）
+  /// 折叠当前视图中的所有节点（仅保留根级节点可见）
   void _collapseAll() {
     void walk(OutlineNode node) {
       node.isExpanded = false;
@@ -2064,7 +2174,7 @@ class OutlineEditorState extends State<OutlineEditor>
       }
     }
 
-    for (final root in _roots) {
+    for (final root in _visibleRoots) {
       walk(root);
     }
     setState(() {});
@@ -2669,7 +2779,8 @@ class OutlineEditorState extends State<OutlineEditor>
   bool get canIndentSelectedNodes => _selectedTopLevelNodeIds().any(_canBatchIndentNode);
 
   /// 批量选中的节点是否可以提升层级
-  bool get canOutdentSelectedNodes => _selectedTopLevelNodeIds().any((id) => _findLocation(id)?.parent != null);
+  bool get canOutdentSelectedNodes =>
+      _selectedTopLevelNodeIds().any((id) => _findLocation(id)?.parent != null && !_isTopicTopLevelNode(id));
 
   /// 批量缩进选中的节点
   ///
@@ -2701,8 +2812,13 @@ class OutlineEditorState extends State<OutlineEditor>
   ///
   /// 仅处理选中的顶层节点，无可提升节点时不产生撤销记录
   void outdentSelectedNodes() {
+    // 主题视图的顶层节点保持在当前主题内，不参与批量提升；
     // 按文档逆序处理，使同级节点依次插入到父节点之后时仍保持原有先后顺序
-    final targets = _selectedTopLevelNodeIdsInOrder().reversed.toList();
+    final targets = _selectedTopLevelNodeIdsInOrder()
+        .where((id) => !_isTopicTopLevelNode(id))
+        .toList()
+        .reversed
+        .toList();
     if (!targets.any((id) => _findLocation(id)?.parent != null)) return;
 
     _undoManager.beginBatch();
@@ -3666,7 +3782,7 @@ class OutlineEditorState extends State<OutlineEditor>
   /// 活动节点是否可以提升层级
   bool get canOutdentActiveNode {
     final nodeId = _activeNodeId;
-    return nodeId != null && _findLocation(nodeId)?.parent != null;
+    return nodeId != null && _findLocation(nodeId)?.parent != null && !_isTopicTopLevelNode(nodeId);
   }
 
   /// 切换目标节点的文字样式
@@ -4463,19 +4579,12 @@ class OutlineEditorState extends State<OutlineEditor>
     }
   }
 
-  /// 构建右键菜单项列表
+  /// 构建文字样式相关的菜单项
   ///
-  /// 菜单结构：
-  /// - 标题级别行（H1/H2/H3/T）
-  /// - 文字样式行（加粗/斜体/下划线/删除线）
-  /// - 字体颜色
-  /// - 字底颜色
-  /// - 常规菜单项：剪切、复制、粘贴、删除、全选
-  List<ContextMenuItem> _buildContextMenuItems() {
-    final nodeId = _contextMenuNodeId;
+  /// 包含标题级别行、文字样式行、字体颜色与字底颜色；
+  /// 节点右键菜单与主题标题右键菜单共用这部分内容。
+  List<ContextMenuItem> _buildStyleContextMenuItems(String? nodeId) {
     final controller = nodeId != null ? _controllers[nodeId] : null;
-    final selection = controller?.selection ?? const TextSelection.collapsed(offset: 0);
-    final bool hasTextSelection = selection.isValid && !selection.isCollapsed;
     final bool hasNodeSelection = _selectedNodeIds.isNotEmpty;
     final bool isReadOnly = widget.readOnly;
     final bool hasTarget = nodeId != null && controller != null;
@@ -4571,6 +4680,26 @@ class OutlineEditorState extends State<OutlineEditor>
           ),
         ],
       ),
+    ];
+  }
+
+  /// 构建右键菜单项列表
+  ///
+  /// 菜单结构：
+  /// - 文字样式相关菜单项（标题级别、文字样式、字体颜色、字底颜色）
+  /// - 常规菜单项：剪切、复制、粘贴、删除、全选
+  List<ContextMenuItem> _buildContextMenuItems() {
+    final nodeId = _contextMenuNodeId;
+    final controller = nodeId != null ? _controllers[nodeId] : null;
+    final selection = controller?.selection ?? const TextSelection.collapsed(offset: 0);
+    final bool hasTextSelection = selection.isValid && !selection.isCollapsed;
+    final bool hasNodeSelection = _selectedNodeIds.isNotEmpty;
+    final bool isReadOnly = widget.readOnly;
+    final bool hasTarget = nodeId != null && controller != null;
+
+    return [
+      // 文字样式相关菜单项
+      ..._buildStyleContextMenuItems(nodeId),
 
       ContextMenuItem.divider(),
 
@@ -5924,6 +6053,8 @@ class OutlineEditorState extends State<OutlineEditor>
             settingsButtonKey: _settingsButtonKey,
             isSettingsCardVisible: _isSettingsCardVisible,
             onOpenSettings: _showSettingsCard,
+            topicPath: _breadcrumbTitles,
+            onTopicPathTap: _onBreadcrumbTap,
           ),
           // 大纲列表
           Expanded(
@@ -6251,17 +6382,46 @@ class OutlineEditorState extends State<OutlineEditor>
         (PlatformCapabilities.isMobile ? horizontalPadding : 0.0) +
         OutlineNodeTile.dotLeftInsetForDepth(0, indentWidth: _indentWidth);
 
-    // 大纲标题显示在第一个节点上方，随内容一同滚动，不属于节点
-    final Widget? titleSliver = settings.outlineShowTitle
+    // 标题显示在第一个节点上方，随内容一同滚动，不属于节点：
+    // 未进入主题时显示大纲文件标题，进入主题后显示当前主题节点自身的文本
+    final OutlineNode? topicNode = _focusNode;
+    final Widget? titleSliver;
+    if (!settings.outlineShowTitle) {
+      titleSliver = null;
+    } else if (topicNode != null) {
+      // 主题标题以纯文本标签展示当前主题文本，不可编辑、不可选中；
+      // 需要修改时返回上一级，在对应节点中输入
+      titleSliver = SliverToBoxAdapter(
+        child: OutlineTopicTitleLabel(
+          key: _titleFieldKey,
+          node: topicNode,
+          colorScheme: colorScheme,
+          leftPadding: titleLeftPadding,
+        ),
+      );
+    } else {
+      titleSliver = SliverToBoxAdapter(
+        child: OutlineTitleField(
+          key: _titleFieldKey,
+          controller: _titleController,
+          focusNode: _titleFocusNode,
+          colorScheme: colorScheme,
+          readOnly: widget.readOnly,
+          leftPadding: titleLeftPadding,
+          onChanged: (value) => widget.onTitleChanged?.call(value),
+        ),
+      );
+    }
+
+    // 主题模式下当前主题暂无子节点时展示提示，避免出现无内容的空白视图
+    final Widget? emptyTopicHint = _focusNode != null && displayRows.isEmpty
         ? SliverToBoxAdapter(
-            child: OutlineTitleField(
-              key: _titleFieldKey,
-              controller: _titleController,
-              focusNode: _titleFocusNode,
-              colorScheme: colorScheme,
-              readOnly: widget.readOnly,
-              leftPadding: titleLeftPadding,
-              onChanged: (value) => widget.onTitleChanged?.call(value),
+            child: Padding(
+              padding: EdgeInsets.only(left: titleLeftPadding, right: 8, top: 8, bottom: 8),
+              child: Text(
+                '该主题暂无子主题，可通过顶部“添加节点”创建',
+                style: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant.withValues(alpha: 0.6)),
+              ),
             ),
           )
         : null;
@@ -6292,6 +6452,7 @@ class OutlineEditorState extends State<OutlineEditor>
                 sliver: SliverMainAxisGroup(
                   slivers: [
                     ?titleSliver,
+                    ?emptyTopicHint,
                     nodeList,
                     SliverFillRemaining(hasScrollBody: false, child: const SizedBox.shrink()),
                   ],
@@ -6328,6 +6489,7 @@ class OutlineEditorState extends State<OutlineEditor>
           sliver: SliverMainAxisGroup(
             slivers: [
               ?titleSliver,
+              ?emptyTopicHint,
               nodeList,
             ],
           ),
@@ -6403,6 +6565,8 @@ class OutlineEditorState extends State<OutlineEditor>
       onDotDragMove: canReorderByDot ? _onDotDragMove : null,
       onDotDragEnd: canReorderByDot ? _onDotDragEnd : null,
       onDotDragCancel: canReorderByDot ? _onDotDragCancel : null,
+      // 点击圆点进入该节点的主题视图，批量选择模式下不切换
+      onDotTap: !_isBatchSelectionMode ? () => _enterNodeTopic(flatNode.node.id) : null,
       isDragging: _reorderNodeId == flatNode.node.id,
       // 折叠动画进度：子节点行据此收进父节点圆点，节点自身据此同步圆点轮廓
       subtreeFoldProgress: displayRow.foldProgress,

@@ -69,6 +69,11 @@ class OutlineNodeTile extends StatefulWidget {
   /// 切换展开/折叠回调
   final VoidCallback onToggleExpand;
 
+  /// 点击圆点进入该节点主题视图回调
+  ///
+  /// 为空时圆点不响应点击，仅保留长按拖拽排序
+  final VoidCallback? onDotTap;
+
   /// 批量选择模式下点击节点回调（切换该节点及其子树的选中状态）
   final VoidCallback onBatchTap;
 
@@ -149,6 +154,7 @@ class OutlineNodeTile extends StatefulWidget {
     required this.isBatchMode,
     required this.readOnly,
     required this.onToggleExpand,
+    this.onDotTap,
     required this.onBatchTap,
     required this.onChanged,
     required this.onTrailingBarLongPress,
@@ -422,8 +428,8 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
             ),
             // 箭头交互层（桌面端有子节点时叠加在连接线上方）
             if (hasChildren && !isMobile) _buildArrowButton(node, colorScheme, indentWidth),
-            // 圆点拖拽热区：长按圆点进入拖拽排序，位于箭头之上以便优先响应
-            if (widget.onDotDragStart != null) _buildDotDragHandle(columnOffset),
+            // 圆点交互热区：点击进入该节点主题，长按进入拖拽排序，位于箭头之上以便优先响应
+            if (widget.onDotDragStart != null || widget.onDotTap != null) _buildDotHandle(columnOffset),
           ],
         );
 
@@ -651,13 +657,13 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
     );
   }
 
-  /// 构建圆点拖拽热区
+  /// 构建圆点交互热区
   ///
-  /// 热区以圆点为中心覆盖圆点周边的小块区域，长按进入拖拽排序；
-  /// 按住移动时把指针的全局坐标交给调用方，由调用方按位置计算落点
-  Widget _buildDotDragHandle(int columnOffset) {
+  /// 热区以圆点为中心覆盖圆点周边的小块区域：点击进入该节点的主题视图，
+  /// 长按进入拖拽排序；按住移动时把指针的全局坐标交给调用方，由调用方按位置计算落点
+  Widget _buildDotHandle(int columnOffset) {
     // 热区边长：需覆盖圆点周边的空白，同时避免过度侵入右侧文本输入区
-    const double hitSize = 26.0;
+    const double hitSize = 20.0;
 
     // 圆点中心在节点行内的坐标，与连接线绘制器使用同一坐标系
     final double dotCenterX = (widget.depth + 1 + columnOffset) * widget.indentWidth + widget.indentWidth / 2;
@@ -675,8 +681,9 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
         onEnter: (_) => setState(() => _isDotHovered = true),
         onExit: (_) => setState(() => _isDotHovered = false),
         child: GestureDetector(
-          // 空白处同样响应手势，保证整个热区都是有效的长按热区
+          // 空白处同样响应手势，保证整个热区都是有效的交互热区
           behavior: HitTestBehavior.opaque,
+          onTap: widget.onDotTap,
           onLongPressStart: (details) => widget.onDotDragStart?.call(details.globalPosition),
           onLongPressMoveUpdate: (details) => widget.onDotDragMove?.call(details.globalPosition),
           onLongPressEnd: (_) => widget.onDotDragEnd?.call(),
@@ -777,3 +784,4 @@ class _OutlineNodeSelectionControls extends MaterialTextSelectionControls with T
 
 /// 大纲节点输入框在 Android 上使用的文字选择控件实例
 final TextSelectionControls _outlineNodeSelectionControls = _OutlineNodeSelectionControls();
+
