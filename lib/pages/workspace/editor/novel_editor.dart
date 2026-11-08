@@ -50,12 +50,6 @@ class NovelEditor extends StatefulWidget {
   /// 光标位置变化回调（使用扁平偏移量）
   final ValueChanged<TextSelection>? onSelectionChanged;
 
-  /// 首次加载时是否跳转到光标位置
-  ///
-  /// true：打开章节后自动跳转到光标位置（用于"定位至章末"等场景）
-  /// false：保持初始滚动位置（默认行为）
-  final bool initialScrollToCursor;
-
   /// 保存回调（Ctrl+S 触发）
   final VoidCallback? onSave;
 
@@ -77,7 +71,6 @@ class NovelEditor extends StatefulWidget {
     this.onChapterTitleChanged,
     required this.colorScheme,
     this.onSelectionChanged,
-    this.initialScrollToCursor = false,
     this.onSave,
     this.isActive = true,
     this.extraTopPadding = 0.0,
@@ -212,9 +205,6 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 用于判断文本是否增长，进而在末行输入时维持底边距这一安全距离。
   int _previousTextLength = 0;
 
-  /// 首次加载时光标定位的待处理标记
-  bool _pendingScrollToCursor = false;
-
   /// 缓存窗口最小化状态，用于检测从最小化恢复的情况
   bool _wasMinimized = false;
 
@@ -263,11 +253,6 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
 
     // 加载中文词库，为双击选词提供分词能力
     ChineseWordSegmenter.instance.install();
-
-    // 打开章节时按需定位到光标位置（如"定位至章末""上一次编辑位置"）
-    if (widget.initialScrollToCursor) {
-      _pendingScrollToCursor = true;
-    }
 
     // 如果初始化时处于激活状态，请求焦点
     if (widget.isActive) {
@@ -898,14 +883,6 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
       _lastHighlightHash = highlightHash;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) widget.controller.forceRepaint();
-      });
-    }
-
-    // 首次加载时按需跳转到光标位置
-    if (_pendingScrollToCursor) {
-      _pendingScrollToCursor = false;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) widget.controller.makeCursorCenterIfInvisible();
       });
     }
 

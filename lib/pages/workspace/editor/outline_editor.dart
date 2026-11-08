@@ -322,9 +322,6 @@ class OutlineEditorState extends State<OutlineEditor>
 
   // ================= 其他状态 =================
 
-  /// 是否正在异步加载文件内容
-  bool _isLoading = false;
-
   /// 折叠状态写入任务链
   ///
   /// 因内容与结构变化都会刷新折叠状态，多次保存按此链顺序执行，避免并发写同一文件
@@ -889,7 +886,6 @@ class OutlineEditorState extends State<OutlineEditor>
   ///
   /// 文件不存在时视为新设定项，初始化一个默认空节点
   Future<void> _loadFromFile() async {
-    _isLoading = true;
     try {
       final file = File(widget.filePath!);
       if (await file.exists()) {
@@ -905,9 +901,8 @@ class OutlineEditorState extends State<OutlineEditor>
       debugPrint('加载大纲文件失败: $e');
     } finally {
       if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
+        // 解析完成后重建节点列表（解析本身不触发刷新）
+        setState(() {});
         // 新建设定文件时把焦点落到第一个节点，便于内容加载完成后立即输入
         if (widget.autoFocusFirstNode) {
           _focusFirstNode();
@@ -6204,14 +6199,6 @@ class OutlineEditorState extends State<OutlineEditor>
     // 将查找匹配高亮同步到各节点控制器
     final workspaceProvider = context.read<WorkspaceProvider>();
     _syncFindHighlightsToControllers(workspaceProvider.findMatches, workspaceProvider.currentMatchIndex);
-
-    // 异步加载文件内容时显示加载状态
-    if (_isLoading) {
-      return Container(
-        color: colorScheme.surface,
-        child: Center(child: CircularProgressIndicator(color: colorScheme.primary)),
-      );
-    }
 
     // 展示数据包含折叠动画中的子节点行，用于呈现子节点收进圆点的过渡
     final displayRows = _buildDisplayRows();

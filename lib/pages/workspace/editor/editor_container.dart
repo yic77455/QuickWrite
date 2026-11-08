@@ -41,9 +41,6 @@ class _EditorContainerState extends State<EditorContainer> {
   /// 不参与今日码字与码字速度统计，但仍同步基线以保持后续统计正确。
   static const int _largeDeletionThreshold = 10;
 
-  /// 是否正在加载内容
-  bool _isLoading = false;
-  
   /// 当前加载的标签页ID（用于避免重复加载）
   String? _loadingTabId;
 
@@ -68,9 +65,8 @@ class _EditorContainerState extends State<EditorContainer> {
 
     // 如果标签页还没有控制器，需要创建并加载内容
     if (currentTab.textController == null) {
-      // 立即标记为加载中，防止编辑器在内容加载前显示hintText
+      // 标记正在加载的标签页，等待期间切换到其他标签页时据此放弃本次加载
       _loadingTabId = currentTab.id;
-      _isLoading = true;
 
       final spanBuilder = ReEditorSpanBuilder(
         customHighlightService: workspaceProvider.customHighlightService,
@@ -84,14 +80,23 @@ class _EditorContainerState extends State<EditorContainer> {
       if (currentTab.type != EditorTabType.backupPreview) {
         currentTab.chapterTitleController = TextEditingController();
       }
-      
+      // 记录载入前标签页携带的光标位置：
+      // 编辑器在空内容上挂载时会上报一次选区并覆盖该字段，需在此处先取出
+      final TextSelection? restoredCursor = currentTab.cursorPosition;
+
       // 异步加载内容
-      _loadTabContent(currentTab, workspaceProvider);
+      _loadTabContent(currentTab, workspaceProvider, restoredCursor);
     }
   }
   
   /// 异步加载标签页内容
-  Future<void> _loadTabContent(EditorTab tab, WorkspaceProvider provider) async {
+  ///
+  /// [restoredCursor] 为载入前标签页携带的光标位置，仅在会话恢复时为非空
+  Future<void> _loadTabContent(
+    EditorTab tab,
+    WorkspaceProvider provider,
+    TextSelection? restoredCursor,
+  ) async {
     // 确保异步执行，避免无 await 时在 build 阶段调用 setState/notifyListeners
     await Future.microtask(() {});
 
@@ -139,7 +144,6 @@ class _EditorContainerState extends State<EditorContainer> {
         // 恢复标签页会话时按记录的光标位置还原；
         // 备份预览标签页置于开头；其余标签页按用户设置的「打开章节时」模式决定
         int caretOffset;
-        final restoredCursor = tab.cursorPosition;
         if (tab.type == EditorTabType.backupPreview) {
           caretOffset = 0;
         } else if (restoredCursor != null) {
@@ -197,10 +201,10 @@ class _EditorContainerState extends State<EditorContainer> {
         // 内容加载完成后，如果查找替换栏处于打开状态，刷新查找结果
         provider.refreshFindIfVisible(resetIndex: true);
 
-        // 恢复标签页会话时，内容载入后让视口跟随还原的光标，
-        // 避免长章节中光标落在视口外（编辑器给选区赋值时不会自动滚动）
-        if (restoredCursor != null) {
-          _scrollToRestoredCursor(tab);
+        // 内容载入后让视口跟随光标，避免长章节中光标落在视口外：
+        // 会话恢复的标签页按还原的光标；「定位至章末」「上一次编辑位置」模式下按载入后的光标
+        if (restoredCursor != null || _openModeScrollsToCursor(tab)) {
+          _scrollToCursorAfterLoad(tab);
         }
       }
     } catch (e) {
@@ -221,10 +225,9 @@ class _EditorContainerState extends State<EditorContainer> {
         tab.recordedSessionWords = 0;
       }
     } finally {
+      // 内容载入完成，通知编辑器重组内容相关布局
       if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
+        setState(() {});
       }
       _loadingTabId = null;
       // 通知等待该标签页内容就绪的调用方（如全文搜索跳转）
@@ -232,11 +235,20 @@ class _EditorContainerState extends State<EditorContainer> {
     }
   }
   
-  /// 让视口滚动到会话还原的光标位置
+  /// 「打开章节时」设置是否要求载入内容后把视口滚动到光标处
+  ///
+  /// 备份预览标签页的光标固定在开头，不参与该判断
+  bool _openModeScrollsToCursor(EditorTab tab) {
+    if (tab.type == EditorTabType.backupPreview) return false;
+    final String mode = SettingsService.instance.openChapterCursorMode;
+    return mode == 'end' || mode == 'lastEdit';
+  }
+
+  /// 内容载入后让视口滚动到光标位置
   ///
   /// 内容与选区是程序化写入的，编辑器不会自动滚动，因此需要显式请求一次；
   /// 滚动由编辑器在下一帧执行，此时内容已完成排版。
-  void _scrollToRestoredCursor(EditorTab tab) {
+  void _scrollToCursorAfterLoad(EditorTab tab) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final state = tab.editorKey.currentState;
@@ -383,7 +395,7 @@ class _EditorContainerState extends State<EditorContainer> {
     final colorScheme = Theme.of(context).colorScheme;
 
     // 用 ColoredBox 包裹整个编辑器区域，确保内容为空时不会露出灰色底层
-    // 底色与编辑器背景设置保持一致，避免加载与空内容状态下出现异色
+    // 底色与编辑器背景设置保持一致，避免空内容状态下出现异色
     return ColoredBox(
       color: ColorUtils.getEditorBackgroundColorForTheme(context),
       child: IndexedStack(
@@ -391,29 +403,6 @@ class _EditorContainerState extends State<EditorContainer> {
         children: provider.openedTabs.asMap().entries.map((entry) {
         final index = entry.key;
         final tab = entry.value;
-        
-        // 如果当前标签页正在加载，显示加载状态
-        if (tab.id == _loadingTabId && _isLoading) {
-          return Center(
-            key: ValueKey('${tab.id}_loading'),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                CircularProgressIndicator(
-                  color: colorScheme.primary,
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  tab.type == EditorTabType.backupPreview ? '正在加载备份内容...' : '正在加载章节内容...',
-                  style: context.bodyLarge?.copyWith(
-                    fontSize: 14,
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-            ),
-          );
-        }
 
         // 设定项标签页使用大纲编辑器
         if (tab.type == EditorTabType.settings) {
@@ -499,10 +488,6 @@ class _EditorContainerState extends State<EditorContainer> {
           return const SizedBox.shrink();
         }
 
-        // 会话恢复的标签页在重建时已带入退出时的光标位置，
-        // 载入内容后由视口跟随该光标，不再按「打开章节时」设置跳转
-        final bool restoredFromSession = tab.cursorPosition != null;
-
         return NovelEditor(
           key: tab.editorKey,
           isActive: provider.currentTabIndex == index,
@@ -511,12 +496,6 @@ class _EditorContainerState extends State<EditorContainer> {
           chapterTitleController: tab.chapterTitleController,
           colorScheme: colorScheme,
           readOnly: tab.isReadOnly,
-          // 备份预览标签页不需要跳转到光标位置；
-          // 会话恢复的标签页已还原光标并在载入后滚动到该处，此处不再重复跳转
-          initialScrollToCursor: tab.type != EditorTabType.backupPreview &&
-              !restoredFromSession &&
-              (SettingsService.instance.openChapterCursorMode == 'end' ||
-              SettingsService.instance.openChapterCursorMode == 'lastEdit'),
           onSelectionChanged: (selection) {
             tab.cursorPosition = selection;
             // 防抖更新选中字数（通过 ValueNotifier 局部通知，不触发全局 Provider 重建）
