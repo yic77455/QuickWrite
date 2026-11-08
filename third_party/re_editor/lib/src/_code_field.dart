@@ -676,6 +676,36 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
     return paddingTop + tops[index + 1] + _externalContentOffset;
   }
 
+  /// 指定位置所在可见行顶部在滚动内容坐标系中的偏移
+  ///
+  /// 正文自动换行时一个逻辑行会排成多个视觉行，返回值已计入该位置在逻辑行内的纵向偏移。
+  /// 行排版尚未完成、索引越界或非自适应高度模式时返回 null。
+  double? contentTopOfPosition(CodeLinePosition position) {
+    final List<double>? tops = _lineTops;
+    if (_externalScrollController == null ||
+        tops == null ||
+        position.index < 0 ||
+        position.index >= _codes.length) {
+      return null;
+    }
+    return paddingTop + tops[position.index] + _lineVerticalOffsetOf(position) + _externalContentOffset;
+  }
+
+  /// 正文行高（像素）
+  double get preferredLineHeight => _preferredLineHeight;
+
+  /// 按当前外部滚动偏移重算可见段落
+  ///
+  /// 供外层滚动容器在布局阶段修正滚动位置后调用，
+  /// 使本帧构建的行段落与修正后的滚动位置一致，绘制结果即为定位后的画面。
+  void refreshVisibleParagraphs() {
+    if (!_intrinsic) return;
+    final List<double>? tops = _lineTops;
+    final ScrollPosition? position = _externalScrollPosition;
+    if (tops == null || position == null || !position.hasViewportDimension) return;
+    _updateIntrinsicDisplayParagraphs(constraints.maxWidth - _padding.horizontal, tops);
+  }
+
   CodeLineRenderParagraph? findDisplayParagraphByLineIndex(int index) {
     for (final CodeLineRenderParagraph paragraph in _displayParagraphs) {
       if (paragraph.index == index) {

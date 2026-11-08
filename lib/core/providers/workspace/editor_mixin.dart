@@ -1424,7 +1424,8 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
   ///
   /// 在书籍数据加载完成后调用：读取缓存中的标签页会话，
   /// 过滤掉已被删除的章节/设定后重建标签页，并恢复退出时选中的标签页，
-  /// 同时带入每个标签页退出时的光标位置（滚动位置由编辑器在定位光标时自动跟随）。
+  /// 同时带入每个标签页退出时的光标位置；大纲标签页标记为恢复上次编辑节点，
+  /// 使其内容加载后回到关闭前的编辑位置。
   /// 由 [WorkspaceProvider.initialize] 在初始化末尾调用。
   void _restoreTabSessionIfEnabled() {
     if (!SettingsService.instance.restoreTabsOnOpenWork) return;
@@ -1458,6 +1459,8 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
           id: item.uuid,
           title: item.title,
           type: EditorTabType.settings,
+          // 恢复出的设定标签页回到关闭前的编辑节点
+          restoreLastEditPosition: true,
         ));
       }
     }
@@ -1474,7 +1477,7 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
   ///
   /// 优先取会话条目中记录的光标偏移量；旧版本缓存未记录该字段时，
   /// 回退到章节光标缓存（该缓存在切换、关闭与保存章节时都会写入）。
-  /// 均无记录时返回 null，由「打开章节时」的设置决定定位位置。
+  /// 均无记录时返回 null，由「打开文件时」的设置决定定位位置。
   TextSelection? _restoredCursorPosition(TabSessionEntry entry) {
     final int? offset = entry.cursorOffset ??
         ChapterCursorCacheService.instance

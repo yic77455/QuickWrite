@@ -216,10 +216,10 @@ class AppSettings {
   /// 1~365 表示保留对应天数内的备份，0 表示永久保留
   final int historyRetentionDays;
 
-  /// 打开章节时光标定位模式
-  /// 'default' - 默认（光标位于章节开头）
-  /// 'end' - 定位至章末（光标位于章节末尾）
-  /// 'lastEdit' - 上一次编辑位置（暂未实现）
+  /// 打开文件时光标定位模式
+  /// 'default' - 默认（光标位于文件开头）
+  /// 'end' - 定位至文末（光标位于文件末尾 / 大纲最后一个节点）
+  /// 'lastEdit' - 上一次编辑位置
   final String openChapterCursorMode;
 
   /// 是否启用预览模式
@@ -338,7 +338,7 @@ class AppSettings {
     this.autoBackupEnabled = true, // 是否开启自动备份
     this.backupInterval = 10, // 备份间隔（单位：分钟）
     this.historyRetentionDays = 30, // 历史记录保存天数
-    this.openChapterCursorMode = 'default', // 打开章节时光标定位模式
+    this.openChapterCursorMode = 'default', // 打开文件时光标定位模式
     this.previewModeEnabled = true, // 是否启用预览模式
     this.quickInputBarEnabled = true, // 是否显示快捷输入栏（移动端）
     this.punctuationAutoCompleteEnabled = true, // 是否开启标点符号自动补全（移动端）

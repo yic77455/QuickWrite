@@ -12,6 +12,7 @@ import 'package:quick_write/core/services/database_service.dart';
 import 'package:quick_write/core/services/backup_service.dart';
 import 'package:quick_write/core/services/cache_services/chapter_cursor_cache_service.dart';
 import 'package:quick_write/core/services/cache_services/misc_cache_service.dart';
+import 'package:quick_write/core/services/cache_services/outline_last_edit_cache_service.dart';
 import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 import 'package:quick_write/core/services/recycle_item_service.dart';
 import 'package:isar/isar.dart';
@@ -414,6 +415,7 @@ class RecycleBinProvider extends ChangeNotifier {
   Future<void> _clearBookCache(String bookUuid) async {
     await MiscCacheService.instance.removeBook(bookUuid);
     await ChapterCursorCacheService.instance.removeBook(bookUuid);
+    await OutlineLastEditCacheService.instance.removeBook(bookUuid);
   }
 
   // ================= 章节回收站操作 =================

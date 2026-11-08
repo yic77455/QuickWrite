@@ -20,6 +20,7 @@ import 'package:quick_write/core/services/backup_service.dart';
 import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 import 'package:quick_write/core/services/recycle_item_service.dart';
 import 'package:quick_write/core/services/cache_services/chapter_cursor_cache_service.dart';
+import 'package:quick_write/core/services/cache_services/outline_last_edit_cache_service.dart';
 import 'package:quick_write/core/services/cache_services/workspace_session_cache_service.dart';
 import 'package:quick_write/core/models/cache_models/workspace_session_cache.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
@@ -462,6 +463,12 @@ class EditorTab {
   /// 打开已有文件时保持 false，避免打开时抢占焦点。
   bool autoFocusFirstNode;
 
+  /// 内容加载完成后是否优先定位到上一次编辑的节点
+  ///
+  /// 会话恢复的大纲标签页置为 true，使其回到关闭前的编辑位置，
+  /// 不受「打开文件时」设置影响。
+  bool restoreLastEditPosition;
+
   /// 是否被鼠标悬停
   bool isHovered;
 
@@ -487,7 +494,7 @@ class EditorTab {
 
   /// 码字统计基线字数（章节加载完成时的字数，跨天时由工作台重置）
   ///
-  /// 用于区分"今日新输入的内容"与"打开章节时已存在的旧内容"：
+  /// 用于区分"今日新输入的内容"与"打开文件时已存在的旧内容"：
   /// 删除旧内容不会让今日码字为负，仅删除今日新输入的字才扣减。
   int sessionBaselineWordCount = 0;
 
@@ -537,6 +544,7 @@ class EditorTab {
     this.isModified = false,
     this.isPreview = false,
     this.autoFocusFirstNode = false,
+    this.restoreLastEditPosition = false,
     this.isHovered = false,
     this.cursorPosition,
     this.textController,

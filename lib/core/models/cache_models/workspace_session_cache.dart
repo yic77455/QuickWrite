@@ -107,7 +107,7 @@ class TabSessionEntry {
   /// 退出时的光标偏移量（字符位置）
   ///
   /// 为 null 表示未记录（如该标签页在退出前从未打开过），
-  /// 恢复时改由章节光标缓存或「打开章节时」设置决定定位位置。
+  /// 恢复时改由章节光标缓存或「打开文件时」设置决定定位位置。
   final int? cursorOffset;
 
   const TabSessionEntry({

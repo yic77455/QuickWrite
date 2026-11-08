@@ -392,15 +392,25 @@ class TextStyleRangeUtils {
   /// 比较旧文本和新文本，找到变化区间（公共前缀和后缀之间的部分），
   /// 先移除被删除文本对应的区间，再将后续区间后移以适配插入的文本。
   ///
+  /// 可选参数 [caretOffset] 为编辑后光标在新文本中的偏移量：
+  /// 文本纯删除时直接按光标位置定位被删除的区间，不再依赖公共前后缀推断；
+  /// 传 null 或文本同时存在插入时，仍按文本差异推断。
+  ///
   /// 用于文本编辑时维护样式区间的正确位置。
   static List<TextStyleRange> adjustForTextChange(
     List<TextStyleRange> ranges,
     String oldText,
-    String newText,
-  ) {
+    String newText, {
+    int? caretOffset,
+  }) {
     final oldLen = oldText.length;
     final newLen = newText.length;
     if (oldText == newText) return ranges;
+
+    // 纯删除：被删除区间紧邻光标，退格与向前删除后光标都落在该区间的起始位置
+    if (oldLen > newLen && caretOffset != null && caretOffset >= 0 && caretOffset <= newLen) {
+      return adjustForDeletion(ranges, caretOffset, caretOffset + (oldLen - newLen));
+    }
 
     // 找公共前缀长度
     int prefixLen = 0;

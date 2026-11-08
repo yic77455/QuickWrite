@@ -269,10 +269,10 @@ class _OtherPanelState extends State<OtherPanel> {
 
   /// 构建编辑器行为设置区块
   Widget _buildEditorBehaviorSection(BuildContext context, String openChapterCursorMode, bool previewModeEnabled) {
-    // 打开章节时光标定位模式的选项列表
+    // 打开文件时光标定位模式的选项列表
     const cursorModeItems = [
       DropdownItem(displayText: '默认', value: 'default'),
-      DropdownItem(displayText: '定位至章末', value: 'end'),
+      DropdownItem(displayText: '定位至文末', value: 'end'),
       DropdownItem(displayText: '上一次编辑', value: 'lastEdit'),
     ];
 
@@ -296,7 +296,7 @@ class _OtherPanelState extends State<OtherPanel> {
                   ),
                   const SizedBox(width: 10),
                   Text(
-                    '打开章节时',
+                    '打开文件时',
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
                       color: Theme.of(context).colorScheme.onSurface,
                     ),

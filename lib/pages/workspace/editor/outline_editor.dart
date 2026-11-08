@@ -10,6 +10,7 @@ import 'package:quick_write/core/constants/constants.dart';
 import 'package:quick_write/core/constants/material_icons.dart';
 import 'package:quick_write/core/constants/punctuation_symbols.dart';
 import 'package:quick_write/core/services/settings_service.dart';
+import 'package:quick_write/core/services/cache_services/outline_last_edit_cache_service.dart';
 import 'package:quick_write/core/services/workspace/book_folder_service.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/providers/window_provider.dart';
@@ -49,6 +50,12 @@ class OutlineEditor extends StatefulWidget {
   /// 关联的本地文件路径（为空时不进行文件读写）
   final String? filePath;
 
+  /// 所属书籍 UUID（与 [settingItemUuid] 一起用于读写上次编辑节点缓存）
+  final String? bookUuid;
+
+  /// 设定项 UUID（与 [bookUuid] 一起用于读写上次编辑节点缓存）
+  final String? settingItemUuid;
+
   /// 大纲标题
   ///
   /// 显示在第一个节点上方，不属于节点，不参与节点格式与样式的设置。
@@ -87,10 +94,23 @@ class OutlineEditor extends StatefulWidget {
   /// 新建设定文件时为 true，使光标直接落在首个节点上便于立即输入。
   final bool autoFocusFirstNode;
 
+  /// 内容加载完成后是否优先定位到上一次编辑的节点
+  ///
+  /// 会话恢复的标签页为 true，使其回到关闭前的编辑位置，
+  /// 不受「打开文件时」设置影响。
+  final bool restoreLastEditPosition;
+
+  /// 是否为当前激活的标签页
+  ///
+  /// 恢复定位后只在激活的标签页上获取焦点，避免会话恢复时后台标签页抢走当前标签页的键盘焦点。
+  final bool isActive;
+
   const OutlineEditor({
     super.key,
     required this.colorScheme,
     this.filePath,
+    this.bookUuid,
+    this.settingItemUuid,
     this.title = '',
     this.onTitleChanged,
     this.onContentChanged,
@@ -100,6 +120,8 @@ class OutlineEditor extends StatefulWidget {
     this.extraTopPadding = 0.0,
     this.onContentLoaded,
     this.autoFocusFirstNode = false,
+    this.restoreLastEditPosition = false,
+    this.isActive = true,
   });
 
   @override
@@ -343,6 +365,13 @@ class OutlineEditorState extends State<OutlineEditor>
   /// 加载指示的延时定时器
   Timer? _loadingIndicatorTimer;
 
+  /// 内容首次呈现在界面前是否暂缓绘制节点列表
+  ///
+  /// 打开文件时需按设置定位到上次编辑节点或文末，懒加载列表的定位要跨多帧完成；
+  /// 若先绘制列表，会先闪出文档头部再跳到目标位置。置位期间列表照常布局
+  /// （定位依赖布局结果）但不绘制，定位完成后一次性呈现最终位置的内容。
+  bool _deferContentPaint = false;
+
   /// 当前内容是否可安全保存（载入完成且读取成功）
   ///
   /// 供保存流程判断：载入中或读取失败时禁止保存，避免空内容覆盖原文件
@@ -352,6 +381,17 @@ class OutlineEditorState extends State<OutlineEditor>
   ///
   /// 因内容与结构变化都会刷新折叠状态，多次保存按此链顺序执行，避免并发写同一文件
   Future<void> _foldStateWriteChain = Future.value();
+
+  /// 上一次编辑节点的路径（自根节点起的层级索引路径）
+  ///
+  /// 节点 ID 每次解析文件都会重新生成，跨次加载无法对应到同一节点，
+  /// 因此与折叠状态一样改用「自根节点起的层级索引路径」标识节点。
+  String? _lastEditedPath;
+
+  /// 上一次编辑节点路径的写入防抖定时器
+  ///
+  /// 连续点击节点会频繁切换焦点，合并短时间内的多次记录，避免反复写文件
+  Timer? _lastEditedPathSaveTimer;
 
   /// 节点折叠动画控制器（节点ID -> 控制器）
   ///
@@ -427,6 +467,7 @@ class OutlineEditorState extends State<OutlineEditor>
     WidgetsBinding.instance.removeObserver(this);
     _stopEdgeAutoScroll();
     _loadingIndicatorTimer?.cancel();
+    _lastEditedPathSaveTimer?.cancel();
     _scrollGuard.dispose();
     SettingsService.instance.removeListener(_onSettingsChanged);
     _undoManager.dispose();
@@ -821,6 +862,8 @@ class OutlineEditorState extends State<OutlineEditor>
       focusNode.addListener(() {
         if (focusNode.hasFocus) {
           _lastFocusedNodeId = node.id;
+          // 记录最近编辑的节点，供下次打开时按「上一次编辑」定位
+          _scheduleLastEditedPathSave();
           // 输入框获得焦点时清除节点选区（Shift+click、右键菜单唤起、撤销/重做时除外）
           if (!_isShiftClicking &&
               !_isContextMenuOpening &&
@@ -935,6 +978,10 @@ class OutlineEditorState extends State<OutlineEditor>
   Future<void> _loadFromFile() async {
     _isContentReady = false;
     _loadErrorMessage = null;
+    // 读取上一次编辑节点，供「打开文件时」的「上一次编辑」模式定位；
+    // 需在解析前读取，解析会触发重建，据此提前决定内容呈现时是否需要先完成定位
+    _loadLastEditedPath();
+    _deferContentPaint = _shouldDeferContentPaint();
     _startLoadingIndicator();
     try {
       final file = File(widget.filePath!);
@@ -952,14 +999,22 @@ class OutlineEditorState extends State<OutlineEditor>
     } finally {
       _isContentReady = true;
       _stopLoadingIndicator();
+      // 读取失败时不会定位，直接恢复绘制以显示错误占位
+      if (_loadErrorMessage != null) _deferContentPaint = false;
       if (mounted) {
         // 解析完成后重建节点列表（解析本身不触发刷新）
         setState(() {});
         // 仅在读取成功时执行聚焦与内容就绪通知
         if (_loadErrorMessage == null) {
-          // 新建设定文件时把焦点落到第一个节点，便于内容加载完成后立即输入
+          // 新建设定文件时把焦点落到第一个节点，便于内容加载完成后立即输入；
+          // 其余情况按「打开文件时」设置定位视口，只读的备份预览固定从顶部开始
           if (widget.autoFocusFirstNode) {
             _focusFirstNode();
+          } else if (!widget.readOnly) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted) return;
+              _applyOpenBehavior();
+            });
           }
           // 通知外部内容已加载完成，用于刷新查找替换等依赖内容的状态
           widget.onContentLoaded?.call();
@@ -991,6 +1046,88 @@ class OutlineEditorState extends State<OutlineEditor>
       if (!mounted) return;
       _focusNodeWithSelection(nodeId, moveCursorToEnd: false);
     });
+  }
+
+  /// 按「打开文件时」设置定位视口
+  ///
+  /// 「默认」保持视口在顶部；「上一次编辑」定位到上次编辑过的节点；
+  /// 「定位至文末」定位到最后一个节点。记录的上次编辑节点已不存在时回退到顶部。
+  /// 会话恢复的标签页优先回到关闭前编辑的节点，不受设置影响。
+  /// 定位结束后恢复节点列表的绘制，使内容呈现时已处于定位后的位置。
+  void _applyOpenBehavior() {
+    // 内容加载后已被外部定位（如全文搜索跳转）时，以外部定位为准
+    if (_lastFocusedNodeId != null) {
+      _endContentDeferral();
+      return;
+    }
+
+    final String? targetId = _resolveOpenTargetNodeId();
+    if (targetId == null) {
+      _endContentDeferral();
+      return;
+    }
+
+    _scrollToNode(targetId, onDone: () => _finishOpenPositioning(targetId));
+  }
+
+  /// 解析「打开文件时」应定位到的节点
+  ///
+  /// 未配置定位或记录的位置已失效时返回 null，此时视口保持在顶部。
+  String? _resolveOpenTargetNodeId() {
+    final String mode = widget.restoreLastEditPosition
+        ? 'lastEdit'
+        : SettingsService.instance.openChapterCursorMode;
+
+    if (mode == 'lastEdit') {
+      final String? path = _lastEditedPath;
+      return path == null ? null : _nodeAtPath(path)?.id;
+    }
+    if (mode == 'end') {
+      return _lastNodeInTree()?.id;
+    }
+    return null;
+  }
+
+  /// 是否需要在内容首次呈现前暂缓绘制节点列表
+  ///
+  /// 在解析内容前调用，此时节点树尚未建立，只能按定位模式判断：
+  /// 「上一次编辑」模式存在记录路径、「定位至文末」模式下均可能需要滚动定位。
+  /// 记录的位置实际失效时会由 [_applyOpenBehavior] 直接恢复绘制。
+  bool _shouldDeferContentPaint() {
+    // 只读预览固定从顶部开始，新建文件聚焦首个节点，两者都不需要定位
+    if (widget.readOnly || widget.autoFocusFirstNode) return false;
+
+    final String mode = widget.restoreLastEditPosition
+        ? 'lastEdit'
+        : SettingsService.instance.openChapterCursorMode;
+    if (mode == 'lastEdit') return _lastEditedPath != null;
+    return mode == 'end';
+  }
+
+  /// 打开定位结束后的收尾
+  ///
+  /// 桌面端把焦点与光标交给定位到的节点、光标落在文末，便于打开后直接继续输入；
+  /// 目标节点未能构建（定位放弃）或标签页未激活时不获取焦点，
+  /// 避免后台标签页抢占键盘焦点。
+  void _finishOpenPositioning(String nodeId) {
+    final bool focused = !PlatformCapabilities.isMobile &&
+        widget.isActive &&
+        _nodeTileGlobalRect(nodeId) != null;
+    if (!focused) {
+      _endContentDeferral();
+      return;
+    }
+
+    _focusNodeWithSelection(nodeId, moveCursorToEnd: true, ensureVisible: false);
+    // 延后一帧恢复绘制：输入框获取焦点后可能因光标超出视口而调整滚动位置，
+    // 让该调整在隐藏状态下完成，内容呈现时便不再发生移动
+    WidgetsBinding.instance.addPostFrameCallback((_) => _endContentDeferral());
+  }
+
+  /// 结束内容绘制延迟，让节点列表一次性呈现在定位后的位置
+  void _endContentDeferral() {
+    if (!mounted || !_deferContentPaint) return;
+    setState(() => _deferContentPaint = false);
   }
 
   /// 将大纲树序列化为纯文本
@@ -1110,6 +1247,8 @@ class OutlineEditorState extends State<OutlineEditor>
       await file.writeAsString(serializeToText());
       // 结构变化会改变节点路径，随内容一并刷新折叠状态
       _saveFoldState();
+      // 节点路径同样可能变化，同步刷新缓存中的上一次编辑节点
+      _saveLastEditedPath();
       return true;
     } catch (e) {
       debugPrint('保存大纲文件失败: $e');
@@ -1132,8 +1271,9 @@ class OutlineEditorState extends State<OutlineEditor>
       if (!await file.exists()) return;
       final dynamic data = jsonDecode(await file.readAsString());
       if (data is! Map) return;
-      final Set<String>? collapsed = (data['collapsed'] as List?)?.whereType<String>().toSet();
-      if (collapsed == null || collapsed.isEmpty || !mounted) return;
+      final Set<String> collapsed = (data['collapsed'] as List?)?.whereType<String>().toSet() ?? {};
+      if (!mounted) return;
+      if (collapsed.isEmpty) return;
       setState(() => _applyFoldState(collapsed));
     } catch (e) {
       debugPrint('加载大纲折叠状态失败: $e');
@@ -1151,7 +1291,61 @@ class OutlineEditorState extends State<OutlineEditor>
     _foldStateWriteChain = _foldStateWriteChain.then((_) => _writeFoldStateFile(path));
   }
 
-  /// 将当前折叠状态写入指定文件
+  /// 从缓存读取上一次编辑节点的路径
+  void _loadLastEditedPath() {
+    final String? bookUuid = widget.bookUuid;
+    final String? itemUuid = widget.settingItemUuid;
+    if (bookUuid == null || itemUuid == null) return;
+    _lastEditedPath = OutlineLastEditCacheService.instance.getLastEditedPath(
+      bookUuid: bookUuid,
+      settingItemUuid: itemUuid,
+    );
+  }
+
+  /// 安排记录上一次编辑节点的路径
+  ///
+  /// 节点焦点切换可能连续发生，等待一小段时间并合并为一次写入，
+  /// 避免频繁点击节点时产生多次缓存写入
+  void _scheduleLastEditedPathSave() {
+    if (widget.readOnly) return;
+    _lastEditedPathSaveTimer?.cancel();
+    _lastEditedPathSaveTimer = Timer(const Duration(milliseconds: 500), () {
+      _lastEditedPathSaveTimer = null;
+      _saveLastEditedPath();
+    });
+  }
+
+  /// 将最近聚焦节点的路径同步到 [_lastEditedPath] 并写入缓存
+  ///
+  /// 最近聚焦节点已被删除时清空记录，使「上一次编辑」回退到默认行为。
+  void _saveLastEditedPath() {
+    if (widget.readOnly) return;
+    final String? bookUuid = widget.bookUuid;
+    final String? itemUuid = widget.settingItemUuid;
+    if (bookUuid == null || itemUuid == null) return;
+
+    final String? nodeId = _lastFocusedNodeId;
+    if (nodeId == null) return;
+    // 结构变化会移动节点，写入前按最新树结构刷新路径
+    final String? path = _pathOfNode(nodeId);
+    _lastEditedPath = path;
+    // 节点已被删除时移除记录，下次打开回退到默认行为
+    if (path == null) {
+      unawaited(OutlineLastEditCacheService.instance.removeSettingItem(
+        bookUuid: bookUuid,
+        settingItemUuid: itemUuid,
+      ));
+      return;
+    }
+
+    unawaited(OutlineLastEditCacheService.instance.saveLastEditedPath(
+      bookUuid: bookUuid,
+      settingItemUuid: itemUuid,
+      path: path,
+    ));
+  }
+
+  /// 将折叠状态写入指定文件
   Future<void> _writeFoldStateFile(String path) async {
     try {
       final file = File(path);
@@ -1159,7 +1353,9 @@ class OutlineEditorState extends State<OutlineEditor>
       if (!await parentDir.exists()) {
         await parentDir.create(recursive: true);
       }
-      await file.writeAsString(jsonEncode({'collapsed': _collectCollapsedPaths()}));
+      await file.writeAsString(jsonEncode({
+        'collapsed': _collectCollapsedPaths(),
+      }));
     } catch (e) {
       debugPrint('保存大纲折叠状态失败: $e');
     }
@@ -1230,6 +1426,51 @@ class OutlineEditorState extends State<OutlineEditor>
     for (int i = 0; i < _roots.length; i++) {
       walk(_roots[i], '$i');
     }
+  }
+
+  /// 计算节点自根节点起的层级索引路径
+  ///
+  /// 路径形如 `0.2.1`，与折叠状态的记录方式一致；节点不存在时返回 null。
+  String? _pathOfNode(String nodeId) {
+    String? search(List<OutlineNode> nodes, String prefix) {
+      for (int i = 0; i < nodes.length; i++) {
+        final path = prefix.isEmpty ? '$i' : '$prefix.$i';
+        if (nodes[i].id == nodeId) return path;
+        final result = search(nodes[i].children, path);
+        if (result != null) return result;
+      }
+      return null;
+    }
+
+    return search(_roots, '');
+  }
+
+  /// 按层级索引路径查找节点
+  ///
+  /// 路径中的任一级索引越界或格式非法时返回 null。
+  OutlineNode? _nodeAtPath(String path) {
+    List<OutlineNode> nodes = _roots;
+    OutlineNode? node;
+    for (final segment in path.split('.')) {
+      final int index = int.tryParse(segment) ?? -1;
+      if (index < 0 || index >= nodes.length) return null;
+      node = nodes[index];
+      nodes = node.children;
+    }
+    return node;
+  }
+
+  /// 获取大纲树中的最后一个节点
+  ///
+  /// 沿每级子节点的末尾向下查找，得到整棵树中排在最末的节点；
+  /// 大纲为空时返回 null。
+  OutlineNode? _lastNodeInTree() {
+    if (_roots.isEmpty) return null;
+    OutlineNode node = _roots.last;
+    while (node.children.isNotEmpty) {
+      node = node.children.last;
+    }
+    return node;
   }
 
   // ================= 统计与通知 =================
@@ -5694,13 +5935,16 @@ class OutlineEditorState extends State<OutlineEditor>
   ///
   /// 先展开祖先确保节点可见，再通过估算位置逐步滚动使节点进入构建范围，
   /// 最终精确滚动到节点可见；节点已可见时补足底部 [margin] 的安全间距，
-  /// 默认为用户设置的底边距。
-  void _scrollToNode(String nodeId, {double? margin}) {
-    if (!mounted) return;
+  /// 默认为用户设置的底边距。[onDone] 在定位结束（成功或放弃）时调用。
+  void _scrollToNode(String nodeId, {double? margin, VoidCallback? onDone}) {
+    if (!mounted) {
+      onDone?.call();
+      return;
+    }
     // 已进入滚动定位阶段，布局阶段的预修正机会已过，清除待修正标记
     if (_pendingRevealNodeId == nodeId) _pendingRevealNodeId = null;
     _ensureAncestorsExpanded(nodeId);
-    _scrollToNodeWithRetry(nodeId, 0, null, margin: margin ?? _bottomContentPadding);
+    _scrollToNodeWithRetry(nodeId, 0, null, margin: margin ?? _bottomContentPadding, onDone: onDone);
   }
 
   /// 安排节点在下一次布局阶段完成底部安全间距修正
@@ -5714,9 +5958,19 @@ class OutlineEditorState extends State<OutlineEditor>
 
   /// 滚动到节点的重试实现
   ///
-  /// 节点未构建时通过估算偏移量跳转，下一帧重试直到节点构建成功或超过最大重试次数。
-  void _scrollToNodeWithRetry(String nodeId, int retryCount, double? lastJumpOffset, {double margin = 0}) {
-    if (!mounted || !_scrollController.hasClients || retryCount >= 30) return;
+  /// 节点未构建时通过估算偏移量跳转，下一帧重试直到节点构建成功或超过最大重试次数；
+  /// 定位结束（成功或放弃）时调用 [onDone]。
+  void _scrollToNodeWithRetry(
+    String nodeId,
+    int retryCount,
+    double? lastJumpOffset, {
+    double margin = 0,
+    VoidCallback? onDone,
+  }) {
+    if (!mounted || !_scrollController.hasClients || retryCount >= 30) {
+      onDone?.call();
+      return;
+    }
 
     final key = _nodeTileKeys[nodeId];
     final context = key?.currentContext;
@@ -5724,12 +5978,16 @@ class OutlineEditorState extends State<OutlineEditor>
     // 节点已构建：确保目标在视口内可见
     if (context != null && context.findRenderObject()?.attached == true) {
       _ensureNodeVisible(context, margin: margin);
+      onDone?.call();
       return;
     }
 
     final flatList = _flatten();
     final targetIndex = flatList.indexWhere((f) => f.node.id == nodeId);
-    if (targetIndex == -1) return;
+    if (targetIndex == -1) {
+      onDone?.call();
+      return;
+    }
 
     // 累计目标节点之前所有已构建节点的实际高度，未构建节点用最近样本高度估算
     double measuredHeight = 0;
@@ -5756,7 +6014,10 @@ class OutlineEditorState extends State<OutlineEditor>
     if (lastJumpOffset != null && (clampedEstimate - lastJumpOffset).abs() < 1.0) {
       final viewport = _scrollController.position.viewportDimension;
       jumpTarget = (currentOffset + viewport * 0.6).clamp(0.0, maxExtent);
-      if (jumpTarget <= currentOffset + 1.0) return;
+      if (jumpTarget <= currentOffset + 1.0) {
+        onDone?.call();
+        return;
+      }
     } else {
       jumpTarget = clampedEstimate;
     }
@@ -5764,7 +6025,7 @@ class OutlineEditorState extends State<OutlineEditor>
     _scrollController.position.jumpTo(jumpTarget);
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollToNodeWithRetry(nodeId, retryCount + 1, jumpTarget, margin: margin);
+      _scrollToNodeWithRetry(nodeId, retryCount + 1, jumpTarget, margin: margin, onDone: onDone);
     });
   }
 
@@ -6397,18 +6658,21 @@ class OutlineEditorState extends State<OutlineEditor>
                           );
 
                           // 移动端隐藏滚动条，避免遮挡窄屏下的编辑内容；桌面端保持原有滚动条表现
-                          if (PlatformCapabilities.isMobile) {
-                            return scrollContent;
-                          }
+                          final Widget contentView = PlatformCapabilities.isMobile
+                              ? scrollContent
+                              : Scrollbar(
+                                  key: _scrollbarKey,
+                                  controller: _scrollController,
+                                  thumbVisibility: settings.scrollbarAlwaysVisible ? true : null,
+                                  thickness: editorScrollbarThickness,
+                                  radius: Radius.circular(editorScrollbarThickness / 2),
+                                  child: scrollContent,
+                                );
 
-                          return Scrollbar(
-                            key: _scrollbarKey,
-                            controller: _scrollController,
-                            thumbVisibility: settings.scrollbarAlwaysVisible ? true : null,
-                            thickness: editorScrollbarThickness,
-                            radius: Radius.circular(editorScrollbarThickness / 2),
-                            child: scrollContent,
-                          );
+                          // 定位完成前不绘制节点列表：列表仍参与布局以便完成定位，
+                          // 定位结束后再一次性呈现，避免先闪出文档头部再跳转
+                          if (!_deferContentPaint) return contentView;
+                          return Opacity(opacity: 0, child: contentView);
                         },
                       ),
                     ),
@@ -6872,14 +7136,20 @@ class OutlineEditorState extends State<OutlineEditor>
       onChanged: (newText) {
         final oldText = flatNode.node.text;
         if (oldText != newText) {
+          final controller = _controllers[flatNode.node.id];
+          // 编辑后的光标位置，用于纯删除时精确定位被删除的区间
+          final selection = controller?.selection;
+          final caretOffset = selection != null && selection.isValid && selection.isCollapsed
+              ? selection.start
+              : null;
           // 文本变化时调整样式区间位置，保持样式与文字对应
           flatNode.node.styleRanges = TextStyleRangeUtils.adjustForTextChange(
             flatNode.node.styleRanges,
             oldText,
             newText,
+            caretOffset: caretOffset,
           );
           // 同步到控制器以触发富文本重建
-          final controller = _controllers[flatNode.node.id];
           if (controller is RichTextEditingController) {
             controller.styleRanges = flatNode.node.styleRanges;
           }

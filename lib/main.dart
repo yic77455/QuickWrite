@@ -11,6 +11,7 @@ import 'package:quick_write/core/services/app_info_service.dart';
 import 'package:quick_write/core/services/backup_service.dart';
 import 'package:quick_write/core/services/database_service.dart';
 import 'package:quick_write/core/services/cache_services/chapter_cursor_cache_service.dart';
+import 'package:quick_write/core/services/cache_services/outline_last_edit_cache_service.dart';
 import 'package:quick_write/core/services/cache_services/workspace_session_cache_service.dart';
 import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 import 'package:quick_write/core/services/font_service.dart';
@@ -74,6 +75,9 @@ void main(List<String> args) async {
   
   // 初始化章节光标缓存服务（用于存储章节编辑时的光标位置）
   await ChapterCursorCacheService.instance.initialize();
+
+  // 初始化大纲上次编辑节点缓存服务（用于「打开文件时」定位到上一次编辑的节点）
+  await OutlineLastEditCacheService.instance.initialize();
   
   // 初始化杂项缓存服务（用于存储分组展开状态、书架分组选择等零散数据）
   await MiscCacheService.instance.initialize();

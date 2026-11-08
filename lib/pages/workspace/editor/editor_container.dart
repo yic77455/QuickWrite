@@ -213,18 +213,18 @@ class _EditorContainerState extends State<EditorContainer> {
 
         // 计算初始光标位置：
         // 恢复标签页会话时按记录的光标位置还原；
-        // 备份预览标签页置于开头；其余标签页按用户设置的「打开章节时」模式决定
+        // 备份预览标签页置于开头；其余标签页按用户设置的「打开文件时」模式决定
         int caretOffset;
         if (tab.type == EditorTabType.backupPreview) {
           caretOffset = 0;
         } else if (restoredCursor != null) {
-          // 会话恢复的标签页优先还原退出时的光标位置，不受「打开章节时」设置影响
+          // 会话恢复的标签页优先还原退出时的光标位置，不受「打开文件时」设置影响
           caretOffset = restoredCursor.baseOffset.clamp(0, content.length);
           debugPrint('恢复会话光标位置: ${tab.title}, offset: $caretOffset');
         } else {
           final cursorMode = SettingsService.instance.openChapterCursorMode;
           if (cursorMode == 'end') {
-            // 定位至章末
+            // 定位至文末
             caretOffset = content.length;
           } else if (cursorMode == 'lastEdit') {
             // 上一次编辑位置：从缓存中读取光标位置
@@ -273,9 +273,9 @@ class _EditorContainerState extends State<EditorContainer> {
         provider.refreshFindIfVisible(resetIndex: true);
 
         // 内容载入后让视口跟随光标，避免长章节中光标落在视口外：
-        // 会话恢复的标签页按还原的光标；「定位至章末」「上一次编辑位置」模式下按载入后的光标
+        // 会话恢复的标签页按还原的光标；「定位至文末」「上一次编辑位置」模式下按载入后的光标
         if (restoredCursor != null || _openModeScrollsToCursor(tab)) {
-          _scrollToCursorAfterLoad(tab);
+          _revealCursorAfterLoad(tab);
         }
       }
     } catch (e) {
@@ -313,7 +313,7 @@ class _EditorContainerState extends State<EditorContainer> {
     _loadTabContent(tab, provider, null);
   }
   
-  /// 「打开章节时」设置是否要求载入内容后把视口滚动到光标处
+  /// 「打开文件时」设置是否要求载入内容后把视口滚动到光标处
   ///
   /// 备份预览标签页的光标固定在开头，不参与该判断
   bool _openModeScrollsToCursor(EditorTab tab) {
@@ -322,16 +322,22 @@ class _EditorContainerState extends State<EditorContainer> {
     return mode == 'end' || mode == 'lastEdit';
   }
 
-  /// 内容载入后让视口滚动到光标位置
+  /// 内容载入后让视口定位到光标所在行
   ///
-  /// 内容与选区是程序化写入的，编辑器不会自动滚动，因此需要显式请求一次；
-  /// 滚动由编辑器在下一帧执行，此时内容已完成排版。
-  void _scrollToCursorAfterLoad(EditorTab tab) {
+  /// 内容与选区是程序化写入的，编辑器不会自动滚动，因此需要显式请求一次定位；
+  /// 定位由编辑器在随后的布局阶段完成，内容首次绘制即为定位后的画面。
+  void _revealCursorAfterLoad(EditorTab tab) {
+    final state = tab.editorKey.currentState;
+    if (state is NovelEditorState) {
+      state.revealCursorAfterLoad();
+      return;
+    }
+    // 编辑器尚未挂载完成时延后一帧再请求定位
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final state = tab.editorKey.currentState;
-      if (state is NovelEditorState) {
-        state.scrollToCursor();
+      final mountedState = tab.editorKey.currentState;
+      if (mountedState is NovelEditorState) {
+        mountedState.revealCursorAfterLoad();
       }
     });
   }
@@ -515,6 +521,9 @@ class _EditorContainerState extends State<EditorContainer> {
             key: tab.editorKey,
             colorScheme: colorScheme,
             filePath: provider.getTabFilePath(tab),
+            // 书籍与设定项标识用于读写上次编辑节点缓存
+            bookUuid: provider.currentBook?.uuid,
+            settingItemUuid: tab.id,
             // 大纲标题取自标签页标题，编辑后随保存同步重命名大纲文件
             title: tab.title,
             onTitleChanged: (title) {
@@ -537,6 +546,10 @@ class _EditorContainerState extends State<EditorContainer> {
             extraTopPadding: provider.findReplaceBarPadding,
             // 新建设定文件时，内容加载完成后聚焦第一个节点
             autoFocusFirstNode: tab.autoFocusFirstNode,
+            // 会话恢复的标签页定位到关闭前编辑的节点
+            restoreLastEditPosition: tab.restoreLastEditPosition,
+            // 标记是否为当前激活的标签页，非激活标签页恢复定位后不抢占键盘焦点
+            isActive: index == provider.currentTabIndex,
             // 大纲内容异步加载完成后，若查找替换栏处于打开状态则刷新查找结果，
             // 并通知等待内容就绪的调用方（如全文搜索跳转）
             onContentLoaded: () {

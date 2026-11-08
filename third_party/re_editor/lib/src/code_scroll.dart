@@ -31,6 +31,25 @@ class CodeScrollController {
     return _render?.contentBottomOfLine(index);
   }
 
+  /// 指定位置所在可见行顶部在外部滚动内容坐标系中的偏移
+  ///
+  /// 供外层滚动容器在 Layout 阶段定位光标所在行使用；
+  /// 编辑器尚未完成排版或索引越界时返回 null。
+  double? contentTopOfPosition(CodeLinePosition position) {
+    return _render?.contentTopOfPosition(position);
+  }
+
+  /// 正文行高（像素），编辑器尚未排版时返回 0
+  double get preferredLineHeight => _render?.preferredLineHeight ?? 0;
+
+  /// 按当前外部滚动偏移重算可见段落
+  ///
+  /// 供外层滚动容器在 Layout 阶段修正滚动位置后调用，
+  /// 使本帧构建的行段落与修正后的滚动位置一致。
+  void refreshVisibleParagraphs() {
+    _render?.refreshVisibleParagraphs();
+  }
+
   void bindEditor(GlobalKey key) {
     _editorKey = key;
   }

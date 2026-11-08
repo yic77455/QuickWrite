@@ -632,7 +632,7 @@ class SettingsService extends ChangeNotifier {
   /// 1~365 表示保留对应天数，0 表示永久保留
   int get historyRetentionDays => _settings.historyRetentionDays;
 
-  /// 获取打开章节时光标定位模式
+  /// 获取打开文件时光标定位模式
   String get openChapterCursorMode => _settings.openChapterCursorMode;
 
   /// 获取预览模式是否启用
@@ -849,7 +849,7 @@ class SettingsService extends ChangeNotifier {
     return updateSettings(newSettings, debounce: debounce);
   }
 
-  /// 更新打开章节时光标定位模式
+  /// 更新打开文件时光标定位模式
   Future<bool> updateOpenChapterCursorMode(String value) async {
     final newSettings = _settings.copyWith(openChapterCursorMode: value);
     return updateSettings(newSettings);

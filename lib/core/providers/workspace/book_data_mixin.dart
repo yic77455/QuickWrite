@@ -1697,6 +1697,14 @@ mixin BookDataMixin on WorkspaceStateBase {
         _currentBook!.updatedAt = DateTime.now();
         await _isar.bookModels.put(_currentBook!);
       });
+
+      // 清理分组内设定项的上次编辑节点缓存
+      for (final item in groupItems) {
+        await OutlineLastEditCacheService.instance.removeSettingItem(
+          bookUuid: _currentBook!.uuid,
+          settingItemUuid: item.uuid,
+        );
+      }
     }
 
     // 删除分组目录
@@ -1757,6 +1765,12 @@ mixin BookDataMixin on WorkspaceStateBase {
 
     // 删除设定项的折叠状态文件
     await _deleteSettingFoldStateFile(item);
+
+    // 清理设定项的上次编辑节点缓存
+    await OutlineLastEditCacheService.instance.removeSettingItem(
+      bookUuid: _currentBook!.uuid,
+      settingItemUuid: itemUuid,
+    );
 
     // 从数据库中删除设定项记录
     await _isar.writeTxn(() async {
@@ -2042,6 +2056,14 @@ mixin BookDataMixin on WorkspaceStateBase {
     // 集中删除设定项折叠状态文件
     for (final item in itemsToDelete) {
       await _deleteSettingFoldStateFile(item);
+    }
+
+    // 集中清理设定项的上次编辑节点缓存
+    for (final item in itemsToDelete) {
+      await OutlineLastEditCacheService.instance.removeSettingItem(
+        bookUuid: _currentBook!.uuid,
+        settingItemUuid: item.uuid,
+      );
     }
 
     // 删除所有设定项记录、更新书籍修改时间

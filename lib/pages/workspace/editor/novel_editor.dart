@@ -178,6 +178,12 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 在布局阶段消费，使滚动修正与当帧渲染一并生效，不出现先渲染再滚动的二次跳动。
   bool _pendingBottomAlignment = false;
 
+  /// 内容载入后待定位光标的标记
+  ///
+  /// 由 [revealCursorAfterLoad] 置位，在内容排版完成的布局阶段消费，
+  /// 使视口定位与内容首次绘制一并生效。
+  bool _pendingCursorReveal = false;
+
   /// 末行与视口底部之间保留的底边距
   ///
   /// 由布局过程按设置换算（视口高度 × 底边距百分比），供末行对齐使用。
@@ -305,6 +311,29 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
       });
     }
 
+    // 内容载入完成解除只读时恢复焦点：
+    // 只读期间获得焦点不会建立输入法连接，需重新失焦再聚焦一次，
+    // 否则编辑器没有输入光标、无法直接输入。
+    // 移动端不主动聚焦，避免自动弹出输入法，也不改动用户已获得的焦点
+    if (!PlatformCapabilities.isMobile &&
+        widget.isActive &&
+        oldWidget.readOnly &&
+        !widget.readOnly) {
+      _scrollGuard.protect(const Duration(milliseconds: 150));
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (!_focusNode.hasFocus) {
+          _focusEditor();
+          return;
+        }
+        _focusNode.unfocus();
+        // 失焦与聚焦分两帧执行，确保焦点变化通知触发输入法连接重建
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _focusEditor();
+        });
+      });
+    }
+
     // 当额外顶边距变化时（如查找替换栏显示/隐藏），在 Layout 阶段补偿滚动偏移量防止内容跳动
     if (widget.extraTopPadding != oldWidget.extraTopPadding) {
       final double delta = widget.extraTopPadding - oldWidget.extraTopPadding;
@@ -367,6 +396,22 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       // 滚动前解除滚动保护，避免保护逻辑把位置拉回旧的滚动值导致定位无效
+      _scrollGuard.unprotect();
+      widget.controller.makeCursorCenterIfInvisible();
+    });
+  }
+
+  /// 内容载入后定位到光标所在行
+  ///
+  /// 内容与选区是程序化写入的，编辑器不会自动滚动：此处标记待定位，
+  /// 由随后内容排版的布局阶段修正视口，内容首次绘制即为定位后的画面。
+  void revealCursorAfterLoad() {
+    if (!mounted) return;
+    _pendingCursorReveal = true;
+    // 布局阶段未能完成定位时（如排版尚未就绪），在布局结束后补一次滚动
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_pendingCursorReveal) return;
+      _pendingCursorReveal = false;
       _scrollGuard.unprotect();
       widget.controller.makeCursorCenterIfInvisible();
     });
@@ -470,7 +515,8 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 在 Layout 阶段修正滚动像素
   ///
   /// 修正发生在 Paint 之前，因此结果随当帧一并呈现，不会出现先渲染再滚动的二次跳动。
-  /// 一是补偿额外顶边距变化导致的滚动偏移，二是让末行连同底边距对齐视口底部。
+  /// 一是补偿额外顶边距变化导致的滚动偏移，二是让末行连同底边距对齐视口底部，
+  /// 三是内容载入后把视口定位到光标所在行。
   void _onApplyContentDimensions(ScrollPosition position, double minExt, double maxExt) {
     bool corrected = false;
     if (_pendingExtraPaddingDelta != null) {
@@ -487,11 +533,40 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
         corrected = true;
       }
     }
+    if (_pendingCursorReveal && _revealCursorInLayout(position, minExt, maxExt)) {
+      corrected = true;
+    }
     // 滚动位置改变后光标在屏幕上的位置随之变化，需要在当帧内刷新输入法坐标：
     // 若等到下一帧，输入法会先按滚动前的位置显示候选框，再跳回正确位置
     if (corrected) {
       _imeReporterKey.currentState?.reportNow();
     }
+  }
+
+  /// 在布局阶段把视口定位到光标所在行
+  ///
+  /// 光标不在视口内时居中显示；修正滚动像素后立即按同一偏移重算可见段落，
+  /// 使本帧绘制的内容与定位结果一致，内容首次呈现即为定位后的画面。
+  /// 排版信息尚不可用时保留待定位标记，由布局结束后的兜底滚动完成定位。
+  /// 返回是否修正了滚动像素。
+  bool _revealCursorInLayout(ScrollPosition position, double minExt, double maxExt) {
+    final double? contentTop = _codeScrollController.contentTopOfPosition(widget.controller.selection.extent);
+    final double lineHeight = _codeScrollController.preferredLineHeight;
+    if (contentTop == null || lineHeight <= 0 || !position.hasViewportDimension) return false;
+    _pendingCursorReveal = false;
+
+    final double viewportTop = position.pixels;
+    final double viewportBottom = viewportTop + position.viewportDimension;
+    final double contentBottom = contentTop + lineHeight;
+    // 光标行已完全在视口内时保持当前滚动位置
+    if (contentTop >= viewportTop && contentBottom <= viewportBottom) return false;
+
+    final double target = ((contentTop + contentBottom) / 2 - position.viewportDimension / 2).clamp(minExt, maxExt);
+    if ((target - position.pixels).abs() <= 0.5) return false;
+    position.correctPixels(target);
+    // 按修正后的偏移重算可见段落，否则本帧仍会按旧偏移构建的行段落绘制
+    _codeScrollController.refreshVisibleParagraphs();
+    return true;
   }
 
   /// 让末行连同其下方的底边距与纸张下留白对齐视口底部
