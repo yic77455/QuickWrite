@@ -8,6 +8,7 @@
 .history
 .vscode/
 tool/
+test/
 
 # Flutter repo-specific
 /bin/cache/

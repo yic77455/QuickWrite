@@ -18,8 +18,10 @@ import 'package:quick_write/shared/dialogs/new_chapter_dialog.dart';
 import 'package:quick_write/shared/dialogs/export_dialog.dart';
 import 'package:quick_write/core/utils/batch_selection_controller.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
+import 'package:quick_write/shared/widgets/sortable/sliver_sortable_list.dart';
 import '../widgets/contents_list_widgets.dart';
 import '../widgets/contents_top_bar.dart';
+import '../widgets/contents_sortable.dart';
 
 
 /// 章节目录面板
@@ -32,7 +34,8 @@ class ChapterPanel extends StatefulWidget {
   State<ChapterPanel> createState() => _ChapterPanelState();
 }
 
-class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClientMixin {
+class _ChapterPanelState extends State<ChapterPanel>
+    with AutomaticKeepAliveClientMixin, ContentsSortMixin {
   /// 未分卷组是否折叠
   bool _isUnassignedCollapsed = false;
 
@@ -57,11 +60,26 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
   /// 当前吸顶的分卷 UUID（仅当前正在浏览内容的分组会吸顶）
   String? _stickyVolumeUuid;
 
+  /// 吸顶标题是否叠加显示（分组标题滚出视口顶部后为 true）
+  bool _isStickyHeaderVisible = false;
+
   /// 分组偏移缓存（在 _buildChapterList 中更新，滚动时查表使用，避免重复计算）
   List<({String uuid, double startOffset, bool isExpanded})> _groupOffsets = [];
 
   /// 列表布局快照（在 _buildChapterList 中更新，批量模式触摸拖拽时按位置查表命中章节）
   List<({double startOffset, String? id})> _listSlots = [];
+
+  /// 本次构建的分卷索引表，供行构建与吸顶标题复用
+  Map<String, VolumeModel> _volumeIndex = const {};
+
+  /// 本次构建的分卷章节映射，供行构建与吸顶标题复用
+  Map<String, List<ChapterModel>> _volumeChaptersByUuid = const {};
+
+  /// 本次构建的章节对象映射
+  Map<String, ChapterModel> _chapterByUuid = const {};
+
+  /// 本次构建的章节卷内序号
+  Map<String, int> _chapterNumberByUuid = const {};
 
   /// 折叠吸顶分组后待跳转的滚动偏移（使折叠后的分组标题保持可见）
   double? _pendingScrollOffset;
@@ -141,8 +159,11 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
 
     // 无分组数据时清除吸顶
     if (_groupOffsets.isEmpty) {
-      if (_stickyVolumeUuid != null) {
-        setState(() => _stickyVolumeUuid = null);
+      if (_stickyVolumeUuid != null || _isStickyHeaderVisible) {
+        setState(() {
+          _stickyVolumeUuid = null;
+          _isStickyHeaderVisible = false;
+        });
       }
       return;
     }
@@ -159,9 +180,18 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
       }
     }
 
-    // 仅在吸顶分组变化时刷新，避免无谓重建
-    if (_stickyVolumeUuid != newStickyUuid) {
-      setState(() => _stickyVolumeUuid = newStickyUuid);
+    // 分组标题滚出视口顶部后才需要叠加吸顶标题
+    final groupInfo = newStickyUuid == null
+        ? null
+        : _groupOffsets.where((g) => g.uuid == newStickyUuid).firstOrNull;
+    final isHeaderVisible = groupInfo != null && offset > groupInfo.startOffset;
+
+    // 仅在吸顶分组或吸顶标题显隐变化时刷新，避免无谓重建
+    if (_stickyVolumeUuid != newStickyUuid || _isStickyHeaderVisible != isHeaderVisible) {
+      setState(() {
+        _stickyVolumeUuid = newStickyUuid;
+        _isStickyHeaderVisible = isHeaderVisible;
+      });
     }
   }
 
@@ -219,7 +249,7 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
           _buildTopBar(context),
 
           // 章节列表
-          Expanded(child: _buildChapterList(context, chapters, workspaceProvider)),
+          Expanded(child: _buildChapterList(context, workspaceProvider)),
 
           // 批量操作栏
           if (_isBatchMode) _buildBatchActionBar(context, chapters),
@@ -275,255 +305,344 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
   }
 
   /// 构建章节列表
-  Widget _buildChapterList(BuildContext context, List<ChapterModel> chapters, WorkspaceProvider workspaceProvider) {
-    // 获取当前选中的章节ID
-    final selectedChapterId = workspaceProvider.currentTab?.id;
-    final volumes = workspaceProvider.volumes;
-    final hasVolumes = volumes.isNotEmpty;
-
-    // 无分卷且无章节时，显示空状态
-    if (!hasVolumes && chapters.isEmpty) {
+  ///
+  /// 分卷标题与章节作为同一可拖拽列表中的行，支持章节跨分卷拖拽；
+  /// 拖拽分卷标题期间折叠所有分卷，结束后恢复。
+  Widget _buildChapterList(BuildContext context, WorkspaceProvider workspaceProvider) {
+    final rows = buildContentsRows();
+    if (rows.isEmpty) {
       return _buildEmptyState(context);
     }
 
-    // 构建章节原始序号映射（序号跟随章节，不受倒序影响）
-    final chapterOriginalIndex = <String, int>{};
+    final listView = CustomScrollView(
+      key: _listKey,
+      controller: _scrollController,
+      slivers: [
+        const SliverPadding(padding: EdgeInsets.only(top: 4)),
+        SliverSortableList(
+          rowKeys: rows.map((row) => row.key).toList(),
+          itemExtentBuilder: (index, _) => rows[index].extent,
+          itemBuilder: (context, index) => _buildContentsRow(context, rows, index, workspaceProvider),
+          onReorderStart: handleContentsReorderStart,
+          onReorder: handleContentsReorder,
+          onReorderCompleted: handleContentsReorderCompleted,
+          proxyDecorator: _buildReorderProxyDecorator,
+        ),
+        const SliverPadding(padding: EdgeInsets.only(bottom: 4)),
+      ],
+    );
 
-    // 无分卷时，直接显示章节列表
-    if (!hasVolumes) {
+    return _wrapWithSelectionListener(
+      _wrapWithStickyHeader(context, _wrapWithScrollbar(listView), workspaceProvider),
+    );
+  }
+
+  /// 构建目录中的单行
+  Widget _buildContentsRow(
+    BuildContext context,
+    List<ContentsRow> rows,
+    int index,
+    WorkspaceProvider provider,
+  ) {
+    final row = rows[index];
+    final content = row.isHeader
+        ? _buildVolumeHeader(context, row.groupUuid, provider)
+        : _buildChapterRow(context, row.itemUuid!, provider);
+
+    // 批量模式下禁用拖拽
+    if (_isBatchMode) {
+      return SizedBox(key: ValueKey(row.key), height: row.extent, child: content);
+    }
+    return SortableDelayedDragStartListener(
+      key: ValueKey(row.key),
+      index: index,
+      child: SizedBox(height: row.extent, child: content),
+    );
+  }
+
+  /// 构建章节行
+  Widget _buildChapterRow(BuildContext context, String chapterUuid, WorkspaceProvider provider) {
+    final chapter = _chapterByUuid[chapterUuid];
+    if (chapter == null) return const SizedBox.shrink();
+
+    return _buildChapterItem(
+      context,
+      chapter,
+      _chapterNumberByUuid[chapterUuid] ?? 0,
+      provider.currentTab?.id,
+      chapter.volumeUuid.isNotEmpty,
+    );
+  }
+
+  /// 构建分卷标题
+  Widget _buildVolumeHeader(BuildContext context, String volumeUuid, WorkspaceProvider provider) {
+    final isUnassigned = volumeUuid.isEmpty;
+    final volumeChapters = _volumeChaptersByUuid[volumeUuid] ?? const <ChapterModel>[];
+    final isExpanded = _isGroupExpanded(volumeUuid, _volumeIndex);
+    final volumeName = isUnassigned ? '' : provider.getVolumeName(volumeUuid);
+
+    if (_isBatchMode) {
+      return _buildBatchGroupHeader(
+        context: context,
+        title: isUnassigned ? '未分卷' : volumeName,
+        icon: Icons.folder_outlined,
+        isExpanded: isExpanded,
+        volumeChapters: volumeChapters,
+        onToggleExpand: () => _toggleVolume(volumeUuid),
+      );
+    }
+
+    return GroupHeader(
+      title: isUnassigned ? '未分卷' : volumeName,
+      icon: Icons.folder_outlined,
+      itemCount: volumeChapters.length,
+      isExpanded: isExpanded,
+      itemCountSuffix: ' 章',
+      onTap: () => _toggleVolume(volumeUuid),
+      onAddPressed: isUnassigned ? null : () => _showAddChapterToVolumeDialog(volumeUuid),
+      addTooltip: '新建章节',
+      onMenuPressed: isUnassigned
+          ? null
+          : (buttonContext) {
+              final button = buttonContext.findRenderObject() as RenderBox?;
+              if (button == null) return;
+              _showVolumeMenu(
+                buttonContext,
+                volumeUuid,
+                type: ContextMenuType.dropdown,
+                position: button.localToGlobal(Offset.zero),
+                anchorSize: button.size,
+              );
+            },
+      isMenuOpen: _menuOpenedVolumeUuid == volumeUuid,
+      isButtonPressed: _menuOpenedVolumeUuid == volumeUuid && _menuOpenedByDropdown,
+      menuTooltip: '更多',
+      onSecondaryTapDown: isUnassigned
+          ? null
+          : (details) {
+              _showVolumeMenu(
+                context,
+                volumeUuid,
+                type: ContextMenuType.contextMenu,
+                position: details.globalPosition,
+              );
+            },
+    );
+  }
+
+  /// 为列表叠加吸顶的分组标题
+  ///
+  /// 标题与章节同属一个可拖拽列表，无法再使用吸顶 sliver，
+  /// 因此在列表上方叠加当前分组的标题，并转发滚动事件以保留可滚动性。
+  Widget _wrapWithStickyHeader(
+    BuildContext context,
+    Widget listView,
+    WorkspaceProvider provider,
+  ) {
+    final stickyHeader = _buildStickyHeaderOverlay(context, provider);
+    return Stack(
+      children: [
+        listView,
+        if (stickyHeader != null) Positioned(top: 0, left: 0, right: 0, child: stickyHeader),
+      ],
+    );
+  }
+
+  /// 构建吸顶标题，无需吸顶时返回 null
+  Widget? _buildStickyHeaderOverlay(BuildContext context, WorkspaceProvider provider) {
+    if (!_isStickyHeaderVisible) return null;
+
+    final volumeUuid = _stickyVolumeUuid;
+    if (volumeUuid == null || !_scrollController.hasClients) return null;
+
+    final groupInfo = _groupOffsets.where((g) => g.uuid == volumeUuid).firstOrNull;
+    if (groupInfo == null || !groupInfo.isExpanded) return null;
+
+    // 标题仍完整位于视口内时由列表自身显示
+    if (groupInfo.startOffset - _scrollController.offset >= 0) return null;
+
+    return ColoredBox(
+      color: Theme.of(context).colorScheme.surface,
+      child: Listener(
+        onPointerMove: _forwardStickyScroll,
+        onPointerSignal: _forwardStickyPointerSignal,
+        child: _buildVolumeHeader(context, volumeUuid, provider),
+      ),
+    );
+  }
+
+  /// 在吸顶标题上拖动时把位移转交给列表滚动
+  void _forwardStickyScroll(PointerMoveEvent event) {
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    final target = (position.pixels - event.delta.dy)
+        .clamp(position.minScrollExtent, position.maxScrollExtent);
+    if ((target - position.pixels).abs() < 0.01) return;
+    _scrollController.jumpTo(target);
+  }
+
+  /// 在吸顶标题上滚动滚轮时驱动列表滚动
+  void _forwardStickyPointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent || !_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    final target = (position.pixels + event.scrollDelta.dy)
+        .clamp(position.minScrollExtent, position.maxScrollExtent);
+    _scrollController.jumpTo(target);
+  }
+
+  // ================= 目录拖拽排序 =================
+
+  @override
+  bool get contentsReversed => _isChapterReversed;
+
+  /// 构建当前显示顺序的目录行
+  ///
+  /// 同时刷新分组偏移、批量命中表与章节序号缓存，供吸顶、批量选择与行构建复用。
+  @override
+  List<ContentsRow> buildContentsRows() {
+    final provider = context.read<WorkspaceProvider>();
+    final chapters = provider.chapters;
+    final volumes = provider.volumes;
+
+    _volumeIndex = _buildVolumeIndex(volumes);
+    _chapterByUuid = {for (final chapter in chapters) chapter.uuid: chapter};
+    _chapterNumberByUuid = {};
+
+    final rows = <ContentsRow>[];
+    final groupOffsets = <({String uuid, double startOffset, bool isExpanded})>[];
+    final listSlots = <({double startOffset, String? id})>[];
+    double offset = 4; // 顶部 padding
+
+    // 无分卷时按章节顺序平铺
+    if (volumes.isEmpty) {
+      // 章节序号按数据顺序编号，不随倒序变化
       for (var i = 0; i < chapters.length; i++) {
-        chapterOriginalIndex[chapters[i].uuid] = i + 1;
+        _chapterNumberByUuid[chapters[i].uuid] = i + 1;
       }
-      // 倒序时反转显示列表
       final displayChapters = _isChapterReversed ? chapters.reversed.toList() : chapters;
-      // 记录列表布局快照（顶部 padding 4 + 每项固定高度），供批量模式触摸拖拽时按位置命中章节
-      _listSlots = [
-        for (var i = 0; i < displayChapters.length; i++)
-          (startOffset: 4 + i * _chapterItemExtent, id: displayChapters[i].uuid),
-      ];
-      final listView = CustomScrollView(
-        key: _listKey,
-        controller: _scrollController,
-        slivers: [
-          const SliverPadding(padding: EdgeInsets.only(top: 4)),
-          SliverReorderableList(
-            itemExtent: _chapterItemExtent,
-            itemCount: displayChapters.length,
-            onReorder: (int oldIndex, int newIndex) {
-              // 倒序时需将显示列表的拖拽索引映射回原始数据列表索引
-              final indices = mapReorderIndices(
-                displayOldIndex: oldIndex,
-                displayNewIndex: newIndex,
-                length: displayChapters.length,
-                reversed: _isChapterReversed,
-              );
-              context.read<WorkspaceProvider>().reorderChaptersInVolume('', indices.dataOldIndex, indices.dataNewIndex);
-            },
-            proxyDecorator: _buildReorderProxyDecorator,
-            itemBuilder: (context, index) {
-              final chapter = displayChapters[index];
-              // 批量模式下禁用拖拽
-              if (_isBatchMode) {
-                return SizedBox(
-                  key: ValueKey(chapter.uuid),
-                  height: _chapterItemExtent,
-                  child: _buildChapterItem(context, chapter, chapterOriginalIndex[chapter.uuid]!, selectedChapterId, false),
-                );
-              }
-              return ReorderableDelayedDragStartListener(
-                key: ValueKey(chapter.uuid),
-                index: index,
-                child: _buildChapterItem(context, chapter, chapterOriginalIndex[chapter.uuid]!, selectedChapterId, false),
-              );
-            },
-          ),
-          const SliverPadding(padding: EdgeInsets.only(bottom: 4)),
-        ],
-      );
-
-      return _wrapWithSelectionListener(_wrapWithScrollbar(listView));
-    }
-
-    // 有分卷时，按分卷分组显示
-    final volumeGroups = _groupChaptersByVolume(chapters, volumes);
-
-    // 构建分卷索引表，避免循环内重复线性查找分卷
-    final volumeIndex = _buildVolumeIndex(volumes);
-
-    // 构建卷内章节原始序号映射
-    for (final entry in volumeGroups.entries) {
-      final volumeChapters = entry.value;
-      for (var i = 0; i < volumeChapters.length; i++) {
-        chapterOriginalIndex[volumeChapters[i].uuid] = i + 1;
+      for (final chapter in displayChapters) {
+        listSlots.add((startOffset: offset, id: chapter.uuid));
+        rows.add(ContentsRow(
+          key: 'i:${chapter.uuid}',
+          groupUuid: '',
+          extent: _chapterItemExtent,
+          itemUuid: chapter.uuid,
+        ));
+        offset += _chapterItemExtent;
       }
-    }
-
-    // 构建显示用的分卷条目列表，倒序时反转分卷顺序（未分卷始终在最后）
-    final volumeEntries = volumeGroups.entries.toList();
-    final assignedEntries = volumeEntries.where((e) => e.key.isNotEmpty).toList();
-    final unassignedEntry = volumeEntries.where((e) => e.key.isEmpty).firstOrNull;
-    final displayEntries = <MapEntry<String, List<ChapterModel>>>[];
-    if (_isChapterReversed) {
-      displayEntries.addAll(assignedEntries.reversed);
     } else {
-      displayEntries.addAll(assignedEntries);
-    }
-    if (unassignedEntry != null) {
-      displayEntries.add(unassignedEntry);
-    }
+      final volumeGroups = _groupChaptersByVolume(chapters, volumes);
+      final volumeEntries = volumeGroups.entries.toList();
+      final assignedEntries = volumeEntries.where((e) => e.key.isNotEmpty).toList();
+      final unassignedEntry = volumeEntries.where((e) => e.key.isEmpty).firstOrNull;
 
-    // 构建 Sliver 列表
-    final slivers = <Widget>[];
+      // 构建显示顺序的分卷条目（倒序时反转，未分卷始终在最后）
+      final displayEntries = <MapEntry<String, List<ChapterModel>>>[];
+      if (_isChapterReversed) {
+        displayEntries.addAll(assignedEntries.reversed);
+      } else {
+        displayEntries.addAll(assignedEntries);
+      }
+      if (unassignedEntry != null) {
+        displayEntries.add(unassignedEntry);
+      }
 
-    // 添加顶部 padding
-    slivers.add(const SliverPadding(padding: EdgeInsets.only(top: 4)));
-
-    // 初始化分组偏移缓存，用于滚动时快速查表计算吸顶分组
-    _groupOffsets = [];
-    // 初始化列表布局快照，供批量模式触摸拖拽时按位置命中章节
-    _listSlots = [];
-    double currentOffset = 4; // 顶部 padding
-
-    for (final entry in displayEntries) {
-      final volumeUuid = entry.key;
-      final volumeChapters = entry.value;
-      final isUnassigned = volumeUuid.isEmpty;
-
-      // 跳过没有章节的未分卷组
-      if (isUnassigned && volumeChapters.isEmpty) continue;
-
-      // 未分卷组使用特殊键追踪折叠状态：存在于集合中表示折叠，不存在表示展开
-      final isExpanded = _isGroupExpanded(volumeUuid, volumeIndex);
-
-      // 记录该分组的偏移信息（供滚动监听查表使用）
-      _groupOffsets.add((uuid: volumeUuid, startOffset: currentOffset, isExpanded: isExpanded));
-      // 记录分组标题在列表中的起始偏移（标题不参与批量拖拽命中，id 记为 null）
-      _listSlots.add((startOffset: currentOffset, id: null));
-
-      // 获取分卷名称
-      final volumeName = isUnassigned ? '' : (volumeIndex[volumeUuid]?.name ?? '');
-
-      // 构建分组标题组件
-      final headerWidget = _isBatchMode
-          ? _buildBatchGroupHeader(
-              context: context,
-              title: isUnassigned ? '未分卷' : volumeName,
-              icon: Icons.folder_outlined,
-              isExpanded: isExpanded,
-              volumeChapters: volumeChapters,
-              onToggleExpand: () => _toggleVolume(isUnassigned ? '' : volumeUuid),
-            )
-          : GroupHeader(
-              title: isUnassigned ? '未分卷' : volumeName,
-              icon: Icons.folder_outlined,
-              itemCount: volumeChapters.length,
-              isExpanded: isExpanded,
-              itemCountSuffix: ' 章',
-              onTap: () => _toggleVolume(isUnassigned ? '' : volumeUuid),
-              onAddPressed: isUnassigned ? null : () => _showAddChapterToVolumeDialog(volumeUuid),
-              addTooltip: '新建章节',
-              onMenuPressed: isUnassigned
-                  ? null
-                  : (buttonContext) {
-                      final button = buttonContext.findRenderObject() as RenderBox?;
-                      if (button == null) return;
-                      _showVolumeMenu(
-                        buttonContext,
-                        volumeUuid,
-                        type: ContextMenuType.dropdown,
-                        position: button.localToGlobal(Offset.zero),
-                        anchorSize: button.size,
-                      );
-                    },
-              isMenuOpen: _menuOpenedVolumeUuid == volumeUuid,
-              isButtonPressed: _menuOpenedVolumeUuid == volumeUuid && _menuOpenedByDropdown,
-              menuTooltip: '更多',
-              onSecondaryTapDown: isUnassigned
-                  ? null
-                  : (details) {
-                      _showVolumeMenu(
-                        context,
-                        volumeUuid,
-                        type: ContextMenuType.contextMenu,
-                        position: details.globalPosition,
-                      );
-                    },
-            );
-
-      // 只有当前吸顶的分组才 pinned，其余分组（含展开的）均不吸顶
-      final shouldPin = isExpanded && _stickyVolumeUuid == volumeUuid;
-
-      slivers.add(
-        shouldPin
-            ? SliverPersistentHeader(
-                pinned: true,
-                delegate: StickyGroupHeaderDelegate(
-                  height: _groupHeaderExtent,
-                  child: headerWidget,
-                ),
-              )
-            : SliverToBoxAdapter(child: headerWidget),
-      );
-
-      // 展开时显示章节列表
-      if (isExpanded) {
-        // 倒序时反转卷内章节显示列表
-        final displayVolumeChapters = _isChapterReversed ? volumeChapters.reversed.toList() : volumeChapters;
-        // 记录卷内章节在列表中的起始偏移（位于分组标题之后）
-        for (var i = 0; i < displayVolumeChapters.length; i++) {
-          _listSlots.add((
-            startOffset: currentOffset + _groupHeaderExtent + i * _chapterItemExtent,
-            id: displayVolumeChapters[i].uuid,
-          ));
+      _volumeChaptersByUuid = {for (final entry in volumeGroups.entries) entry.key: entry.value};
+      // 卷内序号按数据顺序编号，不随倒序变化
+      for (final entry in volumeGroups.entries) {
+        for (var i = 0; i < entry.value.length; i++) {
+          _chapterNumberByUuid[entry.value[i].uuid] = i + 1;
         }
-        slivers.add(
-          SliverReorderableList(
-            itemExtent: _chapterItemExtent,
-            itemCount: displayVolumeChapters.length,
-            onReorder: (int oldIndex, int newIndex) {
-              // 倒序时需将显示列表的拖拽索引映射回原始数据列表索引
-              final indices = mapReorderIndices(
-                displayOldIndex: oldIndex,
-                displayNewIndex: newIndex,
-                length: displayVolumeChapters.length,
-                reversed: _isChapterReversed,
-              );
-              context.read<WorkspaceProvider>().reorderChaptersInVolume(volumeUuid, indices.dataOldIndex, indices.dataNewIndex);
-            },
-            proxyDecorator: _buildReorderProxyDecorator,
-            itemBuilder: (context, index) {
-              final chapter = displayVolumeChapters[index];
-              // 批量模式下禁用拖拽
-              if (_isBatchMode) {
-                return SizedBox(
-                  key: ValueKey(chapter.uuid),
-                  height: _chapterItemExtent,
-                  child: _buildChapterItem(context, chapter, chapterOriginalIndex[chapter.uuid]!, selectedChapterId, true),
-                );
-              }
-              return ReorderableDelayedDragStartListener(
-                key: ValueKey(chapter.uuid),
-                index: index,
-                child: _buildChapterItem(context, chapter, chapterOriginalIndex[chapter.uuid]!, selectedChapterId, true),
-              );
-            },
-          ),
-        );
       }
 
-      // 累加当前分组的偏移量（标题高度 + 展开时的列表高度）
-      currentOffset += _groupHeaderExtent;
-      if (isExpanded) {
-        currentOffset += volumeChapters.length * _chapterItemExtent;
+      for (final entry in displayEntries) {
+        final volumeUuid = entry.key;
+        final volumeChapters = entry.value;
+        final isUnassigned = volumeUuid.isEmpty;
+
+        // 跳过没有章节的未分卷组
+        if (isUnassigned && volumeChapters.isEmpty) continue;
+
+        final isExpanded = _isGroupExpanded(volumeUuid, _volumeIndex);
+        groupOffsets.add((uuid: volumeUuid, startOffset: offset, isExpanded: isExpanded));
+        listSlots.add((startOffset: offset, id: null));
+        rows.add(ContentsRow(
+          key: 'h:$volumeUuid',
+          groupUuid: volumeUuid,
+          extent: _groupHeaderExtent,
+        ));
+        offset += _groupHeaderExtent;
+
+        if (!isExpanded) continue;
+
+        final displayVolumeChapters = _isChapterReversed ? volumeChapters.reversed.toList() : volumeChapters;
+        for (final chapter in displayVolumeChapters) {
+          listSlots.add((startOffset: offset, id: chapter.uuid));
+          rows.add(ContentsRow(
+            key: 'i:${chapter.uuid}',
+            groupUuid: volumeUuid,
+            extent: _chapterItemExtent,
+            itemUuid: chapter.uuid,
+          ));
+          offset += _chapterItemExtent;
+        }
       }
     }
 
-    // 添加底部 padding
-    slivers.add(const SliverPadding(padding: EdgeInsets.only(bottom: 4)));
+    _groupOffsets = groupOffsets;
+    _listSlots = listSlots;
+    return rows;
+  }
 
-    final listView = CustomScrollView(key: _listKey, controller: _scrollController, slivers: slivers);
+  @override
+  void applyContentsHeaderReorder({required int oldDataIndex, required int newDataIndex}) {
+    context.read<WorkspaceProvider>().reorderVolumes(oldDataIndex, newDataIndex);
+  }
 
-    return _wrapWithSelectionListener(_wrapWithScrollbar(listView));
+  @override
+  void applyContentsItemReorder({
+    required ContentsRow row,
+    required String targetGroupUuid,
+    required int position,
+    required int oldIndexInGroup,
+    required bool sameGroup,
+  }) {
+    final provider = context.read<WorkspaceProvider>();
+    final chapterUuid = row.itemUuid!;
+    // 目标分卷的条目总数（包含折叠分卷中未显示的行）
+    final targetCount = provider.chapters.where((c) => c.volumeUuid == targetGroupUuid).length;
+
+    if (sameGroup) {
+      final rawNew = rawReorderIndex(oldIndexInGroup, position);
+      final indices = mapReorderIndices(
+        displayOldIndex: oldIndexInGroup,
+        displayNewIndex: rawNew,
+        length: targetCount,
+        reversed: _isChapterReversed,
+      );
+      provider.reorderChaptersInVolume(targetGroupUuid, indices.dataOldIndex, indices.dataNewIndex);
+      return;
+    }
+
+    // 跨分卷：先移动归属，再按目标位置调整卷内顺序
+    () async {
+      final moved = await provider.moveChapterToVolume(
+        chapterUuid: chapterUuid,
+        targetVolumeUuid: targetGroupUuid,
+      );
+      if (!moved) return;
+
+      // 移动后条目落在目标分卷数据顺序末尾，在显示顺序中位于首端或末端
+      final displayIndexAfterMove = _isChapterReversed ? 0 : targetCount;
+      final rawNew = rawReorderIndex(displayIndexAfterMove, position);
+      final indices = mapReorderIndices(
+        displayOldIndex: displayIndexAfterMove,
+        displayNewIndex: rawNew,
+        length: targetCount + 1,
+        reversed: _isChapterReversed,
+      );
+      await provider.reorderChaptersInVolume(targetGroupUuid, indices.dataOldIndex, indices.dataNewIndex);
+    }();
   }
 
   /// 按全局坐标命中章节项，返回命中章节的UUID
@@ -793,7 +912,9 @@ class _ChapterPanelState extends State<ChapterPanel> with AutomaticKeepAliveClie
   ///
   /// [volumeUuid] 为空表示未分卷组，其折叠状态由本地 [_isUnassignedCollapsed] 维护；
   /// 其余分组从索引表读取 [VolumeModel.isExpanded]，索引缺省时视为展开。
+  /// 拖拽分卷标题期间所有分组统一折叠，使各分卷标题在列表中相邻。
   bool _isGroupExpanded(String volumeUuid, Map<String, VolumeModel> volumeIndex) {
+    if (isHeaderSorting) return false;
     if (volumeUuid.isEmpty) return !_isUnassignedCollapsed;
     return volumeIndex[volumeUuid]?.isExpanded ?? true;
   }

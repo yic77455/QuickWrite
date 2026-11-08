@@ -1058,6 +1058,47 @@ mixin BookDataMixin on WorkspaceStateBase {
     });
   }
 
+  /// 调整分卷的显示顺序
+  /// [oldIndex] 原索引
+  /// [newIndex] 新索引（onReorder 语义：插入到该位置之前）
+  Future<void> reorderVolumes(int oldIndex, int newIndex) async {
+    if (_currentBook == null) return;
+
+    final volumes = List<VolumeModel>.from(_volumes);
+    if (oldIndex < 0 || oldIndex >= volumes.length) return;
+    if (newIndex < 0 || newIndex > volumes.length) return;
+
+    if (oldIndex < newIndex) {
+      newIndex -= 1;
+    }
+    if (oldIndex == newIndex) return;
+
+    final volume = volumes.removeAt(oldIndex);
+    volumes.insert(newIndex, volume);
+
+    // 重排分卷序号与修改时间，修改时间保证排序变化参与同步合并
+    final now = DateTime.now();
+    for (int i = 0; i < volumes.length; i++) {
+      volumes[i].orderIndex = i;
+      volumes[i].updatedAt = now;
+    }
+    _volumes = volumes;
+
+    // 立即通知 UI 更新，避免等待数据库写入造成顺序生效延迟
+    notifyListeners();
+
+    // 写入数据库，并重建章节的全局 orderIndex（分卷顺序变化会影响章节归组顺序）
+    await _isar.writeTxn(() async {
+      await _isar.volumeModels.putAll(volumes);
+    });
+    await _rebuildGlobalOrderIndex();
+
+    notifyListeners();
+
+    // 分卷排序已落盘，交由云同步服务安排一次同步
+    _notifyBookshelfRefresh();
+  }
+
   /// 切换分卷展开/折叠状态
   /// [volumeUuid] 分卷 UUID
   Future<void> toggleVolumeExpanded({required String volumeUuid}) async {
@@ -1934,6 +1975,47 @@ mixin BookDataMixin on WorkspaceStateBase {
     await _isar.writeTxn(() async {
       await _isar.settingItemModels.putAll(newAllItems);
     });
+  }
+
+  /// 调整设定分组的显示顺序
+  /// [oldIndex] 原索引
+  /// [newIndex] 新索引（onReorder 语义：插入到该位置之前）
+  Future<void> reorderSettingGroups(int oldIndex, int newIndex) async {
+    if (_currentBook == null) return;
+
+    final groups = List<SettingGroupModel>.from(_settingGroups);
+    if (oldIndex < 0 || oldIndex >= groups.length) return;
+    if (newIndex < 0 || newIndex > groups.length) return;
+
+    if (oldIndex < newIndex) {
+      newIndex -= 1;
+    }
+    if (oldIndex == newIndex) return;
+
+    final group = groups.removeAt(oldIndex);
+    groups.insert(newIndex, group);
+
+    // 重排分组序号与修改时间，修改时间保证排序变化参与同步合并
+    final now = DateTime.now();
+    for (int i = 0; i < groups.length; i++) {
+      groups[i].orderIndex = i;
+      groups[i].updatedAt = now;
+    }
+    _settingGroups = groups;
+
+    // 立即通知 UI 更新，避免等待数据库写入造成顺序生效延迟
+    notifyListeners();
+
+    // 写入数据库，并重建设定项的全局 orderIndex（分组顺序变化会影响设定项归组顺序）
+    await _isar.writeTxn(() async {
+      await _isar.settingGroupModels.putAll(groups);
+    });
+    await _rebuildGlobalSettingOrderIndex();
+
+    notifyListeners();
+
+    // 分组排序已落盘，交由云同步服务安排一次同步
+    _notifyBookshelfRefresh();
   }
 
   /// 移动设定项到指定分组

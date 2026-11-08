@@ -8,6 +8,7 @@ import 'package:quick_write/core/models/setting_item.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/services/cache_services/misc_cache_service.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
+import 'package:quick_write/shared/widgets/sortable/sliver_sortable_list.dart';
 import 'package:quick_write/shared/dialogs/new_setting_dialog.dart';
 import 'package:quick_write/shared/dialogs/export_dialog.dart';
 import 'package:quick_write/core/utils/reorder_utils.dart';
@@ -17,6 +18,7 @@ import 'package:quick_write/core/utils/file_explorer.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import '../widgets/contents_list_widgets.dart';
 import '../widgets/contents_top_bar.dart';
+import '../widgets/contents_sortable.dart';
 
 /// 设定面板
 ///
@@ -28,7 +30,8 @@ class SettingPanel extends StatefulWidget {
   State<SettingPanel> createState() => _SettingPanelState();
 }
 
-class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClientMixin {
+class _SettingPanelState extends State<SettingPanel>
+    with AutomaticKeepAliveClientMixin, ContentsSortMixin {
   /// 滚动控制器
   final ScrollController _scrollController = ScrollController();
 
@@ -59,11 +62,26 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
   /// 当前吸顶的分组 UUID（仅当前正在浏览内容的分组会吸顶）
   String? _stickyGroupUuid;
 
+  /// 吸顶标题是否叠加显示（分组标题滚出视口顶部后为 true）
+  bool _isStickyHeaderVisible = false;
+
   /// 分组偏移缓存（在 _buildSettingList 中更新，滚动时查表使用，避免重复计算）
   List<({String uuid, double startOffset, bool isExpanded})> _groupOffsets = [];
 
   /// 列表布局快照（在 _buildSettingList 中更新，批量模式触摸拖拽时按位置查表命中设定项）
   List<({double startOffset, String? id})> _listSlots = [];
+
+  /// 本次构建的分组索引表，供行构建与吸顶标题复用
+  Map<String, SettingGroupModel> _settingGroupIndex = const {};
+
+  /// 本次构建的分组设定项映射
+  Map<String, List<SettingItemModel>> _groupItemsByUuid = const {};
+
+  /// 本次构建的设定项对象映射
+  Map<String, SettingItemModel> _itemByUuid = const {};
+
+  /// 本次构建的设定项组内序号
+  Map<String, int> _itemNumberByUuid = const {};
 
   /// 折叠吸顶分组后待跳转的滚动偏移（使折叠后的分组标题保持可见）
   double? _pendingScrollOffset;
@@ -165,8 +183,11 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
 
     // 无分组数据时清除吸顶
     if (_groupOffsets.isEmpty) {
-      if (_stickyGroupUuid != null) {
-        setState(() => _stickyGroupUuid = null);
+      if (_stickyGroupUuid != null || _isStickyHeaderVisible) {
+        setState(() {
+          _stickyGroupUuid = null;
+          _isStickyHeaderVisible = false;
+        });
       }
       return;
     }
@@ -183,9 +204,18 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
       }
     }
 
-    // 仅在吸顶分组变化时刷新，避免无谓重建
-    if (_stickyGroupUuid != newStickyUuid) {
-      setState(() => _stickyGroupUuid = newStickyUuid);
+    // 分组标题滚出视口顶部后才需要叠加吸顶标题
+    final groupInfo = newStickyUuid == null
+        ? null
+        : _groupOffsets.where((g) => g.uuid == newStickyUuid).firstOrNull;
+    final isHeaderVisible = groupInfo != null && offset > groupInfo.startOffset;
+
+    // 仅在吸顶分组或吸顶标题显隐变化时刷新，避免无谓重建
+    if (_stickyGroupUuid != newStickyUuid || _isStickyHeaderVisible != isHeaderVisible) {
+      setState(() {
+        _stickyGroupUuid = newStickyUuid;
+        _isStickyHeaderVisible = isHeaderVisible;
+      });
     }
   }
 
@@ -285,227 +315,353 @@ class _SettingPanelState extends State<SettingPanel> with AutomaticKeepAliveClie
   }
 
   /// 构建设定列表
+  ///
+  /// 分组标题与设定项作为同一可拖拽列表中的行，支持设定项跨分组拖拽；
+  /// 拖拽分组标题期间折叠所有分组，结束后恢复。
   Widget _buildSettingList(BuildContext context) {
-    // 获取设定数据
     final workspaceProvider = context.watch<WorkspaceProvider>();
-    final settingItems = workspaceProvider.settingItems;
-    final settingGroups = workspaceProvider.settingGroups;
-    final selectedId = workspaceProvider.currentTab?.id;
-    final hasGroups = settingGroups.isNotEmpty;
-
-    // 无分组且无设定项时，显示空状态
-    if (!hasGroups && settingItems.isEmpty) {
+    final rows = buildContentsRows();
+    if (rows.isEmpty) {
       return _buildEmptyState(context);
     }
 
-    // 无分组时，直接显示设定项列表
-    if (!hasGroups) {
-      final displayItems = _isReversed ? settingItems.reversed.toList() : settingItems;
-      // 记录列表布局快照（顶部 padding 4 + 每项固定高度），供批量模式触摸拖拽时按位置命中设定项
-      _listSlots = [
-        for (var i = 0; i < displayItems.length; i++)
-          (startOffset: 4 + i * _settingItemExtent, id: displayItems[i].uuid),
-      ];
-      return _wrapWithSelectionListener(CustomScrollView(
-        key: _listKey,
-        controller: _scrollController,
-        slivers: [
-          const SliverPadding(padding: EdgeInsets.only(top: 4)),
-          SliverReorderableList(
-            itemExtent: _settingItemExtent,
-            itemCount: displayItems.length,
-            onReorder: (int oldIndex, int newIndex) {
-              // 倒序时需将显示列表的拖拽索引映射回原始数据列表索引
-              final indices = mapReorderIndices(
-                displayOldIndex: oldIndex,
-                displayNewIndex: newIndex,
-                length: displayItems.length,
-                reversed: _isReversed,
-              );
-              context.read<WorkspaceProvider>().reorderSettingItemsInGroup('', indices.dataOldIndex, indices.dataNewIndex);
-            },
-            proxyDecorator: _buildReorderProxyDecorator,
-            itemBuilder: (context, index) {
-              final item = displayItems[index];
-              // 批量模式下禁用拖拽
-              if (_isBatchMode) {
-                return SizedBox(
-                  key: ValueKey(item.uuid),
-                  height: _settingItemExtent,
-                  child: _buildSettingItemWidget(context, item, null, selectedId, index + 1),
-                );
-              }
-              return ReorderableDelayedDragStartListener(
-                key: ValueKey(item.uuid),
-                index: index,
-                child: _buildSettingItemWidget(context, item, null, selectedId, index + 1),
-              );
-            },
-          ),
-          const SliverPadding(padding: EdgeInsets.only(bottom: 4)),
-        ],
-      ));
+    final listView = CustomScrollView(
+      key: _listKey,
+      controller: _scrollController,
+      slivers: [
+        const SliverPadding(padding: EdgeInsets.only(top: 4)),
+        SliverSortableList(
+          rowKeys: rows.map((row) => row.key).toList(),
+          itemExtentBuilder: (index, _) => rows[index].extent,
+          itemBuilder: (context, index) => _buildContentsRow(context, rows, index, workspaceProvider),
+          onReorderStart: handleContentsReorderStart,
+          onReorder: handleContentsReorder,
+          onReorderCompleted: handleContentsReorderCompleted,
+          proxyDecorator: _buildReorderProxyDecorator,
+        ),
+        const SliverPadding(padding: EdgeInsets.only(bottom: 4)),
+      ],
+    );
+
+    return _wrapWithSelectionListener(
+      _wrapWithStickyHeader(context, listView, workspaceProvider),
+    );
+  }
+
+  /// 构建目录中的单行
+  Widget _buildContentsRow(
+    BuildContext context,
+    List<ContentsRow> rows,
+    int index,
+    WorkspaceProvider provider,
+  ) {
+    final row = rows[index];
+    final content = row.isHeader
+        ? _buildGroupHeader(context, row.groupUuid, provider)
+        : _buildSettingRow(context, row.itemUuid!, provider);
+
+    // 批量模式下禁用拖拽
+    if (_isBatchMode) {
+      return SizedBox(key: ValueKey(row.key), height: row.extent, child: content);
     }
+    return SortableDelayedDragStartListener(
+      key: ValueKey(row.key),
+      index: index,
+      child: SizedBox(height: row.extent, child: content),
+    );
+  }
 
-    // 有分组时，按分组分组显示
-    final groupGroups = _groupSettingItemsByGroup(settingItems, settingGroups);
+  /// 构建设定项行
+  Widget _buildSettingRow(BuildContext context, String itemUuid, WorkspaceProvider provider) {
+    final item = _itemByUuid[itemUuid];
+    if (item == null) return const SizedBox.shrink();
 
-    // 构建显示用的分组条目列表，倒序时反转分组顺序（未分组始终在最后）
-    final groupEntries = groupGroups.entries.toList();
-    final assignedEntries = groupEntries.where((e) => e.key.isNotEmpty).toList();
-    final unassignedEntry = groupEntries.where((e) => e.key.isEmpty).firstOrNull;
-    final displayEntries = <MapEntry<String, List<SettingItemModel>>>[];
+    return _buildSettingItemWidget(
+      context,
+      item,
+      item.groupUuid.isEmpty ? null : item.groupUuid,
+      provider.currentTab?.id,
+      _itemNumberByUuid[itemUuid] ?? 0,
+    );
+  }
 
-    if (_isReversed) {
-      displayEntries.addAll(assignedEntries.reversed);
-      if (unassignedEntry != null) displayEntries.add(unassignedEntry);
-    } else {
-      displayEntries.addAll(assignedEntries);
-      if (unassignedEntry != null) displayEntries.add(unassignedEntry);
-    }
+  /// 构建分组标题
+  Widget _buildGroupHeader(BuildContext context, String groupUuid, WorkspaceProvider provider) {
+    final isUnassigned = groupUuid.isEmpty;
+    final groupItems = _groupItemsByUuid[groupUuid] ?? const <SettingItemModel>[];
+    final isExpanded = _isGroupExpanded(groupUuid);
+    final groupName = isUnassigned ? '未分组' : provider.getSettingGroupName(groupUuid);
 
-    // 构建 Sliver 列表
-    final slivers = <Widget>[];
-    slivers.add(const SliverPadding(padding: EdgeInsets.only(top: 4)));
-
-    // 初始化分组偏移缓存，用于滚动时快速查表计算吸顶分组
-    _groupOffsets = [];
-    // 初始化列表布局快照，供批量模式触摸拖拽时按位置命中设定项
-    _listSlots = [];
-    double currentOffset = 4; // 顶部 padding
-
-    for (final entry in displayEntries) {
-      final groupUuid = entry.key;
-      final groupItems = entry.value;
-      final isUnassigned = groupUuid.isEmpty;
-      final groupName = isUnassigned ? '未分组' : workspaceProvider.getSettingGroupName(groupUuid);
-      final isExpanded = isUnassigned
-          ? !_isUnassignedCollapsed
-          : (settingGroups.where((g) => g.uuid == groupUuid).firstOrNull?.isExpanded ?? true);
-
-      // 记录该分组的偏移信息（供滚动监听查表使用）
-      _groupOffsets.add((uuid: groupUuid, startOffset: currentOffset, isExpanded: isExpanded));
-      // 记录分组标题在列表中的起始偏移（标题不参与批量拖拽命中，id 记为 null）
-      _listSlots.add((startOffset: currentOffset, id: null));
-
-      // 构建分组标题组件
-      final headerWidget = _isBatchMode
-          ? _buildBatchGroupHeader(
-              context: context,
-              title: isUnassigned ? '未分组' : groupName,
-              icon: Icons.folder_outlined,
-              isExpanded: isExpanded,
-              groupItems: groupItems,
-              onToggleExpand: () => _toggleGroup(isUnassigned ? '' : groupUuid),
-            )
-          : GroupHeader(
-              title: groupName,
-              icon: Icons.folder_outlined,
-              itemCount: groupItems.length,
-              isExpanded: isExpanded,
-              itemCountSuffix: '项',
-              onTap: () => _toggleGroup(isUnassigned ? '' : groupUuid),
-              onAddPressed: isUnassigned ? null : () => _showNewSettingDialog(initialGroupUuid: groupUuid),
-              addTooltip: '新建设定',
-              onMenuPressed: isUnassigned
-                  ? null
-                  : (buttonContext) {
-                      final button = buttonContext.findRenderObject() as RenderBox?;
-                      if (button == null) return;
-                      _showGroupMenu(
-                        buttonContext,
-                        groupUuid,
-                        type: ContextMenuType.dropdown,
-                        position: button.localToGlobal(Offset.zero),
-                        anchorSize: button.size,
-                      );
-                    },
-              isMenuOpen: _menuOpenedGroupUuid == groupUuid,
-              isButtonPressed: _menuOpenedGroupUuid == groupUuid && _menuOpenedByDropdown,
-              menuTooltip: '更多',
-              onSecondaryTapDown: isUnassigned
-                  ? null
-                  : (details) {
-                      _showGroupMenu(
-                        context,
-                        groupUuid,
-                        type: ContextMenuType.contextMenu,
-                        position: details.globalPosition,
-                      );
-                    },
-            );
-
-      // 只有当前吸顶的分组才 pinned，其余分组（含展开的）均不吸顶
-      final shouldPin = isExpanded && _stickyGroupUuid == groupUuid;
-
-      slivers.add(
-        shouldPin
-            ? SliverPersistentHeader(
-                pinned: true,
-                delegate: StickyGroupHeaderDelegate(
-                  height: _groupHeaderExtent,
-                  child: headerWidget,
-                ),
-              )
-            : SliverToBoxAdapter(child: headerWidget),
+    if (_isBatchMode) {
+      return _buildBatchGroupHeader(
+        context: context,
+        title: groupName,
+        icon: Icons.folder_outlined,
+        isExpanded: isExpanded,
+        groupItems: groupItems,
+        onToggleExpand: () => _toggleGroup(groupUuid),
       );
+    }
 
-      // 添加设定项列表（展开时显示）
-      if (isExpanded) {
-        // 倒序时反转组内设定项显示列表
-        final displayGroupItems = _isReversed ? groupItems.reversed.toList() : groupItems;
-        // 记录组内设定项在列表中的起始偏移（位于分组标题之后）
-        for (var i = 0; i < displayGroupItems.length; i++) {
-          _listSlots.add((
-            startOffset: currentOffset + _groupHeaderExtent + i * _settingItemExtent,
-            id: displayGroupItems[i].uuid,
-          ));
-        }
-        slivers.add(
-          SliverReorderableList(
-            itemExtent: _settingItemExtent,
-            itemCount: displayGroupItems.length,
-            onReorder: (int oldIndex, int newIndex) {
-              // 倒序时需将显示列表的拖拽索引映射回原始数据列表索引
-              final indices = mapReorderIndices(
-                displayOldIndex: oldIndex,
-                displayNewIndex: newIndex,
-                length: displayGroupItems.length,
-                reversed: _isReversed,
-              );
-              context.read<WorkspaceProvider>().reorderSettingItemsInGroup(groupUuid, indices.dataOldIndex, indices.dataNewIndex);
-            },
-            proxyDecorator: _buildReorderProxyDecorator,
-            itemBuilder: (context, index) {
-              final item = displayGroupItems[index];
-              // 批量模式下禁用拖拽
-              if (_isBatchMode) {
-                return SizedBox(
-                  key: ValueKey(item.uuid),
-                  height: _settingItemExtent,
-                  child: _buildSettingItemWidget(context, item, groupUuid, selectedId, index + 1),
-                );
-              }
-              return ReorderableDelayedDragStartListener(
-                key: ValueKey(item.uuid),
-                index: index,
-                child: _buildSettingItemWidget(context, item, groupUuid, selectedId, index + 1),
+    return GroupHeader(
+      title: groupName,
+      icon: Icons.folder_outlined,
+      itemCount: groupItems.length,
+      isExpanded: isExpanded,
+      itemCountSuffix: '项',
+      onTap: () => _toggleGroup(groupUuid),
+      onAddPressed: isUnassigned ? null : () => _showNewSettingDialog(initialGroupUuid: groupUuid),
+      addTooltip: '新建设定',
+      onMenuPressed: isUnassigned
+          ? null
+          : (buttonContext) {
+              final button = buttonContext.findRenderObject() as RenderBox?;
+              if (button == null) return;
+              _showGroupMenu(
+                buttonContext,
+                groupUuid,
+                type: ContextMenuType.dropdown,
+                position: button.localToGlobal(Offset.zero),
+                anchorSize: button.size,
               );
             },
-          ),
-        );
+      isMenuOpen: _menuOpenedGroupUuid == groupUuid,
+      isButtonPressed: _menuOpenedGroupUuid == groupUuid && _menuOpenedByDropdown,
+      menuTooltip: '更多',
+      onSecondaryTapDown: isUnassigned
+          ? null
+          : (details) {
+              _showGroupMenu(
+                context,
+                groupUuid,
+                type: ContextMenuType.contextMenu,
+                position: details.globalPosition,
+              );
+            },
+    );
+  }
+
+  /// 为列表叠加吸顶的分组标题
+  ///
+  /// 标题与设定项同属一个可拖拽列表，无法再使用吸顶 sliver，
+  /// 因此在列表上方叠加当前分组的标题，并转发滚动事件以保留可滚动性。
+  Widget _wrapWithStickyHeader(
+    BuildContext context,
+    Widget listView,
+    WorkspaceProvider provider,
+  ) {
+    final stickyHeader = _buildStickyHeaderOverlay(context, provider);
+    return Stack(
+      children: [
+        listView,
+        if (stickyHeader != null) Positioned(top: 0, left: 0, right: 0, child: stickyHeader),
+      ],
+    );
+  }
+
+  /// 构建吸顶标题，无需吸顶时返回 null
+  Widget? _buildStickyHeaderOverlay(BuildContext context, WorkspaceProvider provider) {
+    if (!_isStickyHeaderVisible) return null;
+
+    final groupUuid = _stickyGroupUuid;
+    if (groupUuid == null || !_scrollController.hasClients) return null;
+
+    final groupInfo = _groupOffsets.where((g) => g.uuid == groupUuid).firstOrNull;
+    if (groupInfo == null || !groupInfo.isExpanded) return null;
+
+    // 标题仍完整位于视口内时由列表自身显示
+    if (groupInfo.startOffset - _scrollController.offset >= 0) return null;
+
+    return ColoredBox(
+      color: Theme.of(context).colorScheme.surface,
+      child: Listener(
+        onPointerMove: _forwardStickyScroll,
+        onPointerSignal: _forwardStickyPointerSignal,
+        child: _buildGroupHeader(context, groupUuid, provider),
+      ),
+    );
+  }
+
+  /// 在吸顶标题上拖动时把位移转交给列表滚动
+  void _forwardStickyScroll(PointerMoveEvent event) {
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    final target = (position.pixels - event.delta.dy)
+        .clamp(position.minScrollExtent, position.maxScrollExtent);
+    if ((target - position.pixels).abs() < 0.01) return;
+    _scrollController.jumpTo(target);
+  }
+
+  /// 在吸顶标题上滚动滚轮时驱动列表滚动
+  void _forwardStickyPointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent || !_scrollController.hasClients) return;
+    final position = _scrollController.position;
+    final target = (position.pixels + event.scrollDelta.dy)
+        .clamp(position.minScrollExtent, position.maxScrollExtent);
+    _scrollController.jumpTo(target);
+  }
+
+  // ================= 目录拖拽排序 =================
+
+  @override
+  bool get contentsReversed => _isReversed;
+
+  /// 构建当前显示顺序的目录行
+  ///
+  /// 同时刷新分组偏移、批量命中表与设定项序号缓存，供吸顶、批量选择与行构建复用。
+  @override
+  List<ContentsRow> buildContentsRows() {
+    final provider = context.read<WorkspaceProvider>();
+    final items = provider.settingItems;
+    final groups = provider.settingGroups;
+
+    _settingGroupIndex = {for (final group in groups) group.uuid: group};
+    _itemByUuid = {for (final item in items) item.uuid: item};
+    _itemNumberByUuid = {};
+
+    final rows = <ContentsRow>[];
+    final groupOffsets = <({String uuid, double startOffset, bool isExpanded})>[];
+    final listSlots = <({double startOffset, String? id})>[];
+    double offset = 4; // 顶部 padding
+
+    // 无分组时按设定项顺序平铺
+    if (groups.isEmpty) {
+      final displayItems = _isReversed ? items.reversed.toList() : items;
+      for (var i = 0; i < displayItems.length; i++) {
+        final item = displayItems[i];
+        _itemNumberByUuid[item.uuid] = i + 1;
+        listSlots.add((startOffset: offset, id: item.uuid));
+        rows.add(ContentsRow(
+          key: 'i:${item.uuid}',
+          groupUuid: '',
+          extent: _settingItemExtent,
+          itemUuid: item.uuid,
+        ));
+        offset += _settingItemExtent;
+      }
+    } else {
+      final groupGroups = _groupSettingItemsByGroup(items, groups);
+      final groupEntries = groupGroups.entries.toList();
+      final assignedEntries = groupEntries.where((e) => e.key.isNotEmpty).toList();
+      final unassignedEntry = groupEntries.where((e) => e.key.isEmpty).firstOrNull;
+
+      // 构建显示顺序的分组条目（倒序时反转，未分组始终在最后）
+      final displayEntries = <MapEntry<String, List<SettingItemModel>>>[];
+      if (_isReversed) {
+        displayEntries.addAll(assignedEntries.reversed);
+      } else {
+        displayEntries.addAll(assignedEntries);
+      }
+      if (unassignedEntry != null) {
+        displayEntries.add(unassignedEntry);
       }
 
-      // 累加当前分组的偏移量（标题高度 + 展开时的列表高度）
-      currentOffset += _groupHeaderExtent;
-      if (isExpanded) {
-        currentOffset += groupItems.length * _settingItemExtent;
+      _groupItemsByUuid = {for (final entry in groupGroups.entries) entry.key: entry.value};
+      // 组内序号按数据顺序编号，不随倒序变化
+      for (final entry in groupGroups.entries) {
+        for (var i = 0; i < entry.value.length; i++) {
+          _itemNumberByUuid[entry.value[i].uuid] = i + 1;
+        }
+      }
+
+      for (final entry in displayEntries) {
+        final groupUuid = entry.key;
+        final groupItems = entry.value;
+        final isUnassigned = groupUuid.isEmpty;
+
+        // 跳过没有设定项的未分组
+        if (isUnassigned && groupItems.isEmpty) continue;
+
+        final isExpanded = _isGroupExpanded(groupUuid);
+        groupOffsets.add((uuid: groupUuid, startOffset: offset, isExpanded: isExpanded));
+        listSlots.add((startOffset: offset, id: null));
+        rows.add(ContentsRow(
+          key: 'h:$groupUuid',
+          groupUuid: groupUuid,
+          extent: _groupHeaderExtent,
+        ));
+        offset += _groupHeaderExtent;
+
+        if (!isExpanded) continue;
+
+        final displayGroupItems = _isReversed ? groupItems.reversed.toList() : groupItems;
+        for (final item in displayGroupItems) {
+          listSlots.add((startOffset: offset, id: item.uuid));
+          rows.add(ContentsRow(
+            key: 'i:${item.uuid}',
+            groupUuid: groupUuid,
+            extent: _settingItemExtent,
+            itemUuid: item.uuid,
+          ));
+          offset += _settingItemExtent;
+        }
       }
     }
 
-    slivers.add(const SliverPadding(padding: EdgeInsets.only(bottom: 4)));
+    _groupOffsets = groupOffsets;
+    _listSlots = listSlots;
+    return rows;
+  }
 
-    return _wrapWithSelectionListener(CustomScrollView(key: _listKey, controller: _scrollController, slivers: slivers));
+  /// 获取指定分组的展开状态
+  ///
+  /// 未分组的折叠状态由本地 [_isUnassignedCollapsed] 维护；
+  /// 拖拽分组标题期间所有分组统一折叠，使各分组标题在列表中相邻。
+  bool _isGroupExpanded(String groupUuid) {
+    if (isHeaderSorting) return false;
+    if (groupUuid.isEmpty) return !_isUnassignedCollapsed;
+    return _settingGroupIndex[groupUuid]?.isExpanded ?? true;
+  }
+
+  @override
+  void applyContentsHeaderReorder({required int oldDataIndex, required int newDataIndex}) {
+    context.read<WorkspaceProvider>().reorderSettingGroups(oldDataIndex, newDataIndex);
+  }
+
+  @override
+  void applyContentsItemReorder({
+    required ContentsRow row,
+    required String targetGroupUuid,
+    required int position,
+    required int oldIndexInGroup,
+    required bool sameGroup,
+  }) {
+    final provider = context.read<WorkspaceProvider>();
+    final itemUuid = row.itemUuid!;
+    // 目标分组的设定项总数（包含折叠分组中未显示的行）
+    final targetCount = provider.settingItems.where((i) => i.groupUuid == targetGroupUuid).length;
+
+    if (sameGroup) {
+      final rawNew = rawReorderIndex(oldIndexInGroup, position);
+      final indices = mapReorderIndices(
+        displayOldIndex: oldIndexInGroup,
+        displayNewIndex: rawNew,
+        length: targetCount,
+        reversed: _isReversed,
+      );
+      provider.reorderSettingItemsInGroup(targetGroupUuid, indices.dataOldIndex, indices.dataNewIndex);
+      return;
+    }
+
+    // 跨分组：先移动归属，再按目标位置调整组内顺序
+    () async {
+      final moved = await provider.moveSettingItemToGroup(
+        itemUuid: itemUuid,
+        targetGroupUuid: targetGroupUuid,
+      );
+      if (!moved) return;
+
+      // 移动后条目落在目标分组数据顺序末尾，在显示顺序中位于首端或末端
+      final displayIndexAfterMove = _isReversed ? 0 : targetCount;
+      final rawNew = rawReorderIndex(displayIndexAfterMove, position);
+      final indices = mapReorderIndices(
+        displayOldIndex: displayIndexAfterMove,
+        displayNewIndex: rawNew,
+        length: targetCount + 1,
+        reversed: _isReversed,
+      );
+      await provider.reorderSettingItemsInGroup(targetGroupUuid, indices.dataOldIndex, indices.dataNewIndex);
+    }();
   }
 
   /// 按全局坐标命中设定项，返回命中设定项的UUID
