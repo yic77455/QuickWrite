@@ -26,6 +26,7 @@ import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/rich_clipboard.dart';
 import 'package:quick_write/core/utils/rich_text_controller.dart';
 import 'package:quick_write/core/utils/text_style_range.dart';
+import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/utils/word_count_utils.dart';
 import 'package:quick_write/core/models/outline_models.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
@@ -124,6 +125,12 @@ class OutlineEditorState extends State<OutlineEditor>
   /// 指针从按下位置上下移动超过该距离后才生成节点选区，
   /// 避免鼠标轻微移动或纯水平移动就意外拉出节点选区
   static const double _nodeSelectionDragThreshold = 20.0;
+
+  /// 加载指示的显示延迟
+  ///
+  /// 本地文件通常几十毫秒内解析完成，立即显示加载指示会造成闪烁；
+  /// 超过该时长仍未完成时才显示，慢速读取时用户仍能得到反馈。
+  static const Duration _loadingIndicatorDelay = Duration(milliseconds: 300);
 
   // ================= 树结构数据 =================
 
@@ -322,6 +329,25 @@ class OutlineEditorState extends State<OutlineEditor>
 
   // ================= 其他状态 =================
 
+  /// 内容是否已从文件载入完成
+  ///
+  /// 载入完成前禁用添加节点与标题编辑，避免输入被随后解析的内容覆盖
+  bool _isContentReady = true;
+
+  /// 内容读取失败时的错误说明（null 表示未失败）
+  String? _loadErrorMessage;
+
+  /// 加载指示是否可见（载入超过 [_loadingIndicatorDelay] 仍未完成时置位）
+  bool _showLoadingIndicator = false;
+
+  /// 加载指示的延时定时器
+  Timer? _loadingIndicatorTimer;
+
+  /// 当前内容是否可安全保存（载入完成且读取成功）
+  ///
+  /// 供保存流程判断：载入中或读取失败时禁止保存，避免空内容覆盖原文件
+  bool get canSave => _isContentReady && _loadErrorMessage == null;
+
   /// 折叠状态写入任务链
   ///
   /// 因内容与结构变化都会刷新折叠状态，多次保存按此链顺序执行，避免并发写同一文件
@@ -400,6 +426,7 @@ class OutlineEditorState extends State<OutlineEditor>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _stopEdgeAutoScroll();
+    _loadingIndicatorTimer?.cancel();
     _scrollGuard.dispose();
     SettingsService.instance.removeListener(_onSettingsChanged);
     _undoManager.dispose();
@@ -882,35 +909,74 @@ class OutlineEditorState extends State<OutlineEditor>
 
   // ================= 文件读写 =================
 
+  /// 启动加载指示的延时显示
+  ///
+  /// 本地文件通常几十毫秒内解析完成，立即显示加载指示会造成闪烁；
+  /// 超过 [_loadingIndicatorDelay] 仍未完成时才显示
+  void _startLoadingIndicator() {
+    _showLoadingIndicator = false;
+    _loadingIndicatorTimer?.cancel();
+    _loadingIndicatorTimer = Timer(_loadingIndicatorDelay, () {
+      if (!mounted) return;
+      setState(() => _showLoadingIndicator = true);
+    });
+  }
+
+  /// 停止加载指示
+  void _stopLoadingIndicator() {
+    _loadingIndicatorTimer?.cancel();
+    _loadingIndicatorTimer = null;
+    _showLoadingIndicator = false;
+  }
+
   /// 从关联的文件加载大纲内容
   ///
-  /// 文件不存在时视为新设定项，初始化一个默认空节点
+  /// 载入失败时记录错误原因，由编辑器展示错误占位与重试入口
   Future<void> _loadFromFile() async {
+    _isContentReady = false;
+    _loadErrorMessage = null;
+    _startLoadingIndicator();
     try {
       final file = File(widget.filePath!);
-      if (await file.exists()) {
-        final text = await file.readAsString();
-        parseFromText(text);
-        // 恢复上次退出时的节点折叠状态
-        await _loadFoldState();
-      } else {
-        // 文件不存在时视为新设定项，初始化默认空节点
-        parseFromText('');
+      if (!await file.exists()) {
+        _loadErrorMessage = '设定文件不存在，可能已被移动或删除';
+        return;
       }
+      final text = await file.readAsString();
+      parseFromText(text);
+      // 恢复上次退出时的节点折叠状态
+      await _loadFoldState();
     } catch (e) {
       debugPrint('加载大纲文件失败: $e');
+      _loadErrorMessage = '设定内容读取失败';
     } finally {
+      _isContentReady = true;
+      _stopLoadingIndicator();
       if (mounted) {
         // 解析完成后重建节点列表（解析本身不触发刷新）
         setState(() {});
-        // 新建设定文件时把焦点落到第一个节点，便于内容加载完成后立即输入
-        if (widget.autoFocusFirstNode) {
-          _focusFirstNode();
+        // 仅在读取成功时执行聚焦与内容就绪通知
+        if (_loadErrorMessage == null) {
+          // 新建设定文件时把焦点落到第一个节点，便于内容加载完成后立即输入
+          if (widget.autoFocusFirstNode) {
+            _focusFirstNode();
+          }
+          // 通知外部内容已加载完成，用于刷新查找替换等依赖内容的状态
+          widget.onContentLoaded?.call();
         }
-        // 通知外部内容已加载完成，用于刷新查找替换等依赖内容的状态
-        widget.onContentLoaded?.call();
       }
     }
+  }
+
+  /// 重新载入文件内容
+  ///
+  /// 读取失败后由错误占位的重试按钮触发
+  void _retryLoad() {
+    setState(() {
+      _loadErrorMessage = null;
+      _isContentReady = false;
+    });
+    _loadFromFile();
   }
 
   /// 聚焦第一个节点并把光标置于节点开头
@@ -6210,6 +6276,33 @@ class OutlineEditorState extends State<OutlineEditor>
         ? ColorUtils.getPaperOutsideBackgroundColor(context)
         : editorBackgroundColor;
 
+    // 文件读取失败：显示错误占位与重试入口，避免空内容被继续编辑或保存
+    if (_loadErrorMessage != null) {
+      return Container(
+        color: editorAreaColor,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.error_outline_rounded, size: 48, color: colorScheme.error),
+              const SizedBox(height: 12),
+              Text(
+                _loadErrorMessage!,
+                style: context.bodyMedium?.copyWith(color: colorScheme.onSurfaceVariant),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              TextButton.icon(
+                onPressed: _retryLoad,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('重试'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     // 是否启用编辑器级选区和拖拽手势
     // 桌面端支持从文本内拖拽选择文字、从空白或连接线区域拖拽框选多个节点；
     // 移动端禁用，避免手指滑动屏幕滚动时误触发节点选区，
@@ -6224,7 +6317,8 @@ class OutlineEditorState extends State<OutlineEditor>
           OutlineEditorTopBar(
             colorScheme: colorScheme,
             backgroundColor: editorAreaColor,
-            readOnly: widget.readOnly,
+            // 内容载入完成前禁用添加节点，避免输入被随后解析的内容覆盖
+            readOnly: widget.readOnly || !_isContentReady,
             onExpandAll: _expandAll,
             onCollapseAll: _collapseAll,
             onAddRoot: _addRootNode,
@@ -6320,6 +6414,19 @@ class OutlineEditorState extends State<OutlineEditor>
                     ),
                   ),
                 ),
+                // 加载指示：仅在解析超过一定时长仍未完成时显示；
+                // 正常几十毫秒的解析不显示，避免编辑器背景闪动
+                if (_showLoadingIndicator)
+                  Positioned.fill(
+                    child: AbsorbPointer(
+                      child: ColoredBox(
+                        color: editorAreaColor,
+                        child: Center(
+                          child: CircularProgressIndicator(color: colorScheme.primary),
+                        ),
+                      ),
+                    ),
+                  ),
                 // 拖拽排序的落点指示：浮在节点列表之上，不参与指针交互
                 ?_buildReorderIndicator(colorScheme),
                 // 拖拽排序时跟随指针的圆点，模拟被鼠标抓起的圆点
@@ -6595,7 +6702,8 @@ class OutlineEditorState extends State<OutlineEditor>
           controller: _titleController,
           focusNode: _titleFocusNode,
           colorScheme: colorScheme,
-          readOnly: widget.readOnly,
+          // 内容载入完成前不允许编辑标题，避免输入被随后同步的内容覆盖
+          readOnly: widget.readOnly || !_isContentReady,
           leftPadding: titleLeftPadding,
           onChanged: (value) => widget.onTitleChanged?.call(value),
         ),

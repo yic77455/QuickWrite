@@ -136,19 +136,27 @@ mixin BookDataMixin on WorkspaceStateBase {
   /// 读取章节文件内容
   @override
   Future<String> readChapterContent(ChapterModel chapter) async {
+    return await tryReadChapterContent(chapter) ?? '';
+  }
+
+  /// 读取章节内容，读取失败时返回 null
+  ///
+  /// 与 [readChapterContent] 的区别在于能区分「内容为空」与「读取失败」，
+  /// 供编辑器在读取失败时展示错误占位并阻止保存。
+  Future<String?> tryReadChapterContent(ChapterModel chapter) async {
     try {
       final filePath = getChapterFilePath(chapter);
       final file = File(filePath);
 
       if (!await file.exists()) {
         debugPrint('章节文件不存在: $filePath');
-        return '';
+        return null;
       }
 
       return await file.readAsString();
     } catch (e) {
       debugPrint('读取章节文件失败: $e');
-      return '';
+      return null;
     }
   }
 

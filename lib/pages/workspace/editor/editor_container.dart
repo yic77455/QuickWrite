@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/models/chapter.dart';
@@ -41,15 +43,55 @@ class _EditorContainerState extends State<EditorContainer> {
   /// 不参与今日码字与码字速度统计，但仍同步基线以保持后续统计正确。
   static const int _largeDeletionThreshold = 10;
 
+  /// 加载指示的显示延迟
+  ///
+  /// 本地文件通常几十毫秒内读完，立即显示加载指示会形成闪烁；
+  /// 超过该时长仍未完成时才显示，慢速读取时用户仍能得到反馈。
+  static const Duration _loadingIndicatorDelay = Duration(milliseconds: 300);
+
   /// 当前加载的标签页ID（用于避免重复加载）
   String? _loadingTabId;
+
+  /// 加载指示是否可见（加载超过 [_loadingIndicatorDelay] 仍未完成时置位）
+  bool _showLoadingIndicator = false;
+
+  /// 加载指示的延时定时器
+  Timer? _loadingIndicatorTimer;
+
+  @override
+  void dispose() {
+    _loadingIndicatorTimer?.cancel();
+    super.dispose();
+  }
+
+  /// 开始一次内容加载
+  ///
+  /// 记录正在加载的标签页，并延时启动加载指示：
+  /// 正常速度的读取不会显示指示，避免编辑器背景闪动
+  void _startLoading(String tabId) {
+    _loadingTabId = tabId;
+    _showLoadingIndicator = false;
+    _loadingIndicatorTimer?.cancel();
+    _loadingIndicatorTimer = Timer(_loadingIndicatorDelay, () {
+      if (!mounted) return;
+      setState(() => _showLoadingIndicator = true);
+    });
+  }
+
+  /// 清空加载状态
+  void _clearLoadingState() {
+    _loadingTabId = null;
+    _loadingIndicatorTimer?.cancel();
+    _loadingIndicatorTimer = null;
+    _showLoadingIndicator = false;
+  }
 
   /// 确保当前标签页的控制器和内容已加载
   void _ensureCurrentTabLoaded(WorkspaceProvider workspaceProvider) {
     final currentTab = workspaceProvider.currentTab;
 
     if (currentTab == null) {
-      _loadingTabId = null;
+      _clearLoadingState();
       return;
     }
 
@@ -65,8 +107,11 @@ class _EditorContainerState extends State<EditorContainer> {
 
     // 如果标签页还没有控制器，需要创建并加载内容
     if (currentTab.textController == null) {
-      // 标记正在加载的标签页，等待期间切换到其他标签页时据此放弃本次加载
-      _loadingTabId = currentTab.id;
+      // 标记正在加载的标签页：
+      // 等待期间切换到其他标签页时据此放弃本次加载，载入期间禁止保存
+      currentTab.isContentLoading = true;
+      currentTab.loadErrorMessage = null;
+      _startLoading(currentTab.id);
 
       final spanBuilder = ReEditorSpanBuilder(
         customHighlightService: workspaceProvider.customHighlightService,
@@ -101,24 +146,43 @@ class _EditorContainerState extends State<EditorContainer> {
     await Future.microtask(() {});
 
     // 如果用户在等待期间切换了标签页，放弃加载
-    if (_loadingTabId != tab.id) return;
+    if (_loadingTabId != tab.id) {
+      // 放弃加载后标签页没有内容，标记为读取失败，
+      // 避免它被当作空文档继续编辑或保存而覆盖原文件
+      tab.isContentLoading = false;
+      tab.loadErrorMessage = '内容加载已中断，请重试';
+      return;
+    }
     
     try {
       String content = '';
+      // 读取失败原因（null 表示读取成功）
+      String? loadError;
       
       if (tab.type == EditorTabType.backupPreview) {
         // 从备份文件读取内容
         if (tab.backupFilePath != null) {
           final backupContent = await BackupService.instance.readBackupContent(tab.backupFilePath!);
-          if (backupContent != null) {
+          if (backupContent == null) {
+            loadError = '备份内容读取失败';
+          } else {
             content = backupContent;
           }
+        } else {
+          loadError = '备份文件不存在';
         }
       } else if (tab.type == EditorTabType.chapter) {
         // 从文件系统读取章节内容
         final chapter = _findChapterByUuid(provider.chapters, tab.id);
-        if (chapter != null) {
-          content = await provider.readChapterContent(chapter);
+        if (chapter == null) {
+          loadError = '章节不存在，可能已被删除';
+        } else {
+          final chapterContent = await provider.tryReadChapterContent(chapter);
+          if (chapterContent == null) {
+            loadError = '章节内容读取失败';
+          } else {
+            content = chapterContent;
+          }
         }
       } else if (tab.type == EditorTabType.settings) {
         // 从文件系统读取设定项内容
@@ -128,6 +192,13 @@ class _EditorContainerState extends State<EditorContainer> {
         }
       }
       
+      // 读取失败：显示错误占位并提供重试，不再写入任何内容
+      if (loadError != null) {
+        tab.loadErrorMessage = loadError;
+        return;
+      }
+      tab.loadErrorMessage = null;
+
       // 如果内容为空，使用默认模板
       if (content.isEmpty) {
         content = _getDefaultContent(tab);
@@ -209,30 +280,37 @@ class _EditorContainerState extends State<EditorContainer> {
       }
     } catch (e) {
       debugPrint('加载内容失败: $e');
-      // 加载失败时使用默认内容
-      if (tab.textController != null) {
-        final String fallbackText = _getDefaultContent(tab);
-        // 程序化载入内容，不产生编辑事件
-        NovelEditorState.runSilently(() {
-          tab.textController!.text = fallbackText;
-          tab.textController!.selection =
-              CodeLineSelectionUtils.collapsedSelection(fallbackText, 0);
-        });
-        tab.cursorPosition = const TextSelection.collapsed(offset: 0);
-        // 加载失败同样需要初始化基线，避免后续编辑统计错乱
-        tab.updateWordCount();
-        tab.sessionBaselineWordCount = tab.wordCount;
-        tab.recordedSessionWords = 0;
-      }
+      // 载入异常同样进入错误占位，避免空白或半截内容被继续编辑与保存
+      tab.loadErrorMessage = '内容载入失败';
     } finally {
+      tab.isContentLoading = false;
+      // 仅当本次加载仍是当前跟踪的加载时才清理加载状态，
+      // 避免被后续加载取代后误清对方的加载指示
+      if (_loadingTabId == tab.id) {
+        _loadingTabId = null;
+        _loadingIndicatorTimer?.cancel();
+        _loadingIndicatorTimer = null;
+        _showLoadingIndicator = false;
+      }
       // 内容载入完成，通知编辑器重组内容相关布局
       if (mounted) {
         setState(() {});
       }
-      _loadingTabId = null;
       // 通知等待该标签页内容就绪的调用方（如全文搜索跳转）
       provider.notifyTabContentLoaded(tab.id);
     }
+  }
+
+  /// 重新加载标签页内容
+  ///
+  /// 读取失败后由错误占位的重试按钮触发，重试期间重新进入加载状态
+  void _retryLoad(EditorTab tab, WorkspaceProvider provider) {
+    if (tab.isContentLoading) return;
+    tab.loadErrorMessage = null;
+    tab.isContentLoading = true;
+    _startLoading(tab.id);
+    setState(() {});
+    _loadTabContent(tab, provider, null);
   }
   
   /// 「打开章节时」设置是否要求载入内容后把视口滚动到光标处
@@ -352,6 +430,33 @@ class _EditorContainerState extends State<EditorContainer> {
             children: [
               // 编辑器内容
               _buildEditorContent(context, workspaceProvider),
+              // 加载指示：仅在「当前标签页仍在载入」且载入超过一定时长时显示，
+              // 正常几十毫秒的读取不显示，避免编辑器背景闪动；
+              // 切换到其他标签页后不再覆盖其内容
+              if (_showLoadingIndicator &&
+                  (workspaceProvider.currentTab?.isContentLoading ?? false))
+                Positioned.fill(
+                  child: AbsorbPointer(
+                    child: ColoredBox(
+                      color: ColorUtils.getEditorBackgroundColorForTheme(context),
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            CircularProgressIndicator(color: Theme.of(context).colorScheme.primary),
+                            const SizedBox(height: 16),
+                            Text(
+                              '正在加载内容…',
+                              style: context.bodyMedium?.copyWith(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               // 字数浮窗（移动端，浮在编辑内容之上，随编辑区一起被键盘上推）
               const WordCountFloatingWindow(),
               // 查找替换栏（浮动在编辑区域右上角）
@@ -483,6 +588,11 @@ class _EditorContainerState extends State<EditorContainer> {
           );
         }
 
+        // 内容读取失败：显示错误占位与重试入口，避免空白内容被继续编辑或保存
+        if (tab.loadErrorMessage != null) {
+          return _buildLoadErrorPlaceholder(context, tab, provider);
+        }
+
         // 如果控制器为空，返回空占位
         if (tab.textController == null) {
           return const SizedBox.shrink();
@@ -495,7 +605,8 @@ class _EditorContainerState extends State<EditorContainer> {
           spanBuilder: tab.spanBuilder,
           chapterTitleController: tab.chapterTitleController,
           colorScheme: colorScheme,
-          readOnly: tab.isReadOnly,
+          // 内容尚未载入完成时锁定编辑，避免输入被随后写入的内容覆盖
+          readOnly: tab.isReadOnly || tab.isContentLoading,
           onSelectionChanged: (selection) {
             tab.cursorPosition = selection;
             // 防抖更新选中字数（通过 ValueNotifier 局部通知，不触发全局 Provider 重建）
@@ -578,6 +689,38 @@ class _EditorContainerState extends State<EditorContainer> {
           extraTopPadding: provider.findReplaceBarPadding,
         );
       }).toList(),
+      ),
+    );
+  }
+
+  /// 构建内容读取失败的错误占位
+  ///
+  /// 显示失败原因与重试入口；重试成功前该标签页不提供编辑与保存，
+  /// 避免空内容覆盖磁盘上的原文
+  Widget _buildLoadErrorPlaceholder(
+    BuildContext context,
+    EditorTab tab,
+    WorkspaceProvider provider,
+  ) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.error_outline_rounded, size: 36, color: colorScheme.error),
+          const SizedBox(height: 12),
+          Text(
+            tab.loadErrorMessage!,
+            style: context.bodyMedium?.copyWith(color: colorScheme.onSurfaceVariant),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 16),
+          TextButton.icon(
+            onPressed: () => _retryLoad(tab, provider),
+            icon: const Icon(Icons.refresh, size: 18),
+            label: const Text('重试'),
+          ),
+        ],
       ),
     );
   }

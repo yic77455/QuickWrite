@@ -1503,6 +1503,10 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
   Future<bool> saveCurrentTab() async {
     final tab = currentTab;
     if (tab == null) return false;
+    // 内容尚未载入或读取失败时禁止保存，避免空内容覆盖原文件
+    if (tab.isContentLoading || tab.loadErrorMessage != null) {
+      return false;
+    }
     // 章节类型需要文本控制器；大纲类型使用编辑器状态，无需文本控制器
     if (tab.type == EditorTabType.chapter && tab.textController == null) {
       return false;
@@ -1542,6 +1546,10 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
       if (outlineState == null || outlineState is! OutlineEditorState) {
         return false;
       }
+      // 大纲仍在载入或读取失败时禁止保存，避免空内容覆盖原文件
+      if (!outlineState.canSave) {
+        return false;
+      }
       final content = outlineState.serializeToText();
 
       // 更新设定项标题
@@ -1571,6 +1579,8 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
 
     for (final tab in _openedTabs) {
       if (!tab.isModified) continue;
+      // 跳过内容仍在载入或读取失败的标签页，避免把空内容写回文件
+      if (tab.isContentLoading || tab.loadErrorMessage != null) continue;
 
       // 章节类型保存
       if (tab.type == EditorTabType.chapter && tab.textController != null) {
@@ -1601,6 +1611,10 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
           // 从大纲编辑器状态获取序列化后的纯文本内容
           final outlineState = tab.editorKey.currentState;
           if (outlineState == null || outlineState is! OutlineEditorState) {
+            continue;
+          }
+          // 大纲仍在载入或读取失败时跳过，避免空内容覆盖原文件
+          if (!outlineState.canSave) {
             continue;
           }
           final content = outlineState.serializeToText();
@@ -1653,7 +1667,10 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
     if (_isDisposed) return;
     if (!SettingsService.instance.autoSaveEnabled) return;
 
-    final modifiedTabs = _openedTabs.where((t) => t.isModified).toList();
+    // 跳过内容仍在载入或读取失败的标签页，避免把空内容写回文件
+    final modifiedTabs = _openedTabs
+        .where((t) => t.isModified && !t.isContentLoading && t.loadErrorMessage == null)
+        .toList();
     if (modifiedTabs.isEmpty) return;
 
     for (final tab in modifiedTabs) {
@@ -1680,6 +1697,10 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
           // 从大纲编辑器状态获取序列化后的纯文本内容
           final outlineState = tab.editorKey.currentState;
           if (outlineState == null || outlineState is! OutlineEditorState) {
+            continue;
+          }
+          // 大纲仍在载入或读取失败时跳过，避免空内容覆盖原文件
+          if (!outlineState.canSave) {
             continue;
           }
           final content = outlineState.serializeToText();
