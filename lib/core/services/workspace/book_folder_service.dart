@@ -82,34 +82,54 @@ class BookFolderService {
   /// 大纲折叠状态文件后缀
   static const String _foldStateFileSuffix = '.fold.json';
 
+  /// 大纲关键词文件后缀
+  static const String keywordFileSuffix = '.kw.json';
+
+  /// 大纲关联文件后缀
+  static const String linkFileSuffix = '.link.json';
+
+  /// 设定项的伴生文件后缀集合
+  ///
+  /// 关键词与关联信息均由设定项正文派生，随正文一同创建、迁移与删除；
+  /// 折叠状态属于本地界面状态，不参与云同步，不在此列。
+  static const List<String> settingCompanionFileSuffixes = [
+    keywordFileSuffix,
+    linkFileSuffix,
+  ];
+
+  /// 由设定项文件路径派生指定后缀的伴生文件路径
+  ///
+  /// 伴生文件与设定项文件同目录同名，扩展名替换为 [suffix]；
+  /// 独立存放可避免辅助数据混入正文，影响导出与备份内容。
+  /// 路径为空时返回 null。
+  static String? companionFilePath(String? settingItemFilePath, String suffix) {
+    if (settingItemFilePath == null || settingItemFilePath.isEmpty) return null;
+    const String extension = GlobalConstants.settingFileExtension;
+    final String base = settingItemFilePath.endsWith(extension)
+        ? settingItemFilePath.substring(0, settingItemFilePath.length - extension.length)
+        : settingItemFilePath;
+    return '$base$suffix';
+  }
+
   /// 由设定项文件路径派生大纲折叠状态文件路径
   ///
   /// 折叠状态文件与设定项文件同目录同名，扩展名替换为 `.fold.json`，
   /// 独立存放可避免折叠标记混入正文，影响导出与备份的内容。
-  /// 路径为空时返回 null。
-  static String? foldStateFilePath(String? settingItemFilePath) {
-    if (settingItemFilePath == null || settingItemFilePath.isEmpty) return null;
-    const String extension = GlobalConstants.settingFileExtension;
-    final String base = settingItemFilePath.endsWith(extension)
-        ? settingItemFilePath.substring(0, settingItemFilePath.length - extension.length)
-        : settingItemFilePath;
-    return '$base$_foldStateFileSuffix';
-  }
-
-  /// 大纲关键词文件后缀
-  static const String _keywordFileSuffix = '.kw.json';
+  static String? foldStateFilePath(String? settingItemFilePath) =>
+      companionFilePath(settingItemFilePath, _foldStateFileSuffix);
 
   /// 由设定项文件路径派生大纲关键词文件路径
+  static String? keywordFilePath(String? settingItemFilePath) =>
+      companionFilePath(settingItemFilePath, keywordFileSuffix);
+
+  /// 由设定项文件路径派生大纲关联文件路径
+  static String? linkFilePath(String? settingItemFilePath) =>
+      companionFilePath(settingItemFilePath, linkFileSuffix);
+
+  /// 判断路径是否为设定项的伴生文件
   ///
-  /// 关键词文件与设定项文件同目录同名，扩展名替换为 `.kw.json`；
-  /// 独立存放可避免关键词混入大纲 Markdown，影响导出与备份内容。
-  /// 路径为空时返回 null。
-  static String? keywordFilePath(String? settingItemFilePath) {
-    if (settingItemFilePath == null || settingItemFilePath.isEmpty) return null;
-    const String extension = GlobalConstants.settingFileExtension;
-    final String base = settingItemFilePath.endsWith(extension)
-        ? settingItemFilePath.substring(0, settingItemFilePath.length - extension.length)
-        : settingItemFilePath;
-    return '$base$_keywordFileSuffix';
-  }
+  /// 伴生文件由设定项内容派生（关键词、关联），删除后需要同步清理远端副本，
+  /// 否则文件层会把本地缺失当成待补齐内容，重新下载已删除的旧文件。
+  static bool isSettingCompanionFile(String path) =>
+      settingCompanionFileSuffixes.any((suffix) => path.endsWith(suffix));
 }

@@ -145,7 +145,12 @@ class RichTextEditingController extends TextEditingController {
 /// - 下划线/删除线：合并到 decoration
 /// - 删除线状态下叠加半透明灰色到原文字颜色，保留原色基调
 /// - 字体颜色/字底颜色：直接覆盖基础样式的 color/backgroundColor
-TextStyle defaultStyleResolver(TextStyle baseStyle, TextStyleFlags flags) {
+/// - 关联文本：使用 [linkColor] 着色、字号缩小两号、字重略微加粗
+TextStyle defaultStyleResolver(
+  TextStyle baseStyle,
+  TextStyleFlags flags, {
+  Color? linkColor,
+}) {
   var style = baseStyle;
   if (flags.bold) {
     style = style.copyWith(fontWeight: FontWeight.bold);
@@ -166,10 +171,25 @@ TextStyle defaultStyleResolver(TextStyle baseStyle, TextStyleFlags flags) {
   final decorations = <TextDecoration>[];
   if (flags.underline) decorations.add(TextDecoration.underline);
   if (flags.strikethrough) decorations.add(TextDecoration.lineThrough);
-  return style.copyWith(
+  var resolved = style.copyWith(
     color: color,
     backgroundColor: flags.backgroundColor ?? baseStyle.backgroundColor,
     decoration: TextDecoration.combine(decorations),
     decorationColor: color,
   );
+
+  // 关联文本：主题色着色、字号缩小两号、略粗于常规但弱于加粗
+  if (flags.linkId != null) {
+    final double? baseFontSize = baseStyle.fontSize;
+    final double? linkFontSize = baseFontSize == null
+        ? null
+        : (baseFontSize - 2 < 8 ? 8.0 : baseFontSize - 2);
+    resolved = resolved.copyWith(
+      color: linkColor ?? resolved.color,
+      fontSize: linkFontSize,
+      fontWeight: resolved.fontWeight == FontWeight.bold ? FontWeight.bold : FontWeight.w600,
+    );
+  }
+
+  return resolved;
 }

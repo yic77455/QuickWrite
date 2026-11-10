@@ -13,6 +13,7 @@ import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/services/cache_services/outline_last_edit_cache_service.dart';
 import 'package:quick_write/core/services/workspace/book_folder_service.dart';
 import 'package:quick_write/core/services/workspace/outline_keyword_service.dart';
+import 'package:quick_write/core/services/workspace/outline_link_service.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/providers/window_provider.dart';
 import 'package:quick_write/core/utils/batch_selection_controller.dart';
@@ -28,15 +29,18 @@ import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/rich_clipboard.dart';
 import 'package:quick_write/core/utils/rich_text_controller.dart';
 import 'package:quick_write/core/utils/text_style_range.dart';
+import 'package:quick_write/core/utils/text_similarity.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/utils/word_count_utils.dart';
 import 'package:quick_write/core/models/outline_models.dart';
 import 'package:quick_write/core/models/outline_keyword.dart';
+import 'package:quick_write/core/models/outline_link.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 import 'utils/outline_shortcut_keys.dart';
 import 'widgets/outline_color_palette.dart';
 import 'widgets/outline_connection_painter.dart';
 import 'widgets/outline_keyword_card.dart';
+import 'widgets/outline_link_dialog.dart';
 import 'widgets/outline_node_widgets.dart';
 import 'widgets/outline_editor_widgets.dart';
 import 'widgets/outline_settings_card.dart';
@@ -409,6 +413,19 @@ class OutlineEditorState extends State<OutlineEditor>
   /// 避免输入过程中反复写文件。
   Timer? _keywordSaveTimer;
 
+  /// 大纲关联服务（读写关联伴生文件）
+  final OutlineLinkService _linkService = OutlineLinkService();
+
+  /// 关联标识到关联目标的映射
+  ///
+  /// 关联标识同时记录在文本样式区间中，此处保存标识对应的跳转目标信息。
+  final Map<String, OutlineLinkTarget> _links = {};
+
+  /// 关联伴生文件的写入防抖定时器
+  ///
+  /// 关联文本随文字编辑移动位置，合并短时间内的多次修改，避免输入过程中反复写文件。
+  Timer? _linkSaveTimer;
+
   /// 节点折叠动画控制器（节点ID -> 控制器）
   ///
   /// 值从 1 收敛到 0 表示子节点收进圆点，从 0 增长到 1 表示子节点从圆点展开；
@@ -485,6 +502,7 @@ class OutlineEditorState extends State<OutlineEditor>
     _loadingIndicatorTimer?.cancel();
     _lastEditedPathSaveTimer?.cancel();
     _keywordSaveTimer?.cancel();
+    _linkSaveTimer?.cancel();
     _scrollGuard.dispose();
     SettingsService.instance.removeListener(_onSettingsChanged);
     _undoManager.dispose();
@@ -513,6 +531,11 @@ class OutlineEditorState extends State<OutlineEditor>
     // 应用从后台恢复时开启滚动保护，防止 TextField 自动滚动到光标位置
     if (state == AppLifecycleState.resumed) {
       _scrollGuard.protect(const Duration(milliseconds: 300));
+    }
+    // 应用切到后台或失去焦点时立即写入关联伴生文件，
+    // 避免窗口关闭前防抖定时器尚未触发，导致关联文本位置未能落盘
+    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      unawaited(_saveLinks());
     }
   }
 
@@ -551,6 +574,8 @@ class OutlineEditorState extends State<OutlineEditor>
       _renameFoldStateFile(oldWidget.filePath, widget.filePath);
       // 关键词伴生文件同样随大纲文件迁移
       widget.keywordService?.renameSettingKeywords(oldWidget.filePath, widget.filePath);
+      // 关联伴生文件同样随大纲文件迁移
+      _linkService.rename(oldWidget.filePath, widget.filePath);
     }
     // 查找替换栏显示/隐藏导致额外顶边距变化时，记录变化量供 Layout 阶段补偿滚动偏移
     if (widget.extraTopPadding != oldWidget.extraTopPadding) {
@@ -868,7 +893,15 @@ class OutlineEditorState extends State<OutlineEditor>
   /// 为单个节点创建控制器和焦点节点
   void _ensureResources(OutlineNode node) {
     if (!_controllers.containsKey(node.id)) {
-      final controller = RichTextEditingController(text: node.text, styleResolver: defaultStyleResolver);
+      final controller = RichTextEditingController(
+        text: node.text,
+        // 关联文本使用主题强调色渲染，字号与字重由样式解析器统一处理
+        styleResolver: (baseStyle, flags) => defaultStyleResolver(
+          baseStyle,
+          flags,
+          linkColor: widget.colorScheme.primary,
+        ),
+      );
       // 同步节点的样式区间到控制器
       controller.styleRanges = List.of(node.styleRanges);
       _controllers[node.id] = controller;
@@ -1015,6 +1048,8 @@ class OutlineEditorState extends State<OutlineEditor>
       parseFromText(text);
       // 回填节点关键词（伴生文件不存在时保持为空）
       await _loadKeywords();
+      // 回填节点关联文本（伴生文件不存在时保持为空）
+      await _loadLinks();
       // 恢复上次退出时的节点折叠状态
       await _loadFoldState();
     } catch (e) {
@@ -1271,6 +1306,8 @@ class OutlineEditorState extends State<OutlineEditor>
       await file.writeAsString(serializeToText());
       // 关键词与节点树同在保存流程中落盘，保证正文编辑器索引同步更新
       await _saveKeywords();
+      // 关联文本位置随内容变化，与节点树一同落盘
+      await _saveLinks();
       // 结构变化会改变节点路径，随内容一并刷新折叠状态
       _saveFoldState();
       // 节点路径同样可能变化，同步刷新缓存中的上一次编辑节点
@@ -1600,6 +1637,333 @@ class OutlineEditorState extends State<OutlineEditor>
     if (nodeId != null) _showKeywordCard(nodeId);
   }
 
+  // ================= 大纲关联 =================
+
+  /// 生成关联标识
+  String _generateLinkId() => 'link_${DateTime.now().microsecondsSinceEpoch}';
+
+  /// 从伴生文件读取关联目标与关联文本范围并回填到当前节点树
+  ///
+  /// 关联文本范围按「层级索引路径」与节点对应，与关键词、折叠状态使用同一套路径规则；
+  /// 文件中已不存在的节点路径会被忽略。
+  Future<void> _loadLinks() async {
+    final OutlineLinkFile file = await _linkService.read(widget.filePath);
+    _links
+      ..clear()
+      ..addAll(file.links);
+    if (file.nodes.isEmpty) return;
+
+    for (final entry in file.nodes.entries) {
+      final OutlineNode? node = _nodeAtPath(entry.key);
+      if (node == null) continue;
+
+      List<TextStyleRange> ranges = node.styleRanges;
+      for (final OutlineLinkRange linkRange in entry.value) {
+        if (linkRange.linkId.isEmpty) continue;
+
+        // 位置与记录文字一致时直接使用，否则按文字重新定位，
+        // 避免上次未及时落盘的编辑导致关联范围产生偏移
+        int start = linkRange.start;
+        int end = linkRange.end;
+        final String linkText = linkRange.text;
+        final bool sameText = linkText.isNotEmpty &&
+            start >= 0 &&
+            end <= node.text.length &&
+            end - start == linkText.length &&
+            node.text.substring(start, end) == linkText;
+        if (linkText.isNotEmpty && !sameText) {
+          // 同一段文字可能出现多次，取与记录位置最近的一处
+          int? bestIndex;
+          int bestDistance = 1 << 30;
+          int searchStart = 0;
+          while (searchStart < node.text.length) {
+            final int index = node.text.indexOf(linkText, searchStart);
+            if (index < 0) break;
+            final int distance = (index - start).abs();
+            if (distance < bestDistance) {
+              bestDistance = distance;
+              bestIndex = index;
+            }
+            searchStart = index + linkText.length;
+          }
+          if (bestIndex == null) continue;
+          start = bestIndex;
+          end = bestIndex + linkText.length;
+        }
+        if (start >= end || end > node.text.length) continue;
+
+        ranges = TextStyleRangeUtils.applyToggle(
+          ranges,
+          start,
+          end,
+          (current) => current.copyWith(linkId: linkRange.linkId),
+          node.text.length,
+        );
+      }
+      node.styleRanges = ranges;
+      final controller = _controllers[node.id];
+      if (controller is RichTextEditingController) {
+        controller.styleRanges = ranges;
+      }
+    }
+
+    if (mounted) setState(() {});
+  }
+
+  /// 将当前树中的关联目标与关联文本范围写入伴生文件
+  ///
+  /// 仅保存仍被文本引用的关联目标，文本删除后残留的目标不再写盘。
+  Future<bool> _saveLinks() async {
+    if (widget.readOnly) return false;
+    final Map<String, List<OutlineLinkRange>> nodes = _collectLinkRanges();
+    final Set<String> usedIds = {
+      for (final ranges in nodes.values)
+        for (final range in ranges) range.linkId,
+    };
+    final Map<String, OutlineLinkTarget> links = {
+      for (final entry in _links.entries)
+        if (usedIds.contains(entry.key)) entry.key: entry.value,
+    };
+    return _linkService.save(
+      settingItemFilePath: widget.filePath,
+      links: links,
+      nodes: nodes,
+    );
+  }
+
+  /// 安排一次关联伴生文件写入
+  ///
+  /// 关联文本会随输入移动位置，连续输入时合并为一次写入。
+  void _scheduleLinkSave() {
+    if (widget.readOnly) return;
+    _linkSaveTimer?.cancel();
+    _linkSaveTimer = Timer(const Duration(milliseconds: 800), () {
+      _linkSaveTimer = null;
+      unawaited(_saveLinks());
+    });
+  }
+
+  /// 收集整棵树中的关联文本范围
+  ///
+  /// 返回「节点路径 → 关联文本范围列表」，仅包含存在关联文本的节点。
+  Map<String, List<OutlineLinkRange>> _collectLinkRanges() {
+    final result = <String, List<OutlineLinkRange>>{};
+
+    void walk(OutlineNode node, String path) {
+      final ranges = <OutlineLinkRange>[];
+      for (final range in node.styleRanges) {
+        final String? linkId = range.flags.linkId;
+        if (linkId == null) continue;
+        final int start = range.start.clamp(0, node.text.length);
+        final int end = range.end.clamp(0, node.text.length);
+        if (start < end) {
+          ranges.add(OutlineLinkRange(
+            start: start,
+            end: end,
+            linkId: linkId,
+            text: node.text.substring(start, end),
+          ));
+        }
+      }
+      if (ranges.isNotEmpty) result[path] = ranges;
+      for (int i = 0; i < node.children.length; i++) {
+        walk(node.children[i], '$path.$i');
+      }
+    }
+
+    for (int i = 0; i < _roots.length; i++) {
+      walk(_roots[i], '$i');
+    }
+    return result;
+  }
+
+  /// 查找与指定范围重叠的关联样式区间
+  List<TextStyleRange> _linkRangesInSelection(OutlineNode node, TextSelection selection) {
+    if (!selection.isValid) return const [];
+    return [
+      for (final range in node.styleRanges)
+        if (range.flags.linkId != null && range.start < selection.end && range.end > selection.start) range,
+    ];
+  }
+
+  /// 从右键菜单打开关联目标选择弹窗
+  ///
+  /// 仅在单节点存在文字选区时可用，选择完成后把选区文字标记为关联文本。
+  Future<void> _showLinkDialog(String? nodeId) async {
+    if (widget.readOnly || nodeId == null) return;
+    final OutlineNode? node = _findNode(nodeId);
+    final controller = _controllers[nodeId];
+    if (node == null || controller == null) return;
+
+    final TextSelection selection = controller.selection;
+    if (!selection.isValid || selection.isCollapsed) return;
+    final int start = selection.start.clamp(0, node.text.length);
+    final int end = selection.end.clamp(0, node.text.length);
+    if (start >= end) return;
+
+    final WorkspaceProvider provider = context.read<WorkspaceProvider>();
+    final OutlineLinkTarget? target = await OutlineLinkDialog.show(
+      context: context,
+      chapters: provider.chapters,
+      settingItems: provider.settingItems,
+      currentSettingItemUuid: widget.settingItemUuid ?? '',
+      readChapterContent: provider.readChapterContent,
+      readSettingItemContent: provider.readSettingItemContent,
+      volumeNameOf: provider.getVolumeName,
+      groupNameOf: provider.getSettingGroupName,
+    );
+    if (target == null || !mounted) return;
+
+    _applyLink(nodeId, start, end, target.copyWith(id: _generateLinkId()));
+  }
+
+  /// 将节点文本的指定范围标记为关联文本
+  void _applyLink(String nodeId, int start, int end, OutlineLinkTarget target) {
+    final OutlineNode? node = _findNode(nodeId);
+    final controller = _controllers[nodeId];
+    if (node == null || controller == null) return;
+
+    final TextSelection selection = controller.selection;
+    _undoManager.beginBatch();
+    setState(() {
+      _links[target.id] = target;
+
+      // 先清除选区范围内已有的关联标记，保证同一段文字只关联到一个目标
+      List<TextStyleRange> ranges = node.styleRanges;
+      final TextSelection targetRange = TextSelection(baseOffset: start, extentOffset: end);
+      for (final existing in _linkRangesInSelection(node, targetRange)) {
+        ranges = TextStyleRangeUtils.applyToggle(
+          ranges,
+          existing.start,
+          existing.end,
+          (current) => current.copyWith(clearLink: true),
+          node.text.length,
+        );
+      }
+      // 再为选区写入新的关联标识
+      ranges = TextStyleRangeUtils.applyToggle(
+        ranges,
+        start,
+        end,
+        (current) => current.copyWith(linkId: target.id),
+        node.text.length,
+      );
+      node.styleRanges = ranges;
+      // 同步到控制器以触发富文本重建
+      (controller as RichTextEditingController).styleRanges = ranges;
+    });
+    _endBatchAndNotify(description: '添加关联', focusNodeId: nodeId, focusSelection: selection);
+    // 关联变更立即落盘，不等待自动保存
+    unawaited(_saveLinks());
+  }
+
+  /// 移除与指定范围重叠的关联文本标记
+  void _removeLink(String nodeId, int start, int end) {
+    final OutlineNode? node = _findNode(nodeId);
+    final controller = _controllers[nodeId];
+    if (node == null || controller == null) return;
+
+    final TextSelection selection = TextSelection(baseOffset: start, extentOffset: end);
+    final List<TextStyleRange> targets = _linkRangesInSelection(node, selection);
+    if (targets.isEmpty) return;
+
+    _undoManager.beginBatch();
+    setState(() {
+      List<TextStyleRange> ranges = node.styleRanges;
+      // 按整段关联文本清除标记，避免只移除选区覆盖的部分
+      for (final range in targets) {
+        ranges = TextStyleRangeUtils.applyToggle(
+          ranges,
+          range.start,
+          range.end,
+          (current) => current.copyWith(clearLink: true),
+          node.text.length,
+        );
+      }
+      node.styleRanges = ranges;
+      (controller as RichTextEditingController).styleRanges = ranges;
+    });
+    _endBatchAndNotify(description: '移除关联', focusNodeId: nodeId, focusSelection: controller.selection);
+    unawaited(_saveLinks());
+  }
+
+  /// 光标处的关联文本范围
+  ///
+  /// 用于把落在关联文本内部的程序化光标位置移到关联文本末尾，避免光标停在关联文本中间。
+  int _snapOffsetOutOfLink(String nodeId, int offset) {
+    final OutlineNode? node = _findNode(nodeId);
+    if (node == null) return offset;
+    final span = node.linkSpanAt(offset);
+    // 只处理严格位于关联文本内部的位置，边界上的光标保持不变
+    if (span == null || offset == span.start) return offset;
+    return span.end;
+  }
+
+  /// 删除光标旁的关联标记
+  ///
+  /// [forward] 为 true 时对应删除键（光标左侧的字符），false 时对应退格键（光标右侧的字符）。
+  /// 命中关联文本时仅移除关联标记并保留文字，返回 true 表示本次按键已被处理。
+  bool _removeLinkAtCaret(String nodeId, {required bool forward}) {
+    final OutlineNode? node = _findNode(nodeId);
+    final controller = _controllers[nodeId];
+    if (node == null || controller == null) return false;
+
+    final TextSelection selection = controller.selection;
+    if (!selection.isValid || !selection.isCollapsed) return false;
+
+    final int caret = selection.start.clamp(0, node.text.length);
+    final int offset = forward ? caret : caret - 1;
+    final span = node.linkSpanAt(offset);
+    if (span == null) return false;
+
+    _removeLink(nodeId, span.start, span.end);
+    return true;
+  }
+
+  /// 左右方向键跨越关联文本
+  ///
+  /// 关联文本视为一个整体：向右移动时整段跳过，向左移动时同样整段跳过。
+  /// 返回 true 表示已移动光标，false 表示光标不在关联文本边界，交由输入框默认处理。
+  bool _moveCaretAcrossLink(String nodeId, {required bool forward}) {
+    final OutlineNode? node = _findNode(nodeId);
+    final controller = _controllers[nodeId];
+    if (node == null || controller == null) return false;
+
+    final TextSelection selection = controller.selection;
+    if (!selection.isValid || !selection.isCollapsed) return false;
+
+    final int caret = selection.start.clamp(0, node.text.length);
+    if (forward) {
+      // 光标位于关联文本左边界或内部时，跳到整段关联文本末尾
+      final span = node.linkSpanAt(caret);
+      if (span == null) return false;
+      controller.selection = TextSelection.collapsed(offset: span.end);
+    } else {
+      // 光标位于关联文本右边界或内部时，跳到整段关联文本开头
+      final span = node.linkSpanAt(caret - 1);
+      if (span == null) return false;
+      controller.selection = TextSelection.collapsed(offset: span.start);
+    }
+    _ensureCaretVisibleInViewport(nodeId);
+    return true;
+  }
+
+  /// 点击关联文本时跳转到关联目标
+  ///
+  /// 跳转失败（目标被删除、无法定位到段落或节点）时给出浮动提示。
+  Future<void> _handleLinkTap(String linkId) async {
+    final OutlineLinkTarget? target = _links[linkId];
+    if (target == null) {
+      SnackBarService.showError(context, '关联目标不存在，无法跳转');
+      return;
+    }
+
+    final bool located = await context.read<WorkspaceProvider>().navigateToOutlineLink(target);
+    if (!located && mounted) {
+      SnackBarService.showError(context, '无法定位关联目标，目标可能已被修改或删除');
+    }
+  }
+
   /// 收集全部折叠节点的路径
   ///
   /// 节点 ID 每次解析文件都会重新生成，无法跨次加载对应到同一节点，
@@ -1690,6 +2054,8 @@ class OutlineEditorState extends State<OutlineEditor>
     _notifyStatsChanged();
     // 文本变化会影响关键词悬浮卡片中的子孙节点快照，防抖刷新伴生文件
     _scheduleKeywordSave();
+    // 文本变化会移动关联文本的位置，防抖刷新关联伴生文件
+    _scheduleLinkSave();
   }
 
   /// 通知统计信息变化
@@ -2146,6 +2512,28 @@ class OutlineEditorState extends State<OutlineEditor>
     if (ensureVisible) {
       _scrollToNode(nodeId);
     }
+    _confirmNodeFocus(nodeId, moveCursorToEnd: moveCursorToEnd);
+  }
+
+  /// 在帧末确认焦点已落到指定节点
+  ///
+  /// 节点所在标签页尚未切换为当前页时处于不可聚焦的隐藏状态，
+  /// 此时发起的焦点请求会被丢弃，需在切换完成后再补发请求并恢复光标位置。
+  /// 同时可纠正同一指针操作中后续控件抢走焦点的情况。
+  /// [retryCount] 为已补发次数，用尽后放弃，避免与其他焦点操作长期相互争抢。
+  void _confirmNodeFocus(String nodeId, {required bool moveCursorToEnd, int retryCount = 0}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final focusNode = _focusNodes[nodeId];
+      final controller = _controllers[nodeId];
+      if (focusNode == null || controller == null) return;
+      if (focusNode.hasFocus || retryCount >= 2) return;
+
+      focusNode.requestFocus();
+      final offset = moveCursorToEnd ? controller.text.length : 0;
+      controller.selection = TextSelection.fromPosition(TextPosition(offset: offset));
+      _confirmNodeFocus(nodeId, moveCursorToEnd: moveCursorToEnd, retryCount: retryCount + 1);
+    });
   }
 
   /// 聚焦指定节点并滚动到视口中可见
@@ -5220,7 +5608,11 @@ class OutlineEditorState extends State<OutlineEditor>
     if (selection.isCollapsed || !selection.isValid) {
       final renderEditable = _findRenderEditable(nodeId);
       if (renderEditable != null && renderEditable.attached) {
-        final offset = renderEditable.getPositionForPoint(position).offset;
+        // 落在关联文本内部时把光标移到关联文本末尾，避免光标停在关联文本中间
+        final offset = _snapOffsetOutOfLink(
+          nodeId,
+          renderEditable.getPositionForPoint(position).offset,
+        );
         controller.selection = TextSelection.collapsed(offset: offset);
       }
     }
@@ -5287,7 +5679,10 @@ class OutlineEditorState extends State<OutlineEditor>
     }
 
     // 立即将光标定位到点击位置
-    final offset = renderEditable.getPositionForPoint(event.position).offset;
+    final offset = _snapOffsetOutOfLink(
+      nodeId,
+      renderEditable.getPositionForPoint(event.position).offset,
+    );
     controller.selection = TextSelection.collapsed(offset: offset);
 
     // 请求目标节点焦点，覆盖 _handleContextMenuDismissed 对旧节点的焦点请求
@@ -5312,6 +5707,15 @@ class OutlineEditorState extends State<OutlineEditor>
     final TextSelection? styleSelection = targetIds.length == 1 ? _controllers[targetIds.first]?.selection : null;
     final currentFg = _getContextMenuColor(targetNodes, styleSelection, true);
     final currentBg = _getContextMenuColor(targetNodes, styleSelection, false);
+
+    // 关联文本仅作用于单个节点的文字选区，节点选区下不提供
+    final OutlineNode? contextNode = nodeId != null ? _findNode(nodeId) : null;
+    final TextSelection? contextSelection = nodeId != null ? _controllers[nodeId]?.selection : null;
+    final bool hasTextSelection = contextSelection != null &&
+        contextSelection.isValid &&
+        !contextSelection.isCollapsed;
+    final bool canAddLink =
+        !isReadOnly && !hasNodeSelection && contextNode != null && hasTextSelection;
 
     return [
       // 标题/正文格式行
@@ -5400,12 +5804,20 @@ class OutlineEditorState extends State<OutlineEditor>
 
       ContextMenuItem.divider(),
 
+      // 节点内容绑定区：关键词与关联
       // 关键词：单节点绑定，节点选区下不提供（批量绑定语义不清）
       ContextMenuItem(
         labelText: '关键词',
         icon: Icons.sell_outlined,
         enabled: !isReadOnly && !hasNodeSelection && hasTarget,
         onTap: () => _showKeywordCardForContextMenu(nodeId),
+      ),
+      // 关联：把选中文字关联到其他正文文件或设定文件
+      ContextMenuItem(
+        labelText: '添加关联',
+        icon: Icons.link,
+        enabled: canAddLink,
+        onTap: () => _showLinkDialog(nodeId),
       ),
     ];
   }
@@ -5663,10 +6075,12 @@ class OutlineEditorState extends State<OutlineEditor>
           }
           // 左右移动属于横向移动，放弃垂直移动记录的目标列
           _preferredCaretX = null;
-          final bool moved = _moveCaretAcrossNodeBoundary(
-            nodeId,
-            forward: event.logicalKey == LogicalKeyboardKey.arrowRight,
-          );
+          final bool forward = event.logicalKey == LogicalKeyboardKey.arrowRight;
+          // 关联文本视为一个整体，左右移动时整段跳过
+          if (_moveCaretAcrossLink(nodeId, forward: forward)) {
+            return KeyEventResult.handled;
+          }
+          final bool moved = _moveCaretAcrossNodeBoundary(nodeId, forward: forward);
           if (moved) return KeyEventResult.handled;
         }
       }
@@ -5820,6 +6234,19 @@ class OutlineEditorState extends State<OutlineEditor>
         _indentNode(nodeId);
       }
       return KeyEventResult.handled;
+    }
+
+    // 关联文本视为一个整体：在关联文本右侧按退格、左侧按删除时先移除关联，
+    // 文字保持不变，再次按下同样的按键才按普通文本处理
+    if (!isCommand &&
+        !isAlt &&
+        !isShift &&
+        (event.logicalKey == LogicalKeyboardKey.backspace ||
+            event.logicalKey == LogicalKeyboardKey.delete)) {
+      final bool forward = event.logicalKey == LogicalKeyboardKey.delete;
+      if (_removeLinkAtCaret(nodeId, forward: forward)) {
+        return KeyEventResult.handled;
+      }
     }
 
     // Backspace：空节点删除；有内容且光标在开头时仅合并到同级上一节点
@@ -6632,12 +7059,105 @@ class OutlineEditorState extends State<OutlineEditor>
   /// 按节点层级路径定位并聚焦节点
   ///
   /// 供正文关键词跳转使用：先展开全部祖先使节点可见，再滚动到视口中央，
-  /// 最后把焦点与光标交给该节点。返回 false 表示节点尚未解析出来（如内容仍在加载）。
+  /// 最后把焦点与光标（位于节点末尾）交给该节点。返回 false 表示节点尚未解析出来（如内容仍在加载）。
   bool revealNodeByPath(String path) {
     final OutlineNode? node = _nodeAtPath(path);
     if (node == null) return false;
+    _revealNode(node);
+    return true;
+  }
+
+  /// 按关联目标定位节点
+  ///
+  /// 优先使用节点路径，并对路径节点的文本做校验：
+  /// - 路径节点文本与目标一致或高度相似时直接定位
+  /// - 节点被移动到其他位置时按文本查找
+  /// - 文本也被大幅修改时回退到原路径节点（结构未变的情况）
+  /// 返回 false 表示节点尚未解析出来或无法定位。
+  bool revealLinkedNode({required String nodePath, required String text}) {
+    final OutlineNode? pathNode = _nodeAtPath(nodePath);
+    final String target = text.trim();
+
+    if (pathNode != null) {
+      if (target.isEmpty) {
+        _revealNode(pathNode);
+        return true;
+      }
+      final String pathText = pathNode.text.trim();
+      final bool sameNode = pathText == target ||
+          pathText.contains(target) ||
+          TextSimilarity.similarity(target, pathText) >= TextSimilarity.matchThreshold;
+      if (sameNode) {
+        _revealNode(pathNode);
+        return true;
+      }
+    }
+
+    // 路径节点已不是原目标，按文本查找被移动的节点
+    if (target.isNotEmpty && revealNodeByText(target)) return true;
+
+    // 文本也被修改且无法匹配时，结构未变的情况下回退到原路径节点
+    if (pathNode != null) {
+      _revealNode(pathNode);
+      return true;
+    }
+    return false;
+  }
+
+  /// 展开祖先并滚动聚焦到指定节点
+  ///
+  /// 光标置于节点文本末尾，便于定位后直接在原有内容之后继续编辑。
+  void _revealNode(OutlineNode node) {
     _ensureAncestorsExpanded(node.id);
-    _focusAndScrollToNode(node.id, moveCursorToEnd: false);
+    _focusAndScrollToNode(node.id, moveCursorToEnd: true);
+  }
+
+  /// 按节点文本定位并聚焦节点
+  ///
+  /// 供关联跳转兜底使用：节点路径因结构变化失效时，按记录的目标文本查找节点，
+  /// 依次尝试完全相同、包含目标文本、文本相似度匹配。
+  /// 返回 false 表示未找到可信的对应节点。
+  bool revealNodeByText(String text) {
+    final String target = text.trim();
+    if (target.isEmpty) return false;
+
+    OutlineNode? exactNode;
+    OutlineNode? partialNode;
+    OutlineNode? fuzzyNode;
+    double bestScore = 0;
+
+    void walk(OutlineNode node) {
+      final String nodeText = node.text.trim();
+      if (nodeText == target) {
+        exactNode ??= node;
+        return;
+      }
+      if (partialNode == null && nodeText.isNotEmpty && nodeText.contains(target)) {
+        partialNode = node;
+      }
+      // 记录相似度最高的节点，供文本被局部修改后兜底定位；
+      // 过短的文本相似度不可靠，不做模糊匹配
+      if (target.length >= 4) {
+        final double score = TextSimilarity.similarity(target, nodeText);
+        if (score > bestScore) {
+          bestScore = score;
+          fuzzyNode = node;
+        }
+      }
+      for (final child in node.children) {
+        walk(child);
+      }
+    }
+
+    for (final root in _roots) {
+      walk(root);
+    }
+
+    final OutlineNode? node = exactNode ??
+        partialNode ??
+        (bestScore >= TextSimilarity.matchThreshold ? fuzzyNode : null);
+    if (node == null) return false;
+    _revealNode(node);
     return true;
   }
 
@@ -7398,6 +7918,8 @@ class OutlineEditorState extends State<OutlineEditor>
       onDotDragCancel: canReorderByDot ? _onDotDragCancel : null,
       // 点击圆点进入该节点的主题视图，批量选择模式下不切换
       onDotTap: !_isBatchSelectionMode ? () => _enterNodeTopic(flatNode.node.id) : null,
+      // 点击关联文本跳转到关联目标
+      onLinkTap: widget.readOnly || _isBatchSelectionMode ? null : _handleLinkTap,
       isDragging: _reorderNodeId == flatNode.node.id,
       // 折叠动画进度：子节点行据此收进父节点圆点，节点自身据此同步圆点轮廓
       subtreeFoldProgress: displayRow.foldProgress,

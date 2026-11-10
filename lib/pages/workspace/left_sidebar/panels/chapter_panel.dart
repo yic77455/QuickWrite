@@ -1117,7 +1117,16 @@ class _ChapterPanelState extends State<ChapterPanel>
               message: '正在删除分卷，请稍候...',
             );
             try {
-              await workspaceProvider.deleteVolume(volumeUuid: volumeUuid);
+              final success = await workspaceProvider.deleteVolume(volumeUuid: volumeUuid);
+              if (!mounted) return;
+              if (success) {
+                SnackBarService.show(
+                  context,
+                  volumeChapters.isEmpty
+                      ? '分卷「$volumeName」已删除'
+                      : '分卷「$volumeName」已删除，${volumeChapters.length} 个章节已移入回收站',
+                );
+              }
             } finally {
               dismissLoading();
             }
@@ -1292,7 +1301,11 @@ class _ChapterPanelState extends State<ChapterPanel>
             confirmText: '删除',
             cancelText: '取消',
             onConfirm: () async {
-              await provider.deleteChapter(chapterUuid: chapter.uuid);
+              final success = await provider.deleteChapter(chapterUuid: chapter.uuid);
+              if (!mounted) return;
+              if (success) {
+                SnackBarService.show(context, '章节「${chapter.title}」已移入回收站');
+              }
             },
           );
         },

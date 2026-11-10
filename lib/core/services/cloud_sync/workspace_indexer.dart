@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:isar/isar.dart';
-import 'package:quick_write/core/constants/constants.dart';
 import 'package:quick_write/core/models/book.dart';
 import 'package:quick_write/core/models/chapter.dart';
 import 'package:quick_write/core/models/setting_item.dart';
@@ -296,25 +295,41 @@ class WorkspaceIndexer {
           baselines: baselines,
           files: files,
           plainPaths: plainPaths,
-          key:
-              '$_booksKeyPrefix${book.uuid}/settings/'
-              '${item.uuid}${GlobalConstants.settingFileExtension}',
+          key: settingSyncKeyOf(book.uuid, item.uuid),
           localPath: settingLocalPath,
         );
 
         // 关键词伴生文件：与设定项文件同目录同名
-        final String? keywordFileName = BookFolderService.keywordFilePath(
-          '${item.uuid}${GlobalConstants.settingFileExtension}',
-        );
         final String? keywordLocalPath =
             BookFolderService.keywordFilePath(settingLocalPath);
-        if (keywordFileName != null && keywordLocalPath != null) {
+        if (keywordLocalPath != null) {
           await _collectPlainFile(
             baselines: baselines,
             files: files,
             plainPaths: plainPaths,
-            key: '$_booksKeyPrefix${book.uuid}/settings/$keywordFileName',
+            key: settingCompanionSyncKeyOf(
+              book.uuid,
+              item.uuid,
+              BookFolderService.keywordFileSuffix,
+            ),
             localPath: keywordLocalPath,
+          );
+        }
+
+        // 关联伴生文件：与设定项文件同目录同名
+        final String? linkLocalPath =
+            BookFolderService.linkFilePath(settingLocalPath);
+        if (linkLocalPath != null) {
+          await _collectPlainFile(
+            baselines: baselines,
+            files: files,
+            plainPaths: plainPaths,
+            key: settingCompanionSyncKeyOf(
+              book.uuid,
+              item.uuid,
+              BookFolderService.linkFileSuffix,
+            ),
+            localPath: linkLocalPath,
           );
         }
       }
@@ -391,7 +406,7 @@ class WorkspaceIndexer {
           chaptersDirPath,
           relativePathToPlatform(chapter.filePath),
         ]);
-        final cacheKey = chapterCacheKeyOf(bookUuid, chapter.uuid);
+        final cacheKey = chapterSyncKeyOf(bookUuid, chapter.uuid);
         final resolved = await _resolveFileContent(
           cacheKey,
           localPath,
@@ -475,7 +490,7 @@ class WorkspaceIndexer {
     for (final chapter in chapters) {
       if (chapter.uuid.isEmpty || chapter.filePath.isEmpty) continue;
 
-      final key = chapterCacheKeyOf(bookUuid, chapter.uuid);
+      final key = chapterSyncKeyOf(bookUuid, chapter.uuid);
       final localPath = _joinPath([
         chaptersDirPath,
         relativePathToPlatform(chapter.filePath),
@@ -673,14 +688,6 @@ class WorkspaceIndexer {
     if (dotIndex <= separatorIndex) return '';
     return path.substring(dotIndex);
   }
-}
-
-/// 章节正文哈希的缓存键
-///
-/// 章节不再作为独立的同步单元，该键仅用于标记缓存归属
-String chapterCacheKeyOf(String bookUuid, String chapterUuid) {
-  return '$_booksKeyPrefix$bookUuid/$_chaptersDirName/'
-      '$chapterUuid${GlobalConstants.chapterFileExtension}';
 }
 
 /// 已解析的文件内容特征

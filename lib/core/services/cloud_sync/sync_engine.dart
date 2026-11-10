@@ -1,5 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:isar/isar.dart';
+import 'package:quick_write/core/models/chapter.dart';
+import 'package:quick_write/core/models/recycle_item.dart';
+import 'package:quick_write/core/models/setting_item.dart';
 import 'package:quick_write/core/services/database_service.dart';
 import 'package:quick_write/core/services/cloud_sync/metadata_sync.dart';
 import 'package:quick_write/core/services/cloud_sync/remote_storage.dart';
@@ -99,7 +102,12 @@ class SyncEngine {
 
     // 第二阶段：正文同步
     final index = await _buildIndex();
-    final plan = await _buildPlanFrom(index);
+
+    // 与计划生成共用同一次远端列举：回收站清理与差异比对都基于这份清单，
+    // 避免重复请求
+    await _storage.ensureDirectory(_storage.remoteDir);
+    final remoteFiles = await _storage.listFilesRecursive();
+    final plan = _planFrom(index, remoteFiles);
 
     // 查找待清理的远端书籍正文目录：删除不可逆，需在执行前纳入风险预检
     final deletableBookDirs = await _metadataSync.findDeletableBookDirs(
@@ -130,7 +138,12 @@ class SyncEngine {
       );
     }
 
-    // 确认通过后再执行不可逆的远端目录删除
+    // 确认通过后再执行不可逆的远端清理。
+    // 先按回收站记录清理具体文件，再删除整本书的正文目录
+    await _deleteRecycledRemoteFiles(
+      isar: isar,
+      remoteKeys: {for (final file in remoteFiles) file.key},
+    );
     final deletedBookDirCount = await _metadataSync.deleteBookDirs(
       deletableBookDirs,
     );
@@ -232,22 +245,106 @@ class SyncEngine {
     return index;
   }
 
-  /// 结合远端清单生成差异计划
+  /// 结合本地索引生成差异计划
+  ///
+  /// 供同步预演使用：只比对不执行，不改动任何远端或本地状态
   Future<SyncPlan> _buildPlanFrom(WorkspaceIndex index) async {
     // 确保远端同步目录存在，避免首次同步时列举失败
     await _storage.ensureDirectory(_storage.remoteDir);
+    final remoteFiles = await _storage.listFilesRecursive();
+    return _planFrom(index, remoteFiles);
+  }
 
+  /// 依据本地索引与远端清单生成差异计划
+  SyncPlan _planFrom(WorkspaceIndex index, List<RemoteSyncFile> remoteFiles) {
     // 只处理能在本地定位的文件：远端存在但本地数据库尚无对应实体的文件，
     // 需等待元数据同步在本机建立实体后才能落到具体路径
-    final remoteFiles = (await _storage.listFilesRecursive())
-        .where((file) => index.localPathOf(file.key) != null)
-        .toList();
+    final locatableFiles = [
+      for (final file in remoteFiles)
+        if (index.localPathOf(file.key) != null) file,
+    ];
 
     return _planner.buildPlan(
       localFiles: index.files,
-      remoteFiles: remoteFiles,
+      remoteFiles: locatableFiles,
       baselines: _stateStore.baselines,
     );
+  }
+
+  /// 清理回收站中章节与设定项对应的远端文件
+  ///
+  /// 回收站只存在于本地，其中的内容不参与云同步。为让云端与本地回收状态保持一致，
+  /// 每次同步会清理两类远端文件：
+  /// - 仍在回收站中的项：按回收记录推导出对应的章节文件、设定文件与伴生文件
+  /// - 已从回收站彻底删除的项：删除前已登记的逻辑键
+  /// 从回收站恢复后记录消失，下一次同步会把文件重新上传。
+  Future<void> _deleteRecycledRemoteFiles({
+    required Isar isar,
+    required Set<String> remoteKeys,
+  }) async {
+    final recycleItems = await isar.recycleItemModels.where().findAll();
+    if (recycleItems.isEmpty && _stateStore.pendingRemoteDeletes.isEmpty) return;
+
+    final chapters = await isar.chapterModels.where().findAll();
+    final settingItems = await isar.settingItemModels.where().findAll();
+
+    // 数据库中仍存在的实体不参与云端清理：回收记录可能已因跨设备恢复而失效
+    final chapterUuids = {for (final chapter in chapters) chapter.uuid};
+    final settingItemUuids = {for (final item in settingItems) item.uuid};
+    final aliveKeys = {
+      for (final chapter in chapters)
+        ...recycleItemRemoteKeysOf(
+          isChapter: true,
+          bookUuid: chapter.bookUuid,
+          itemUuid: chapter.uuid,
+        ),
+      for (final item in settingItems)
+        ...recycleItemRemoteKeysOf(
+          isChapter: false,
+          bookUuid: item.bookUuid,
+          itemUuid: item.uuid,
+        ),
+    };
+
+    final keys = <String>{};
+    for (final key in _stateStore.pendingRemoteDeletes.toList()) {
+      // 实体已恢复时撤销登记，避免误删重新上传的云端文件
+      if (aliveKeys.contains(key)) {
+        _stateStore.resolveRemoteDelete(key);
+        continue;
+      }
+      keys.add(key);
+    }
+    for (final item in recycleItems) {
+      final bool alive = item.isChapter
+          ? chapterUuids.contains(item.itemUuid)
+          : settingItemUuids.contains(item.itemUuid);
+      if (alive) continue;
+
+      keys.addAll(
+        recycleItemRemoteKeysOf(
+          isChapter: item.isChapter,
+          bookUuid: item.bookUuid,
+          itemUuid: item.itemUuid,
+        ),
+      );
+    }
+
+    for (final key in keys) {
+      // 远端不存在时无需请求，视为已清理
+      if (remoteKeys.contains(key)) {
+        try {
+          await _storage.deleteFile(_storage.remotePathOf(key));
+          // 远端文件已删除，基线随之失效；恢复后会按新文件重新上传
+          _stateStore.removeBaseline(key);
+        } catch (e) {
+          // 清理失败时保留登记，下次同步自动重试
+          debugPrint('清理回收站对应的远端文件失败: $key，$e');
+          continue;
+        }
+      }
+      _stateStore.resolveRemoteDelete(key);
+    }
   }
 
   /// 回填上传项的基线并校验上传结果

@@ -9,6 +9,7 @@ import 'package:quick_write/core/models/setting_group.dart';
 import 'package:quick_write/core/models/setting_item.dart';
 import 'package:quick_write/core/models/recycle_item.dart';
 import 'package:quick_write/core/services/app_paths.dart';
+import 'package:quick_write/core/services/workspace/book_folder_service.dart';
 import 'package:quick_write/core/utils/relative_path_utils.dart';
 
 /// 章节回收站服务
@@ -132,6 +133,13 @@ class RecycleItemService {
       if (sourceFile.existsSync()) {
         await sourceFile.rename(recycleFileFullPath);
       }
+
+      // 伴生文件随正文一同移入回收站，恢复时才能与正文重新配对
+      await _moveSettingCompanionFilesToRecycleBin(
+        itemFilePath: itemFilePath,
+        recycleBinPath: recycleBinPath,
+        recycleFilePath: recycleFilePath,
+      );
 
       // 创建回收项记录
       final recycleItem = RecycleItemModel.fromSettingItem(
@@ -257,6 +265,13 @@ class RecycleItemService {
           await sourceFile.rename(recycleFileFullPath);
         }
 
+        // 伴生文件随正文一同移入回收站，恢复时才能与正文重新配对
+        await _moveSettingCompanionFilesToRecycleBin(
+          itemFilePath: sourceFilePath,
+          recycleBinPath: recycleBinPath,
+          recycleFilePath: recycleFilePath,
+        );
+
         // 创建回收项记录
         recycleItems.add(RecycleItemModel.fromSettingItem(
           item: item,
@@ -323,6 +338,11 @@ class RecycleItemService {
         return null;
       }
 
+      // 原 UUID 已被同书章节占用时说明它已通过其他途径重新存在，
+      // 恢复副本改用新 UUID，避免写入时与现有章节冲突
+      final bool uuidOccupied = existingChapters.any((c) => c.uuid == item.itemUuid);
+      final String restoredUuid = uuidOccupied ? const Uuid().v4() : item.itemUuid;
+
       // 检测重名，必要时添加后缀
       String finalTitle = item.title;
       int suffix = 1;
@@ -374,6 +394,7 @@ class RecycleItemService {
 
       // 创建恢复后的 ChapterModel
       final restoredChapter = item.toChapterModel(
+        uuid: restoredUuid,
         filePath: newRelativePath,
         orderIndex: newOrderIndex,
         volumeOrderIndex: newVolumeOrderIndex,
@@ -418,6 +439,11 @@ class RecycleItemService {
         debugPrint('回收站文件不存在: $recycleFileFullPath');
         return null;
       }
+
+      // 原 UUID 已被同书设定项占用时说明它已通过其他途径重新存在，
+      // 恢复副本改用新 UUID，避免写入时与现有设定项冲突
+      final bool uuidOccupied = existingItems.any((i) => i.uuid == item.itemUuid);
+      final String restoredUuid = uuidOccupied ? const Uuid().v4() : item.itemUuid;
 
       // 检测重名，必要时添加后缀
       String finalTitle = item.title;
@@ -471,8 +497,16 @@ class RecycleItemService {
           '${Platform.pathSeparator}${relativePathToPlatform(newRelativePath)}';
       await recycleFile.rename(targetFilePath);
 
+      // 伴生文件按恢复后的正文路径重新落位
+      await _restoreSettingCompanionFiles(
+        recycleBinPath: recycleBinPath,
+        recycleFilePath: item.recycleFilePath,
+        targetFilePath: targetFilePath,
+      );
+
       // 创建恢复后的 SettingItemModel
       final restoredItem = item.toSettingItemModel(
+        uuid: restoredUuid,
         filePath: newRelativePath,
         orderIndex: newOrderIndex,
         groupOrderIndex: newGroupOrderIndex,
@@ -539,6 +573,11 @@ class RecycleItemService {
             continue;
           }
 
+          // 原 UUID 已被同书章节占用时说明它已通过其他途径重新存在，
+          // 恢复副本改用新 UUID，避免写入时与现有章节冲突
+          final bool uuidOccupied = existingChapters.any((c) => c.uuid == item.itemUuid);
+          final String restoredUuid = uuidOccupied ? const Uuid().v4() : item.itemUuid;
+
           // 检测重名，必要时添加后缀
           String finalTitle = item.title;
           int suffix = 1;
@@ -590,6 +629,7 @@ class RecycleItemService {
 
           // 创建恢复后的 ChapterModel
           final restoredChapter = item.toChapterModel(
+            uuid: restoredUuid,
             filePath: newRelativePath,
             orderIndex: newOrderIndex,
             volumeOrderIndex: newVolumeOrderIndex,
@@ -670,6 +710,11 @@ class RecycleItemService {
             continue;
           }
 
+          // 原 UUID 已被同书设定项占用时说明它已通过其他途径重新存在，
+          // 恢复副本改用新 UUID，避免写入时与现有设定项冲突
+          final bool uuidOccupied = existingItems.any((i) => i.uuid == item.itemUuid);
+          final String restoredUuid = uuidOccupied ? const Uuid().v4() : item.itemUuid;
+
           // 检测重名，必要时添加后缀
           String finalTitle = item.title;
           int suffix = 1;
@@ -722,8 +767,16 @@ class RecycleItemService {
               '${Platform.pathSeparator}${relativePathToPlatform(newRelativePath)}';
           await recycleFile.rename(targetFilePath);
 
+          // 伴生文件按恢复后的正文路径重新落位
+          await _restoreSettingCompanionFiles(
+            recycleBinPath: recycleBinPath,
+            recycleFilePath: item.recycleFilePath,
+            targetFilePath: targetFilePath,
+          );
+
           // 创建恢复后的 SettingItemModel
           final restoredItem = item.toSettingItemModel(
+            uuid: restoredUuid,
             filePath: newRelativePath,
             orderIndex: newOrderIndex,
             groupOrderIndex: newGroupOrderIndex,
@@ -773,6 +826,11 @@ class RecycleItemService {
         await file.delete();
       }
 
+      // 设定项的伴生文件随正文一同彻底删除
+      if (item.isSetting) {
+        await _deleteSettingCompanionFiles(recycleBinPath, item.recycleFilePath);
+      }
+
       // 删除数据库记录
       await _db.writeTxn(() async {
         await _db.recycleItemModels.delete(item.id);
@@ -798,6 +856,11 @@ class RecycleItemService {
         final file = File(recycleFileFullPath);
         if (file.existsSync()) {
           await file.delete();
+        }
+
+        // 设定项的伴生文件随正文一同彻底删除
+        if (item.isSetting) {
+          await _deleteSettingCompanionFiles(recycleBinPath, item.recycleFilePath);
         }
       }
 
@@ -833,6 +896,102 @@ class RecycleItemService {
   }
 
   // ================= 辅助方法 =================
+
+  /// 回收站中正文文件的扩展名
+  static const String _recycleFileExtension = '.txt';
+
+  /// 由回收站正文路径派生伴生文件的回收站相对路径
+  ///
+  /// 正文保存为 items/{uuid}.txt，伴生文件与其同目录，
+  /// 文件名沿用相同的 uuid 并保留各自的伴生后缀，避免同名覆盖
+  String _recycleCompanionPath(String recycleFilePath, String suffix) {
+    final String base = recycleFilePath.endsWith(_recycleFileExtension)
+        ? recycleFilePath.substring(
+            0,
+            recycleFilePath.length - _recycleFileExtension.length,
+          )
+        : recycleFilePath;
+    return '$base$suffix';
+  }
+
+  /// 将设定项的伴生文件移入回收站
+  ///
+  /// 伴生文件与正文同目录同名，正文移入回收站后若继续留在原处，
+  /// 恢复时会与正文脱节，因此需要一同移动
+  Future<void> _moveSettingCompanionFilesToRecycleBin({
+    required String itemFilePath,
+    required String recycleBinPath,
+    required String recycleFilePath,
+  }) async {
+    for (final String suffix in BookFolderService.settingCompanionFileSuffixes) {
+      final String? sourcePath = BookFolderService.companionFilePath(itemFilePath, suffix);
+      if (sourcePath == null) continue;
+
+      final File sourceFile = File(sourcePath);
+      if (!sourceFile.existsSync()) continue;
+
+      final String targetPath =
+          '$recycleBinPath${Platform.pathSeparator}${_recycleCompanionPath(recycleFilePath, suffix)}';
+      // 单个伴生文件移动失败不影响正文已完成的回收
+      try {
+        await sourceFile.rename(targetPath);
+      } catch (e) {
+        debugPrint('设定项伴生文件移入回收站失败: $sourcePath，$e');
+      }
+    }
+  }
+
+  /// 将设定项的伴生文件从回收站恢复到正文所在位置
+  ///
+  /// 恢复后的正文路径可能与删除前不同（分组变化或重名后缀），
+  /// 伴生文件需按新路径重新派生，才能继续与正文同名
+  Future<void> _restoreSettingCompanionFiles({
+    required String recycleBinPath,
+    required String recycleFilePath,
+    required String targetFilePath,
+  }) async {
+    for (final String suffix in BookFolderService.settingCompanionFileSuffixes) {
+      final File sourceFile = File(
+        '$recycleBinPath${Platform.pathSeparator}${_recycleCompanionPath(recycleFilePath, suffix)}',
+      );
+      if (!sourceFile.existsSync()) continue;
+
+      final String? targetPath = BookFolderService.companionFilePath(targetFilePath, suffix);
+      if (targetPath == null) continue;
+
+      final File targetFile = File(targetPath);
+      // 目标位置已有同名伴生文件时先移除，避免重命名失败
+      // 单个伴生文件恢复失败不影响正文已完成的恢复
+      try {
+        if (targetFile.existsSync()) {
+          await targetFile.delete();
+        }
+        await sourceFile.rename(targetPath);
+      } catch (e) {
+        debugPrint('设定项伴生文件恢复失败: $targetPath，$e');
+      }
+    }
+  }
+
+  /// 彻底删除设定项在回收站中的伴生文件
+  Future<void> _deleteSettingCompanionFiles(
+    String recycleBinPath,
+    String recycleFilePath,
+  ) async {
+    for (final String suffix in BookFolderService.settingCompanionFileSuffixes) {
+      final File file = File(
+        '$recycleBinPath${Platform.pathSeparator}${_recycleCompanionPath(recycleFilePath, suffix)}',
+      );
+      // 单个伴生文件删除失败不影响回收项的其余清理
+      try {
+        if (file.existsSync()) {
+          await file.delete();
+        }
+      } catch (e) {
+        debugPrint('设定项伴生文件彻底删除失败: ${file.path}，$e');
+      }
+    }
+  }
 
   /// 文件名安全化处理
   ///

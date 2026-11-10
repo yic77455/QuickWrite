@@ -77,6 +77,33 @@ class OutlineNode {
       children: children.map((c) => c.clone()).toList(),
     );
   }
+
+  /// 查找指定文本位置所在的关联文本范围
+  ///
+  /// 同一关联标识可能被其他样式拆分为多个区间，此处合并为完整范围；
+  /// 位置不在任何关联文本内时返回 null。
+  ({String linkId, int start, int end})? linkSpanAt(int offset) {
+    if (offset < 0 || offset >= text.length) return null;
+
+    String? linkId;
+    for (final range in styleRanges) {
+      final String? id = range.flags.linkId;
+      if (id != null && offset >= range.start && offset < range.end) {
+        linkId = id;
+        break;
+      }
+    }
+    if (linkId == null) return null;
+
+    int start = text.length;
+    int end = 0;
+    for (final range in styleRanges) {
+      if (range.flags.linkId != linkId) continue;
+      if (range.start < start) start = range.start;
+      if (range.end > end) end = range.end;
+    }
+    return (linkId: linkId, start: start, end: end);
+  }
 }
 
 /// 扁平化的大纲节点（用于渲染）

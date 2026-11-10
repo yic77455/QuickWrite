@@ -14,6 +14,8 @@ import 'package:quick_write/core/services/cache_services/chapter_cursor_cache_se
 import 'package:quick_write/core/services/cache_services/misc_cache_service.dart';
 import 'package:quick_write/core/services/cache_services/outline_last_edit_cache_service.dart';
 import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
+import 'package:quick_write/core/services/cloud_sync/sync_models.dart';
+import 'package:quick_write/core/services/cloud_sync/sync_state_store.dart';
 import 'package:quick_write/core/services/recycle_item_service.dart';
 import 'package:isar/isar.dart';
 import 'package:uuid/uuid.dart';
@@ -603,6 +605,7 @@ class RecycleBinProvider extends ChangeNotifier {
   ///
   /// [item] 要彻底删除的回收项
   Future<void> deleteItemPermanently(RecycleItemModel item) async {
+    await _enqueueRemoteDeletes([item]);
     await RecycleItemService.instance.deleteItemPermanently(item);
     _allRecycledItems.removeWhere((i) => i.uuid == item.uuid);
     notifyListeners();
@@ -612,6 +615,7 @@ class RecycleBinProvider extends ChangeNotifier {
   ///
   /// [items] 要彻底删除的回收项列表
   Future<void> deleteItemsPermanentlyBatch(List<RecycleItemModel> items) async {
+    await _enqueueRemoteDeletes(items);
     await RecycleItemService.instance.deleteItemsPermanentlyBatch(items);
     final uuidsToDelete = items.map((i) => i.uuid).toSet();
     _allRecycledItems.removeWhere((i) => uuidsToDelete.contains(i.uuid));
@@ -621,8 +625,31 @@ class RecycleBinProvider extends ChangeNotifier {
   /// 清空章节回收站
   Future<void> emptyItemsRecycleBin() async {
     if (_allRecycledItems.isEmpty) return;
+    await _enqueueRemoteDeletes(_allRecycledItems);
     await RecycleItemService.instance.emptyItems();
     _allRecycledItems.clear();
     notifyListeners();
+  }
+
+  /// 登记彻底删除的回收项对应的远端文件
+  ///
+  /// 回收记录删除后已无法再推导其云端文件，需在删除记录前交给同步服务清理，
+  /// 并立即安排一次同步，避免云端残留无引用文件
+  Future<void> _enqueueRemoteDeletes(Iterable<RecycleItemModel> items) async {
+    if (items.isEmpty) return;
+
+    final store = SyncStateStore.instance;
+    if (!store.isInitialized) return;
+
+    store.enqueueRemoteDeletes([
+      for (final item in items)
+        ...recycleItemRemoteKeysOf(
+          isChapter: item.isChapter,
+          bookUuid: item.bookUuid,
+          itemUuid: item.itemUuid,
+        ),
+    ]);
+    await store.save();
+    CloudSyncService.instance.notifyLocalChange();
   }
 }

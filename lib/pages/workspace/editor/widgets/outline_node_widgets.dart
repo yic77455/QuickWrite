@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/find_match_highlighter.dart';
@@ -139,6 +140,9 @@ class OutlineNodeTile extends StatefulWidget {
   /// 失焦时是否应保留选区（传入节点ID，仅右键菜单目标节点为 true）
   final bool Function(String nodeId) shouldPersistSelectionOnFocusLoss;
 
+  /// 点击关联文本回调（参数为文本样式区间中记录的关联标识）
+  final ValueChanged<String>? onLinkTap;
+
   const OutlineNodeTile({
     super.key,
     required this.node,
@@ -173,6 +177,7 @@ class OutlineNodeTile extends StatefulWidget {
     this.foldTargetDotDepth,
     this.dotFoldProgress,
     required this.shouldPersistSelectionOnFocusLoss,
+    this.onLinkTap,
   });
 
   /// 计算指定深度节点行首连接线区域的总宽度
@@ -296,6 +301,97 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
 
   /// TextField 的 GlobalKey，用于查找 RenderEditable 注入 Painter
   final GlobalKey _textFieldKey = GlobalKey();
+
+  /// 关联文本点击的判定距离
+  ///
+  /// 指针按下与抬起的位置超过该距离时视为拖动选择文字，不触发关联跳转。
+  static const double _linkTapSlop = 6.0;
+
+  /// 按下指针的位置（用于区分点击与拖动）
+  Offset? _linkPointerDownPosition;
+
+  /// 按下指针的时间（用于排除长按选字）
+  DateTime? _linkPointerDownTime;
+
+  /// 按下的指针是否为左键或触摸
+  ///
+  /// 仅左键与触摸触发关联跳转，右键交由自定义右键菜单处理。
+  bool _linkPointerIsPrimary = false;
+
+  /// 鼠标是否悬停在关联文本上
+  ///
+  /// 悬停时把输入框光标换成手型，提示该段文字可点击跳转。
+  bool _isHoveringLink = false;
+
+  /// 记录指针按下位置与按键类型
+  void _handleLinkPointerDown(PointerDownEvent event) {
+    if (widget.onLinkTap == null) return;
+    _linkPointerDownPosition = event.position;
+    _linkPointerDownTime = DateTime.now();
+    _linkPointerIsPrimary = event.buttons == kPrimaryButton || event.kind == PointerDeviceKind.touch;
+  }
+
+  /// 指针抬起时判断是否点击了关联文本
+  ///
+  /// 根据按下位置、按住时长与位移排除拖动选择和长按选字，
+  /// 再用命中位置换算文本偏移量，落在关联文本范围内时回调关联标识。
+  void _handleLinkPointerUp(PointerUpEvent event) {
+    final Offset? downPosition = _linkPointerDownPosition;
+    final DateTime? downTime = _linkPointerDownTime;
+    _linkPointerDownPosition = null;
+    _linkPointerDownTime = null;
+    final ValueChanged<String>? onLinkTap = widget.onLinkTap;
+    if (onLinkTap == null || !_linkPointerIsPrimary || downPosition == null || downTime == null) return;
+    // 长按用于选择文字，不触发跳转
+    if (DateTime.now().difference(downTime).inMilliseconds > 300) return;
+    if ((event.position - downPosition).distance > _linkTapSlop) return;
+
+    final renderEditable = findPersistentRenderEditable(_textFieldKey);
+    if (renderEditable == null || !renderEditable.attached) return;
+
+    final int offset = renderEditable.getPositionForPoint(event.position).offset;
+    final span = widget.node.linkSpanAt(offset);
+    if (span == null) return;
+
+    // 点击关联文本时把光标置于关联文本末尾，避免光标停在关联文本中间
+    widget.controller.selection = TextSelection.collapsed(offset: span.end);
+    onLinkTap(span.linkId);
+
+    // 点击手势可能在本回调之后重新定位光标，帧末再校正一次
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final TextSelection selection = widget.controller.selection;
+      if (!selection.isValid || !selection.isCollapsed) return;
+      final current = widget.node.linkSpanAt(selection.start);
+      if (current == null || selection.start == current.start) return;
+      widget.controller.selection = TextSelection.collapsed(offset: current.end);
+    });
+  }
+
+  /// 鼠标悬停在文本上时更新关联文本状态
+  ///
+  /// 仅在悬停状态发生变化时重建，避免鼠标移动过程中频繁刷新。
+  void _handleLinkHover(PointerHoverEvent event) {
+    if (widget.onLinkTap == null) {
+      if (_isHoveringLink) setState(() => _isHoveringLink = false);
+      return;
+    }
+
+    final renderEditable = findPersistentRenderEditable(_textFieldKey);
+    if (renderEditable == null || !renderEditable.attached) return;
+
+    final int offset = renderEditable.getPositionForPoint(event.position).offset;
+    final bool hovering = widget.node.linkSpanAt(offset) != null;
+    if (hovering != _isHoveringLink) {
+      setState(() => _isHoveringLink = hovering);
+    }
+  }
+
+  /// 鼠标离开输入框时清除关联文本悬停状态
+  void _handleLinkHoverExit(PointerExitEvent event) {
+    if (!_isHoveringLink) return;
+    setState(() => _isHoveringLink = false);
+  }
 
   @override
   void initState() {
@@ -772,42 +868,55 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
         // 通过 DefaultSelectionStyle 注入选区底色，使节点文本选区与正文编辑器使用同一套配色
         child: DefaultSelectionStyle.merge(
           selectionColor: computeFocusedSelectionColor(colorScheme),
-          child: TextField(
-            key: _textFieldKey,
-            controller: widget.controller,
-            focusNode: widget.focusNode,
-            readOnly: widget.readOnly,
-            maxLines: null,
-            minLines: 1,
-            // 基础样式：字号、字体、行高、默认文字颜色
-            // 加粗/斜体/下划线/删除线由 RichTextEditingController 的 buildTextSpan 根据 styleRanges 叠加
-            style: TextStyle(
-              fontFamily: SettingsService.instance.outlineFontFamily,
-              fontSize: _fontSize,
-              height: _lineHeightFactor,
-              color: node.foregroundColor ?? colorScheme.onSurface,
+          // 悬停关联文本时切换为手型光标，提示该段文字可点击跳转
+          child: MouseRegion(
+            opaque: false,
+            onHover: _handleLinkHover,
+            onExit: _handleLinkHoverExit,
+            // 关联文本点击检测需要原始指针位置与位移，故在输入框外层监听指针事件
+            child: Listener(
+              onPointerDown: _handleLinkPointerDown,
+              onPointerUp: _handleLinkPointerUp,
+              child: TextField(
+                key: _textFieldKey,
+                controller: widget.controller,
+                focusNode: widget.focusNode,
+                readOnly: widget.readOnly,
+                // 悬停关联文本时显示手型，其余位置保持文本光标
+                mouseCursor: _isHoveringLink ? SystemMouseCursors.click : SystemMouseCursors.text,
+                maxLines: null,
+                minLines: 1,
+                // 基础样式：字号、字体、行高、默认文字颜色
+                // 加粗/斜体/下划线/删除线由 RichTextEditingController 的 buildTextSpan 根据 styleRanges 叠加
+                style: TextStyle(
+                  fontFamily: SettingsService.instance.outlineFontFamily,
+                  fontSize: _fontSize,
+                  height: _lineHeightFactor,
+                  color: node.foregroundColor ?? colorScheme.onSurface,
+                ),
+                decoration: const InputDecoration(
+                  border: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  filled: false,
+                  isCollapsed: true,
+                  // contentPadding: EdgeInsets.fromLTRB(6, _contentPaddingVertical - 2.5, 6, _contentPaddingVertical + 2.5),
+                  isDense: true,
+                ),
+                cursorColor: colorScheme.primary,
+                // 折叠光标（单击定位产生的光标）不绘制拖动调整用的手柄，仅保留光标本身；
+                // 仅 Android 的默认控件会为折叠光标绘制手柄，故只在 Android 上替换，桌面端与 iOS 保持系统默认
+                selectionControls: Theme.of(context).platform == TargetPlatform.android
+                    ? _outlineNodeSelectionControls
+                    : null,
+                // 桌面端屏蔽 TextField 原生右键菜单，改用自定义右键菜单；
+                // 移动端长按选中文字后弹出文字选择工具栏
+                contextMenuBuilder: PlatformCapabilities.isMobile
+                    ? _buildMobileSelectionToolbar
+                    : (context, editableTextState) => const SizedBox.shrink(),
+                onChanged: widget.onChanged,
+              ),
             ),
-            decoration: const InputDecoration(
-              border: InputBorder.none,
-              focusedBorder: InputBorder.none,
-              enabledBorder: InputBorder.none,
-              filled: false,
-              isCollapsed: true,
-              // contentPadding: EdgeInsets.fromLTRB(6, _contentPaddingVertical - 2.5, 6, _contentPaddingVertical + 2.5),
-              isDense: true,
-            ),
-            cursorColor: colorScheme.primary,
-            // 折叠光标（单击定位产生的光标）不绘制拖动调整用的手柄，仅保留光标本身；
-            // 仅 Android 的默认控件会为折叠光标绘制手柄，故只在 Android 上替换，桌面端与 iOS 保持系统默认
-            selectionControls: Theme.of(context).platform == TargetPlatform.android
-                ? _outlineNodeSelectionControls
-                : null,
-            // 桌面端屏蔽 TextField 原生右键菜单，改用自定义右键菜单；
-            // 移动端长按选中文字后弹出文字选择工具栏
-            contextMenuBuilder: PlatformCapabilities.isMobile
-                ? _buildMobileSelectionToolbar
-                : (context, editableTextState) => const SizedBox.shrink(),
-            onChanged: widget.onChanged,
           ),
         ),
       ),

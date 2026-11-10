@@ -907,16 +907,297 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
   ///
   /// 编辑器尚未挂载或内容尚未解析完成时逐帧重试，
   /// [maxFrames] 用尽后放弃，避免标签页被切换等情况导致无限等待。
-  void _revealOutlineNodeWhenReady(EditorTab tab, String nodePath, int maxFrames) {
+  /// [fallbackText] 为节点路径失效时用于兜底匹配的节点文本。
+  /// [onResult] 在定位结束（成功或失败）时回调，供跳转入口提示用户。
+  void _revealOutlineNodeWhenReady(
+    EditorTab tab,
+    String nodePath,
+    int maxFrames, {
+    String? fallbackText,
+    void Function(bool)? onResult,
+  }) {
     final editorState = tab.editorKey.currentState;
     if (editorState is OutlineEditorState) {
-      final bool revealed = editorState.revealNodeByPath(nodePath);
-      if (revealed) return;
+      // 有关联文本时同时校验路径节点文本，兼容节点被移动或文字被修改的情况
+      final bool revealed = fallbackText == null
+          ? editorState.revealNodeByPath(nodePath)
+          : editorState.revealLinkedNode(nodePath: nodePath, text: fallbackText);
+      if (revealed) {
+        onResult?.call(true);
+        return;
+      }
+      // 内容已加载完成仍找不到目标，说明节点已被删除或结构变化过大，无需继续重试
+      if (editorState.canSave) {
+        onResult?.call(false);
+        return;
+      }
     }
-    if (maxFrames <= 0 || !_openedTabs.contains(tab)) return;
+    if (maxFrames <= 0 || !_openedTabs.contains(tab)) {
+      onResult?.call(false);
+      return;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _revealOutlineNodeWhenReady(tab, nodePath, maxFrames - 1);
+      _revealOutlineNodeWhenReady(
+        tab,
+        nodePath,
+        maxFrames - 1,
+        fallbackText: fallbackText,
+        onResult: onResult,
+      );
     });
+  }
+
+  // ================= 大纲关联跳转 =================
+
+  /// 跳转到大纲关联的目标位置
+  ///
+  /// 正文目标打开章节标签页并按段落定位，设定目标打开设定标签页并定位节点。
+  /// 返回 false 表示目标已被删除或无法定位，供调用方提示用户。
+  Future<bool> navigateToOutlineLink(OutlineLinkTarget target) async {
+    if (target.type == OutlineLinkTargetType.setting) {
+      return _navigateToLinkedSetting(target);
+    }
+    return _navigateToLinkedChapter(target);
+  }
+
+  /// 跳转到关联的设定文件节点
+  Future<bool> _navigateToLinkedSetting(OutlineLinkTarget target) async {
+    final int existingIndex = _openedTabs.indexWhere((t) => t.id == target.targetUuid);
+    if (existingIndex != -1) {
+      _currentTabIndex = existingIndex;
+      notifyListeners();
+      final completer = Completer<bool>();
+      _revealOutlineNodeWhenReady(
+        _openedTabs[existingIndex],
+        target.nodePath,
+        10,
+        fallbackText: target.anchorText,
+        onResult: (result) {
+          if (!completer.isCompleted) completer.complete(result);
+        },
+      );
+      return completer.future;
+    }
+
+    // 目标设定项已被删除时不跳转
+    final item = _settingItems.where((i) => i.uuid == target.targetUuid).firstOrNull;
+    if (item == null) return false;
+
+    final EditorTab tab = EditorTab(
+      id: item.uuid,
+      title: item.title,
+      type: EditorTabType.settings,
+      isPreview: true,
+    );
+    await _openSearchResultTab(tab);
+    notifyListeners();
+
+    final EditorTab? openedTab = _openedTabs.where((t) => t.id == target.targetUuid).firstOrNull;
+    if (openedTab == null) return false;
+
+    final completer = Completer<bool>();
+    _revealOutlineNodeWhenReady(
+      openedTab,
+      target.nodePath,
+      10,
+      fallbackText: target.anchorText,
+      onResult: (result) {
+        if (!completer.isCompleted) completer.complete(result);
+      },
+    );
+    return completer.future;
+  }
+
+  /// 跳转到关联的正文文件段落
+  Future<bool> _navigateToLinkedChapter(OutlineLinkTarget target) async {
+    final int existingIndex = _openedTabs.indexWhere((t) => t.id == target.targetUuid);
+    if (existingIndex != -1) {
+      _currentTabIndex = existingIndex;
+      notifyListeners();
+    } else {
+      // 目标章节已被删除时不跳转
+      final chapter = _chapters.where((c) => c.uuid == target.targetUuid).firstOrNull;
+      if (chapter == null) return false;
+
+      final EditorTab tab = EditorTab(
+        id: chapter.uuid,
+        title: chapter.title,
+        type: EditorTabType.chapter,
+        isPreview: true,
+      );
+      await _openSearchResultTab(tab);
+      notifyListeners();
+    }
+
+    final EditorTab? tab = _openedTabs.where((t) => t.id == target.targetUuid).firstOrNull;
+    if (tab == null) return false;
+
+    final completer = Completer<bool>();
+    _revealChapterParagraphWhenReady(tab, target, 30, (result) {
+      if (!completer.isCompleted) completer.complete(result);
+    });
+    return completer.future;
+  }
+
+  /// 在章节内容就绪后定位到关联段落
+  ///
+  /// 内容尚未载入完成时逐帧重试，[maxFrames] 用尽后放弃；
+  /// 内容已就绪但找不到目标段落时立即回调失败，无需继续等待。
+  void _revealChapterParagraphWhenReady(
+    EditorTab tab,
+    OutlineLinkTarget target,
+    int maxFrames,
+    void Function(bool) onResult,
+  ) {
+    final bool contentReady = tab.textController != null && !tab.isContentLoading;
+    if (contentReady) {
+      if (tab.loadErrorMessage != null || !_locateChapterParagraph(tab, target)) {
+        onResult(false);
+        return;
+      }
+      _scrollToSelectionWhenReady(tab, 10);
+      onResult(true);
+      return;
+    }
+
+    if (maxFrames <= 0 || !_openedTabs.contains(tab)) {
+      onResult(false);
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _revealChapterParagraphWhenReady(tab, target, maxFrames - 1, onResult);
+    });
+  }
+
+  /// 在章节正文中选中关联段落
+  ///
+  /// 返回 false 表示章节内容尚未载入完成或未能定位到目标段落。
+  bool _locateChapterParagraph(EditorTab tab, OutlineLinkTarget target) {
+    final controller = tab.textController;
+    if (controller == null || tab.isContentLoading) return false;
+
+    final String text = controller.text;
+    if (text.isEmpty) return false;
+
+    final ({int start, int end})? range = _resolveChapterParagraphRange(text, target);
+    if (range == null) return false;
+
+    controller.selection = CodeLineSelectionUtils.selectionFromFlat(text, range.start, range.end);
+    return true;
+  }
+
+  /// 计算关联段落在章节正文中的范围
+  ///
+  /// 依次尝试：记录段落序号处的精确文本匹配、全文精确文本匹配、
+  /// 文本相似度模糊匹配，最后回退到记录段落序号。
+  /// 目标段落已被大幅改写且段落序号也失效时返回 null。
+  ({int start, int end})? _resolveChapterParagraphRange(String text, OutlineLinkTarget target) {
+    final List<({int start, int end})> spans = _chapterParagraphSpans(text);
+    if (spans.isEmpty) return null;
+
+    final String anchor = target.anchorText.trim();
+    final int paragraphIndex = target.paragraphIndex;
+
+    // 记录段落序号处的文本与锚点一致时直接命中
+    if (paragraphIndex >= 0 && paragraphIndex < spans.length) {
+      final span = spans[paragraphIndex];
+      final String paragraph = text.substring(span.start, span.end).trim();
+      if (anchor.isEmpty || paragraph == anchor) {
+        if (anchor.isEmpty) return (start: span.start, end: span.end);
+        final int anchorStart = text.indexOf(anchor, span.start);
+        if (anchorStart >= 0 && anchorStart < span.end) {
+          final int anchorEnd = anchorStart + anchor.length > span.end ? span.end : anchorStart + anchor.length;
+          return (start: anchorStart, end: anchorEnd);
+        }
+      }
+    }
+
+    // 全文匹配锚点，取与记录段落序号最近的一次命中
+    if (anchor.isNotEmpty) {
+      int? bestStart;
+      int bestDistance = 1 << 30;
+      int searchStart = 0;
+      while (searchStart < text.length) {
+        final int index = text.indexOf(anchor, searchStart);
+        if (index < 0) break;
+
+        int matchParagraphIndex = 0;
+        for (int i = 0; i < spans.length; i++) {
+          if (index >= spans[i].start && index < spans[i].end) {
+            matchParagraphIndex = i;
+            break;
+          }
+        }
+
+        final int distance = (matchParagraphIndex - paragraphIndex).abs();
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          bestStart = index;
+        }
+        searchStart = index + anchor.length;
+      }
+      if (bestStart != null) return (start: bestStart, end: bestStart + anchor.length);
+    }
+
+    // 段落被局部修改导致文本无法精确匹配时，按相似度寻找最接近的段落
+    // 过短的文本相似度不可靠，不做模糊匹配，直接进入序号兜底判断
+    if (anchor.length >= 4) {
+      final List<double> scores = [
+        for (final span in spans)
+          TextSimilarity.similarity(anchor, text.substring(span.start, span.end)),
+      ];
+      int? bestIndex;
+      double bestScore = 0;
+      for (int i = 0; i < scores.length; i++) {
+        if (scores[i] > bestScore) {
+          bestScore = scores[i];
+          bestIndex = i;
+        }
+      }
+
+      if (bestIndex != null && bestScore >= TextSimilarity.matchThreshold) {
+        // 分数接近时优先选择与记录段落序号更近的段落
+        int chosen = bestIndex;
+        int chosenDistance = (bestIndex - paragraphIndex).abs();
+        for (int i = 0; i < scores.length; i++) {
+          if (scores[i] < bestScore - 0.05) continue;
+          final int distance = (i - paragraphIndex).abs();
+          if (distance < chosenDistance) {
+            chosen = i;
+            chosenDistance = distance;
+          }
+        }
+        final span = spans[chosen];
+        return (start: span.start, end: span.end);
+      }
+    }
+
+    // 文本与相似度均未命中时，仅在段落数量未变化的情况下按记录序号兜底：
+    // 段落数量变化说明序号可能整体偏移，此时宁可不跳转也不跳到错误段落
+    final bool paragraphCountUnchanged =
+        target.paragraphCount <= 0 || target.paragraphCount == spans.length;
+    if (paragraphCountUnchanged && paragraphIndex >= 0 && paragraphIndex < spans.length) {
+      final span = spans[paragraphIndex];
+      return (start: span.start, end: span.end);
+    }
+    return null;
+  }
+
+  /// 将章节正文按行拆分为非空段落范围
+  ///
+  /// 段落范围不含换行符，空行不产生段落，与关联弹窗中的段落序号保持一致。
+  List<({int start, int end})> _chapterParagraphSpans(String text) {
+    final spans = <({int start, int end})>[];
+    int lineStart = 0;
+    for (int i = 0; i <= text.length; i++) {
+      final bool isTextEnd = i == text.length;
+      if (!isTextEnd && text.codeUnitAt(i) != 0x0A) continue;
+      if (i > lineStart && text.substring(lineStart, i).trim().isNotEmpty) {
+        spans.add((start: lineStart, end: i));
+      }
+      lineStart = i + 1;
+    }
+    return spans;
   }
 
   /// 通知指定标签页的内容已加载完成

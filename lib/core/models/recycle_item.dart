@@ -205,6 +205,8 @@ class RecycleItemModel {
 
   /// 转换为 ChapterModel（用于恢复）
   ///
+  /// [uuid] 恢复后的章节 UUID，为空时沿用原 UUID；
+  /// 原 UUID 已被占用时由调用方传入新值，避免覆盖现有章节
   /// [filePath] 恢复后的章节文件相对路径
   /// [orderIndex] 全局排序索引
   /// [volumeOrderIndex] 卷内排序索引
@@ -212,9 +214,10 @@ class RecycleItemModel {
     required String filePath,
     required int orderIndex,
     required int volumeOrderIndex,
+    String? uuid,
   }) {
     return ChapterModel()
-      ..uuid = itemUuid
+      ..uuid = uuid ?? itemUuid
       ..bookUuid = bookUuid
       ..title = title
       ..volumeUuid = containerUuid
@@ -229,6 +232,8 @@ class RecycleItemModel {
 
   /// 转换为 SettingItemModel（用于恢复）
   ///
+  /// [uuid] 恢复后的设定项 UUID，为空时沿用原 UUID；
+  /// 原 UUID 已被占用时由调用方传入新值，避免覆盖现有设定项
   /// [filePath] 恢复后的设定项文件相对路径
   /// [orderIndex] 全局排序索引
   /// [groupOrderIndex] 组内排序索引
@@ -236,9 +241,10 @@ class RecycleItemModel {
     required String filePath,
     required int orderIndex,
     required int groupOrderIndex,
+    String? uuid,
   }) {
     return SettingItemModel()
-      ..uuid = itemUuid
+      ..uuid = uuid ?? itemUuid
       ..bookUuid = bookUuid
       ..title = title
       ..groupUuid = containerUuid

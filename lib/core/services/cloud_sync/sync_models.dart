@@ -5,11 +5,58 @@
 /// 例如 `books/{书籍UUID}/chapters/{章节UUID}.txt`，与本地书名无关
 library;
 
+import 'package:quick_write/core/constants/constants.dart';
+import 'package:quick_write/core/services/workspace/book_folder_service.dart';
+
 /// 同步过程中临时文件使用的后缀
 ///
 /// 上传与下载都先把数据写到临时文件，确认完整后再替换目标文件，
 /// 同时索引本地文件时会跳过该后缀，避免临时文件被当作正式文件同步
 const String kSyncTempSuffix = '.qwsync-tmp';
+
+/// 书籍相关文件在同步命名空间中的键前缀
+const String kBooksKeyPrefix = 'books/';
+
+/// 生成章节正文的逻辑键
+///
+/// 逐章同步时每章是一个独立文件；归档模式下该键同时用作哈希缓存的键，
+/// 保证切换平台后无需重建状态
+String chapterSyncKeyOf(String bookUuid, String chapterUuid) =>
+    '$kBooksKeyPrefix$bookUuid/chapters/'
+    '$chapterUuid${GlobalConstants.chapterFileExtension}';
+
+/// 生成设定文件的逻辑键
+///
+/// 设定文件以设定项 UUID 命名，与书名、标题无关，
+/// 因此重命名或恢复后仍能对应到同一个云端文件
+String settingSyncKeyOf(String bookUuid, String settingItemUuid) =>
+    '$kBooksKeyPrefix$bookUuid/settings/'
+    '$settingItemUuid${GlobalConstants.settingFileExtension}';
+
+/// 生成设定项伴生文件的逻辑键
+///
+/// [suffix] 为伴生文件后缀（关键词、关联），与设定文件同目录、同 UUID
+String settingCompanionSyncKeyOf(
+  String bookUuid,
+  String settingItemUuid,
+  String suffix,
+) => '$kBooksKeyPrefix$bookUuid/settings/$settingItemUuid$suffix';
+
+/// 生成回收项对应的全部远端文件逻辑键
+///
+/// 章节只有正文文件；设定项包含设定文件与全部伴生文件
+List<String> recycleItemRemoteKeysOf({
+  required bool isChapter,
+  required String bookUuid,
+  required String itemUuid,
+}) {
+  if (isChapter) return [chapterSyncKeyOf(bookUuid, itemUuid)];
+  return [
+    settingSyncKeyOf(bookUuid, itemUuid),
+    for (final suffix in BookFolderService.settingCompanionFileSuffixes)
+      settingCompanionSyncKeyOf(bookUuid, itemUuid, suffix),
+  ];
+}
 
 /// 自定义词典在同步命名空间中的键前缀
 const String kDictKeyPrefix = 'dict/';
@@ -204,8 +251,9 @@ class LocalHashCacheEntry {
 
 /// 同步动作
 ///
-/// 描述计划层针对单个逻辑文件给出的处理方式。文件层不做删除决策，
-/// 因为「文件缺失」无法区分被删除、尚未下载与本地丢失三种情况
+/// 描述计划层针对单个逻辑文件给出的处理方式。文件层通常不做删除决策，
+/// 因为「文件缺失」无法区分被删除、尚未下载与本地丢失三种情况；
+/// 仅由设定项派生的伴生文件在明确被删除时使用 [deleteRemote]。
 enum SyncAction {
   /// 上传本地文件到远端
   upload,
@@ -215,6 +263,12 @@ enum SyncAction {
 
   /// 两端都存在无法自动合并的修改，保留双份
   keepBoth,
+
+  /// 删除远端已失去本地对应内容的伴生文件
+  ///
+  /// 仅用于可从设定项内容重新派生的关键词、关联等伴生文件，
+  /// 避免本地删除后旧副本在下次同步被重新下载
+  deleteRemote,
 }
 
 /// 同步计划项
@@ -258,6 +312,9 @@ class SyncPlan {
 
   /// 需要保留双份的冲突数量
   int get conflictCount => _countOf(SyncAction.keepBoth);
+
+  /// 待清理的远端伴生文件数量
+  int get deleteCount => _countOf(SyncAction.deleteRemote);
 
   /// 待处理项目总数
   int get totalCount => items.length;

@@ -877,6 +877,7 @@ class CloudSyncService extends ChangeNotifier {
     final parts = <String>[];
     _addCountPart(parts, '上传', plan.uploadCount);
     _addCountPart(parts, '下载', plan.downloadCount);
+    _addCountPart(parts, '清理伴生文件', plan.deleteCount);
     _addCountPart(parts, '保留双份', plan.conflictCount);
     return '同步预演：${parts.join('，')}（尚未实际传输）';
   }
@@ -899,6 +900,7 @@ class CloudSyncService extends ChangeNotifier {
     _addCountPart(parts, '元数据删除', summary.metadataRemovalCount);
     _addCountPart(parts, '上传', summary.countOf(SyncAction.upload));
     _addCountPart(parts, '下载', summary.countOf(SyncAction.download));
+    _addCountPart(parts, '清理伴生文件', summary.countOf(SyncAction.deleteRemote));
     _addCountPart(parts, '保留双份', summary.conflictCount);
     _addCountPart(parts, '清理书籍目录', summary.deletedBookDirCount);
 

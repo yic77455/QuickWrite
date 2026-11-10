@@ -9,6 +9,8 @@ import 'package:quick_write/core/models/setting_group.dart';
 import 'package:quick_write/core/models/setting_item.dart';
 import 'package:quick_write/core/models/volume.dart';
 import 'package:quick_write/core/services/app_paths.dart';
+import 'package:quick_write/core/services/cache_services/chapter_cursor_cache_service.dart';
+import 'package:quick_write/core/services/cache_services/outline_last_edit_cache_service.dart';
 import 'package:quick_write/core/services/cloud_sync/metadata_codec.dart';
 import 'package:quick_write/core/services/cloud_sync/metadata_merger.dart';
 import 'package:quick_write/core/services/cloud_sync/metadata_types.dart';
@@ -277,7 +279,7 @@ class MetadataSync {
       final bookTitle = titleByBookUuid[chapter.bookUuid];
       if (bookTitle == null || chapter.filePath.isEmpty) continue;
 
-      await recycleService.moveChapterToRecycleBin(
+      final bool moved = await recycleService.moveChapterToRecycleBin(
         chapter: chapter,
         bookTitle: bookTitle,
         volumeName: nameByVolumeUuid[chapter.volumeUuid] ?? '',
@@ -288,6 +290,14 @@ class MetadataSync {
           relativePathToPlatform(chapter.filePath),
         ]),
       );
+
+      // 章节已移入回收站，其光标位置缓存不再有意义
+      if (moved) {
+        await ChapterCursorCacheService.instance.removeChapter(
+          bookUuid: chapter.bookUuid,
+          chapterUuid: chapter.uuid,
+        );
+      }
     }
   }
 
@@ -307,7 +317,7 @@ class MetadataSync {
       final bookTitle = titleByBookUuid[item.bookUuid];
       if (bookTitle == null || item.filePath.isEmpty) continue;
 
-      await recycleService.moveSettingItemToRecycleBin(
+      final bool moved = await recycleService.moveSettingItemToRecycleBin(
         item: item,
         bookTitle: bookTitle,
         groupName: nameByGroupUuid[item.groupUuid] ?? '',
@@ -318,6 +328,14 @@ class MetadataSync {
           relativePathToPlatform(item.filePath),
         ]),
       );
+
+      // 设定项已移入回收站，其上次编辑节点缓存不再有意义
+      if (moved) {
+        await OutlineLastEditCacheService.instance.removeSettingItem(
+          bookUuid: item.bookUuid,
+          settingItemUuid: item.uuid,
+        );
+      }
     }
   }
 

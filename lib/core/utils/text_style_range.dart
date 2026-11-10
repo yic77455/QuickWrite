@@ -26,6 +26,12 @@ class TextStyleFlags {
   /// 字底颜色（null 表示使用默认背景）
   final Color? backgroundColor;
 
+  /// 关联标识（null 表示该段文字不是关联文本）
+  ///
+  /// 关联标识对应大纲外部保存的关联目标信息，用于渲染关联样式与点击跳转；
+  /// 与布尔标记位一样随文字增删自动调整位置。
+  final String? linkId;
+
   const TextStyleFlags({
     this.bold = false,
     this.italic = false,
@@ -33,9 +39,10 @@ class TextStyleFlags {
     this.strikethrough = false,
     this.foregroundColor,
     this.backgroundColor,
+    this.linkId,
   });
 
-  /// 空样式（所有标记位均为 false，颜色为 null）
+  /// 空样式（所有标记位均为 false，颜色与关联标识为 null）
   static const TextStyleFlags none = TextStyleFlags();
 
   /// 是否没有任何样式标记
@@ -45,11 +52,12 @@ class TextStyleFlags {
       !underline &&
       !strikethrough &&
       foregroundColor == null &&
-      backgroundColor == null;
+      backgroundColor == null &&
+      linkId == null;
 
   /// 合并两组样式（区间叠加时使用）
   ///
-  /// 布尔标记位取或运算；颜色属性以 [other] 优先（后覆盖前）。
+  /// 布尔标记位取或运算；颜色与关联标识以 [other] 优先（后覆盖前）。
   TextStyleFlags merge(TextStyleFlags other) => TextStyleFlags(
         bold: bold || other.bold,
         italic: italic || other.italic,
@@ -57,6 +65,7 @@ class TextStyleFlags {
         strikethrough: strikethrough || other.strikethrough,
         foregroundColor: other.foregroundColor ?? foregroundColor,
         backgroundColor: other.backgroundColor ?? backgroundColor,
+        linkId: other.linkId ?? linkId,
       );
 
   /// 切换指定标记位
@@ -75,13 +84,15 @@ class TextStyleFlags {
         strikethrough: strikethrough ?? this.strikethrough,
         foregroundColor: foregroundColor,
         backgroundColor: backgroundColor,
+        linkId: linkId,
       );
 
   /// 复制并修改属性
   ///
   /// 布尔标记位通过 nullable 参数覆盖；
   /// 颜色属性通过 [foregroundColor]/[backgroundColor] 设置新值，
-  /// 通过 [clearForegroundColor]/[clearBackgroundColor] 清除为 null。
+  /// 通过 [clearForegroundColor]/[clearBackgroundColor] 清除为 null；
+  /// 关联标识通过 [linkId] 设置新值，通过 [clearLink] 清除为 null。
   TextStyleFlags copyWith({
     bool? bold,
     bool? italic,
@@ -91,6 +102,8 @@ class TextStyleFlags {
     Color? backgroundColor,
     bool clearForegroundColor = false,
     bool clearBackgroundColor = false,
+    String? linkId,
+    bool clearLink = false,
   }) =>
       TextStyleFlags(
         bold: bold ?? this.bold,
@@ -101,6 +114,7 @@ class TextStyleFlags {
             clearForegroundColor ? null : (foregroundColor ?? this.foregroundColor),
         backgroundColor:
             clearBackgroundColor ? null : (backgroundColor ?? this.backgroundColor),
+        linkId: clearLink ? null : (linkId ?? this.linkId),
       );
 
   /// 切换加粗标记位的函数（用于 [TextStyleRangeUtils.applyToggle]）
@@ -128,16 +142,17 @@ class TextStyleFlags {
           underline == other.underline &&
           strikethrough == other.strikethrough &&
           foregroundColor == other.foregroundColor &&
-          backgroundColor == other.backgroundColor;
+          backgroundColor == other.backgroundColor &&
+          linkId == other.linkId;
 
   @override
   int get hashCode => Object.hash(
-      bold, italic, underline, strikethrough, foregroundColor, backgroundColor);
+      bold, italic, underline, strikethrough, foregroundColor, backgroundColor, linkId);
 
   @override
   String toString() =>
       'TextStyleFlags(b:$bold, i:$italic, u:$underline, s:$strikethrough, '
-      'fc:$foregroundColor, bc:$backgroundColor)';
+      'fc:$foregroundColor, bc:$backgroundColor, link:$linkId)';
 }
 
 /// 样式区间
@@ -274,8 +289,13 @@ class TextStyleRangeUtils {
         ));
       } else {
         // 区间跨越或紧邻插入点（r.end == insertPos），
-        // 延伸 end 以包含新文本，使新键入文字继承前一段样式
-        result.add(r.copyWith(end: r.end + insertLength));
+        // 延伸 end 以包含新文本，使新键入文字继承前一段样式；
+        // 关联文本是整体标记，不向后吞并紧邻其右侧输入的文字
+        if (r.flags.linkId != null && r.end == insertPos) {
+          result.add(r);
+        } else {
+          result.add(r.copyWith(end: r.end + insertLength));
+        }
       }
     }
     return result;

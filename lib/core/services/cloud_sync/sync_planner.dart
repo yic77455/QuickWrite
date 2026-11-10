@@ -1,4 +1,6 @@
+import 'package:quick_write/core/constants/constants.dart';
 import 'package:quick_write/core/services/cloud_sync/sync_models.dart';
+import 'package:quick_write/core/services/workspace/book_folder_service.dart';
 
 /// 云同步计划器
 ///
@@ -10,8 +12,9 @@ import 'package:quick_write/core/services/cloud_sync/sync_models.dart';
 /// - 两端都存在且都变更：保留双份，绝不覆盖
 /// - 两端都未变更：跳过
 ///
-/// 文件的缺失是歧义的（被删除、尚未下载、本地丢失），因此本层不做删除决策；
-/// 实体的删除由元数据同步通过删除记录统一负责
+/// 文件的缺失是歧义的（被删除、尚未下载、本地丢失），因此本层一般不做删除决策；
+/// 仅有设定项派生的伴生文件（关键词、关联）在确认本地删除时清理远端副本，
+/// 避免旧副本在下次同步被重新下载。实体删除仍由元数据同步通过删除记录统一负责
 class SyncPlanner {
   const SyncPlanner();
 
@@ -27,6 +30,7 @@ class SyncPlanner {
   }) {
     final localMap = {for (final file in localFiles) file.key: file};
     final remoteMap = {for (final file in remoteFiles) file.key: file};
+    final localKeys = localMap.keys.toSet();
 
     // 逻辑键全集：任意一端存在或基线中留有记录的文件都需要比对
     final keys = <String>{
@@ -38,9 +42,11 @@ class SyncPlanner {
     final items = <SyncPlanItem>[];
     for (final key in keys) {
       final action = _decide(
+        key: key,
         local: localMap[key],
         remote: remoteMap[key],
         baseline: baselines[key],
+        localKeys: localKeys,
       );
       if (action == null) continue;
       items.add(
@@ -62,9 +68,11 @@ class SyncPlanner {
   ///
   /// 返回 null 表示无需处理
   SyncAction? _decide({
+    required String key,
     LocalSyncFile? local,
     RemoteSyncFile? remote,
     SyncBaselineRecord? baseline,
+    required Set<String> localKeys,
   }) {
     // 基线被标记为墓碑时，等同于没有基线，文件视为重新出现
     final hasBaseline = baseline != null && !baseline.deleted;
@@ -82,8 +90,19 @@ class SyncPlanner {
     // 仅本地存在：远端缺少该文件属于内容缺失，重新上传
     if (local != null && remote == null) return SyncAction.upload;
 
-    // 仅远端存在：本地缺少该文件，重新下载
-    if (local == null && remote != null) return SyncAction.download;
+    // 仅远端存在：本地缺少该文件，通常重新下载；
+    // 设定项伴生文件被主动删除时改为清理远端副本
+    if (local == null && remote != null) {
+      if (_shouldDeleteRemoteCompanion(
+        key: key,
+        remote: remote,
+        baseline: baseline,
+        localKeys: localKeys,
+      )) {
+        return SyncAction.deleteRemote;
+      }
+      return SyncAction.download;
+    }
 
     // 两端都存在
     if (!hasBaseline) return SyncAction.keepBoth; // 两端各自新增同一文件
@@ -91,5 +110,38 @@ class SyncPlanner {
     if (localChanged) return SyncAction.upload;
     if (remoteChanged) return SyncAction.download;
     return null; // 两端均未变更，跳过
+  }
+
+  /// 判断本地缺失的远端伴生文件是否应删除远端副本
+  ///
+  /// 满足以下条件时才删除，避免误删：
+  /// - 上次同步留有基线，说明该伴生文件曾在本地存在
+  /// - 远端内容自上次同步后未变化，其他设备新增的内容不被覆盖
+  /// - 对应的设定项正文仍在本地，书籍目录整体不可用时不会误删云端文件
+  bool _shouldDeleteRemoteCompanion({
+    required String key,
+    required RemoteSyncFile remote,
+    required SyncBaselineRecord? baseline,
+    required Set<String> localKeys,
+  }) {
+    if (baseline == null || baseline.deleted) return false;
+    if (!BookFolderService.isSettingCompanionFile(key)) return false;
+
+    final String? mainKey = _mainSettingKeyOf(key);
+    if (mainKey == null || !localKeys.contains(mainKey)) return false;
+
+    return baseline.remoteContentId == remote.contentId;
+  }
+
+  /// 由伴生文件逻辑键推导设定项正文的逻辑键
+  ///
+  /// 伴生文件与设定项文件同目录同名，仅扩展名不同。
+  String? _mainSettingKeyOf(String key) {
+    for (final String suffix in BookFolderService.settingCompanionFileSuffixes) {
+      if (!key.endsWith(suffix)) continue;
+      final String base = key.substring(0, key.length - suffix.length);
+      return '$base${GlobalConstants.settingFileExtension}';
+    }
+    return null;
   }
 }

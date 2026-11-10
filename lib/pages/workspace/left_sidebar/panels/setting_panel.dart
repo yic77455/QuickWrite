@@ -1122,7 +1122,16 @@ class _SettingPanelState extends State<SettingPanel>
           message: '正在删除分组，请稍候...',
         );
         try {
-          await provider.deleteSettingGroup(groupUuid: groupUuid);
+          final success = await provider.deleteSettingGroup(groupUuid: groupUuid);
+          if (!mounted) return;
+          if (success) {
+            SnackBarService.show(
+              context,
+              groupItems.isEmpty
+                  ? '分组「$groupName」已删除'
+                  : '分组「$groupName」已删除，${groupItems.length} 个设定项已移入回收站',
+            );
+          }
         } finally {
           dismissLoading();
         }
@@ -1299,7 +1308,11 @@ class _SettingPanelState extends State<SettingPanel>
             confirmText: '删除',
             cancelText: '取消',
             onConfirm: () async {
-              await provider.deleteSettingItem(itemUuid: item.uuid);
+              final success = await provider.deleteSettingItem(itemUuid: item.uuid);
+              if (!mounted) return;
+              if (success) {
+                SnackBarService.show(context, '设定「${item.title}」已移入回收站');
+              }
             },
           );
         },

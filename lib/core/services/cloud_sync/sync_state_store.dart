@@ -10,6 +10,7 @@ import 'package:quick_write/core/services/cloud_sync/sync_models.dart';
 ///
 /// 负责本机同步状态的持久化，存放于 {应用根目录}/sync/state.json：
 /// - 同步基线：每个逻辑文件上一次同步完成时两端的状态，是三方比对的依据
+/// - 待清理的远端文件：回收项彻底删除后已无法推导的云端文件逻辑键
 ///
 /// 该状态与设备绑定，不参与云端同步
 class SyncStateStore {
@@ -60,6 +61,26 @@ class SyncStateStore {
   Map<String, Set<String>> get entityBaselines =>
       Map.unmodifiable(_entityBaselines);
 
+  /// 待清理的远端文件逻辑键
+  ///
+  /// 回收项被彻底删除后已无法再推导其云端文件，因此需要在删除记录之前登记，
+  /// 由后续同步完成清理；本机回收站仍在的项无需登记，可随时按记录推导
+  final Set<String> _pendingRemoteDeletes = {};
+
+  /// 获取待清理的远端文件逻辑键（只读）
+  Set<String> get pendingRemoteDeletes =>
+      Set.unmodifiable(_pendingRemoteDeletes);
+
+  /// 登记待清理的远端文件
+  void enqueueRemoteDeletes(Iterable<String> keys) {
+    _pendingRemoteDeletes.addAll(keys.where((key) => key.isNotEmpty));
+  }
+
+  /// 标记远端文件已清理，移出待清理队列
+  void resolveRemoteDelete(String key) {
+    _pendingRemoteDeletes.remove(key);
+  }
+
   /// 更新元数据实体基线
   void setEntityBaselines(Map<String, Set<String>> baselines) {
     _entityBaselines
@@ -77,6 +98,8 @@ class SyncStateStore {
   void clearSyncBaselines() {
     _baselines.clear();
     _entityBaselines.clear();
+    // 远端已清空，待清理的远端文件不再存在
+    _pendingRemoteDeletes.clear();
   }
 
   /// 本机设备名称
@@ -246,6 +269,11 @@ class SyncStateStore {
         }
       }
 
+      final rawPendingDeletes = jsonMap['pendingRemoteDeletes'];
+      if (rawPendingDeletes is List) {
+        _pendingRemoteDeletes.addAll(rawPendingDeletes.whereType<String>());
+      }
+
       // 旧版本把扫描得到的章节哈希写进了基线，需要还原为可正常比对的状态
       if (version < _schemaVersion) _repairScannedChapterBaselines();
     } catch (e) {
@@ -310,6 +338,7 @@ class SyncStateStore {
         'entityBaselines': _entityBaselines.map(
           (key, value) => MapEntry(key, value.toList()),
         ),
+        'pendingRemoteDeletes': _pendingRemoteDeletes.toList(),
       };
       final content = const JsonEncoder.withIndent('  ').convert(jsonMap);
       await File(_stateFilePath!).writeAsString(content);

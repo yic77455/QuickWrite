@@ -58,6 +58,9 @@ class SyncTransfer {
           return await _keepBothArchive(item, index);
         }
         return await _keepBothPlain(item, index);
+      case SyncAction.deleteRemote:
+        await _deleteRemoteCompanion(item);
+        return const [];
     }
   }
 
@@ -101,6 +104,16 @@ class SyncTransfer {
       localModifiedAt: committed.modifiedAt,
       remoteContentId: remote.contentId,
     );
+  }
+
+  /// 删除远端已失去本地对应内容的伴生文件
+  ///
+  /// 仅用于可从设定项内容重新派生的文件（关键词、关联）：
+  /// 本地删除后旧副本不能留在远端，否则下次同步会把它重新下载回本地。
+  /// 删除成功后记录墓碑，避免已删除的文件被反复处理。
+  Future<void> _deleteRemoteCompanion(SyncPlanItem item) async {
+    await _storage.deleteFile(_storage.remotePathOf(item.key));
+    _stateStore.markDeleted(item.key);
   }
 
   /// 处理普通文件的两端同时修改
