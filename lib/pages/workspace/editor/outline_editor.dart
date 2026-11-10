@@ -624,8 +624,11 @@ class OutlineEditorState extends State<OutlineEditor>
   }
 
   /// 创建新节点
-  OutlineNode _createNode(String text) {
-    return OutlineNode(id: _generateId(), text: text);
+  ///
+  /// [styleRanges] 用于携带文本片段原有的样式区间，例如分割节点时
+  /// 把前半段的样式一并交给新节点。
+  OutlineNode _createNode(String text, {List<TextStyleRange>? styleRanges}) {
+    return OutlineNode(id: _generateId(), text: text, styleRanges: styleRanges);
   }
 
   /// 当前进入的主题节点（未进入主题时为 null）
@@ -2286,15 +2289,23 @@ class OutlineEditorState extends State<OutlineEditor>
     if (selection.isCollapsed && selection.baseOffset > 0 && selection.baseOffset < text.length) {
       final textBefore = text.substring(0, selection.baseOffset);
       final textAfter = text.substring(selection.baseOffset);
+      // 样式区间随文本一起分割：前半段归前面的节点，后半段归后面的节点
+      final rangesBefore = TextStyleRangeUtils.slice(currentNode.styleRanges, 0, selection.baseOffset);
+      final rangesAfter = TextStyleRangeUtils.slice(currentNode.styleRanges, selection.baseOffset, text.length);
 
       if (hasChildren) {
         // 有子节点：在当前节点上方插入新节点承载前半部分，当前节点保留后半部分和子节点
-        final newNode = _createNode(textBefore);
+        final newNode = _createNode(textBefore, styleRanges: rangesBefore);
         _ensureResources(newNode);
         siblings.insert(location.index, newNode);
 
+        // 当前节点只保留后半段文本，样式区间同步裁剪到后半段
+        currentNode.styleRanges = rangesAfter;
         controller.text = textAfter;
         currentNode.text = textAfter;
+        if (controller is RichTextEditingController) {
+          controller.styleRanges = rangesAfter;
+        }
 
         // 新节点插入在当前节点上方，需保证当前节点插入后仍满足底部安全间距
         _scheduleRevealBeforePaint(currentNode.id);
@@ -2309,10 +2320,15 @@ class OutlineEditorState extends State<OutlineEditor>
       }
 
       // 无子节点：前半部分留当前节点，新节点在下方承载后半部分
+      // 当前节点只保留前半段文本，样式区间同步裁剪到前半段
+      currentNode.styleRanges = rangesBefore;
       controller.text = textBefore;
       currentNode.text = textBefore;
+      if (controller is RichTextEditingController) {
+        controller.styleRanges = rangesBefore;
+      }
 
-      final newNode = _createNode(textAfter);
+      final newNode = _createNode(textAfter, styleRanges: rangesAfter);
       _ensureResources(newNode);
       siblings.insert(location.index + 1, newNode);
 

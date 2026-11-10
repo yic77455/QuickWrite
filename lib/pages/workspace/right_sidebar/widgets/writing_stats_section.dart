@@ -252,6 +252,9 @@ class _StatCard extends StatelessWidget {
   });
 
   /// 构建时长富文本（数字粗体 + 单位普通字重）
+  ///
+  /// 数字与上方统计计数的字号一致，单位与统计单位的字号一致，
+  /// 使时长文本的最大字号不超过计数文本
   Widget _buildDurationRichText(BuildContext context) {
     final totalSeconds = durationSeconds!;
     final hours = totalSeconds ~/ 3600;
@@ -259,9 +262,13 @@ class _StatCard extends StatelessWidget {
     final seconds = totalSeconds % 60;
 
     final colorScheme = Theme.of(context).colorScheme;
-    final baseStyle = context.titleLarge?.copyWith(color: colorScheme.onSurface);
-    final numberStyle = baseStyle?.copyWith(fontWeight: FontWeight.w600);
-    final unitStyle = baseStyle?.copyWith(fontWeight: FontWeight.normal);
+    // 数字样式与统计计数相同
+    final numberStyle = context.titleLarge?.copyWith(
+      fontWeight: FontWeight.w600,
+      color: colorScheme.onSurface,
+    );
+    // 单位样式与统计单位相同
+    final unitStyle = context.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant);
 
     return Text.rich(
       TextSpan(
