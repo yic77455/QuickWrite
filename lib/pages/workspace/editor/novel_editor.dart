@@ -1,14 +1,17 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/constants/constants.dart';
 import 'package:quick_write/core/constants/punctuation_symbols.dart';
+import 'package:quick_write/core/models/outline_keyword.dart';
 import 'package:quick_write/core/providers/window_provider.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/services/workspace/custom_highlight_service.dart';
+import 'package:quick_write/core/services/workspace/outline_keyword_service.dart';
 import 'package:quick_write/core/utils/chinese_word_segmenter.dart';
 import 'package:quick_write/core/utils/clean_scroll.dart';
 import 'package:quick_write/core/utils/clipboard_state_cache.dart';
@@ -20,6 +23,7 @@ import 'package:quick_write/core/utils/persistent_selection.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/re_editor_span_builder.dart';
 import 'package:quick_write/pages/workspace/editor/utils/re_editor_indent_policy.dart';
+import 'package:quick_write/pages/workspace/editor/widgets/outline_keyword_hover_card.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/re_editor_ime_reporter.dart';
 import 'package:quick_write/shared/widgets/context_menu.dart';
 import 'package:re_editor/re_editor.dart';
@@ -155,6 +159,63 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 自定义高亮服务引用（用于监听配置变化触发重绘）
   CustomHighlightService? _customHighlightService;
 
+  /// 大纲关键词服务引用（用于监听索引变化触发重绘）
+  OutlineKeywordService? _outlineKeywordService;
+
+  /// 关键词交互修饰键是否按住
+  ///
+  /// Windows/Linux 为 Ctrl，macOS 为 Command；按住时正文叠加大纲关键词高亮，
+  /// 并启用悬停卡片与修饰键点击跳转。
+  bool _keywordModifierPressed = false;
+
+  /// 移动端是否常驻开启关键词高亮
+  ///
+  /// 移动端没有悬停与修饰键，改由工具栏开关控制，开启后点按关键词弹出预览卡片。
+  bool _keywordHighlightPinned = false;
+
+  /// 大纲关键词高亮当前是否生效
+  bool get _keywordHighlightActive =>
+      _keywordModifierPressed || _keywordHighlightPinned;
+
+  /// 当前悬停的大纲关键词
+  String? _hoveredKeyword;
+
+  /// 当前悬停关键词的全局矩形列表
+  List<Rect> _hoveredKeywordRects = const [];
+
+  /// 大纲关键词悬浮卡片的浮层
+  OverlayEntry? _keywordCardEntry;
+
+  /// 待展示的悬浮卡片数据（帧末插入时使用）
+  OutlineKeywordEntry? _pendingKeywordCard;
+
+  /// 待展示悬浮卡片的锚点
+  Rect? _pendingKeywordCardAnchor;
+
+  /// 待展示悬浮卡片的主色（当前悬停关键词的颜色）
+  Color? _pendingKeywordCardAccent;
+
+  /// 是否已排队等待插入悬浮卡片
+  bool _keywordCardScheduled = false;
+
+  /// 当前已展示卡片对应的索引项
+  ///
+  /// 鼠标追踪在每帧结束后都会重新命中测试，若内联样式重建会产生新的注解对象并重复
+  /// 触发进入回调；据此判断同一节点无需反复重建浮层。
+  OutlineKeywordEntry? _displayedKeywordEntry;
+
+  /// 悬浮卡片当前的左侧位置
+  double _keywordCardLeft = 0;
+
+  /// 悬浮卡片是否显示在关键词上方
+  bool _keywordCardAbove = false;
+
+  /// 悬停离开关键词后的延迟收起定时器
+  ///
+  /// 指针在两处相同关键词之间移动或移向卡片时可能先触发离开再触发进入，
+  /// 延迟收起可避免卡片闪烁或提前消失。
+  Timer? _keywordHoverExitTimer;
+
   /// 待消费的编辑事件类型
   ///
   /// 程序化编辑（撤销、粘贴、剪切等）在执行前先置入类型，
@@ -260,6 +321,14 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     // 加载中文词库，为双击选词提供分词能力
     ChineseWordSegmenter.instance.install();
 
+    // 监听关键词修饰键状态，按住时叠加大纲关键词高亮
+    _keywordModifierPressed = _readKeywordModifierPressed();
+    HardwareKeyboard.instance.addHandler(_onHardwareKeyEvent);
+    _bindKeywordCallbacks();
+
+    // 滚动时悬停位置已失效，收起关键词悬浮卡片
+    _scrollController.addListener(_hideKeywordCardOnScroll);
+
     // 如果初始化时处于激活状态，请求焦点
     if (widget.isActive) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -280,16 +349,29 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
       _customHighlightService = newService;
       _customHighlightService!.addListener(_onSettingsChanged);
     }
+
+    // 监听大纲关键词索引变化（关键词增删改后立即刷新正文高亮）
+    final OutlineKeywordService newKeywordService = context.read<WorkspaceProvider>().outlineKeywordService;
+    if (!identical(newKeywordService, _outlineKeywordService)) {
+      _outlineKeywordService?.removeListener(_onSettingsChanged);
+      _outlineKeywordService = newKeywordService;
+      _outlineKeywordService!.addListener(_onSettingsChanged);
+    }
   }
 
   @override
   void dispose() {
     _viewportRepaintTimer?.cancel();
+    HardwareKeyboard.instance.removeHandler(_onHardwareKeyEvent);
+    _keywordHoverExitTimer?.cancel();
+    _removeKeywordCardEntry();
+    _scrollController.removeListener(_hideKeywordCardOnScroll);
     _scrollGuard.dispose();
     widget.controller.removeListener(_onControllerChanged);
     _focusNode.removeListener(_onFocusChanged);
     SettingsService.instance.removeListener(_onSettingsChanged);
     _customHighlightService?.removeListener(_onSettingsChanged);
+    _outlineKeywordService?.removeListener(_onSettingsChanged);
     _scrollController.dispose();
     _codeScrollController.dispose();
     _focusNode.dispose();
@@ -309,6 +391,8 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
           _focusEditor();
         }
       });
+      // 后台期间关键词修饰键状态可能已变化，切换回前台时同步一次
+      _syncKeywordModifierState();
     }
 
     // 内容载入完成解除只读时恢复焦点：
@@ -341,6 +425,9 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
         _pendingExtraPaddingDelta = delta;
       }
     }
+
+    // 标签页切换到后台后收起关键词悬浮卡片
+    if (!widget.isActive) _hideKeywordCard();
   }
 
   @override
@@ -438,6 +525,22 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 供外部（如移动端快捷输入栏）判断输入法是否由本编辑器唤起。
   bool get hasEditorFocus => _focusNode.hasFocus;
 
+  /// 移动端关键词高亮开关是否开启
+  bool get keywordHighlightEnabled => _keywordHighlightPinned;
+
+  /// 当前书籍是否已绑定关键词
+  bool get hasOutlineKeywords =>
+      _outlineKeywordService != null && _outlineKeywordService!.keywords.isNotEmpty;
+
+  /// 切换移动端关键词高亮
+  ///
+  /// 开启后正文常驻关键词高亮，点按关键词弹出预览卡片。
+  void toggleKeywordHighlight() {
+    _keywordHighlightPinned = !_keywordHighlightPinned;
+    _applyKeywordHighlightState();
+    if (!_keywordHighlightActive) _hideKeywordCard();
+  }
+
   /// 设置变化时刷新样式并重绘
   void _onSettingsChanged() {
     if (!mounted) return;
@@ -448,6 +551,305 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     setState(() {});
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) widget.controller.forceRepaint();
+    });
+  }
+
+  /// 绑定大纲关键词相关的样式构建器回调
+  void _bindKeywordCallbacks() {
+    final ReEditorSpanBuilder? spanBuilder = widget.spanBuilder;
+    if (spanBuilder == null) return;
+    spanBuilder.ctrlPressed = _keywordHighlightActive;
+    spanBuilder.onKeywordHover = _onKeywordHover;
+    spanBuilder.onKeywordHoverExit = _onKeywordHoverExit;
+  }
+
+  /// 读取关键词交互修饰键的当前状态
+  ///
+  /// macOS 使用 Command，其余平台使用 Ctrl。
+  static bool _readKeywordModifierPressed() =>
+      PlatformCapabilities.isMacOS
+          ? HardwareKeyboard.instance.isMetaPressed
+          : HardwareKeyboard.instance.isControlPressed;
+
+  /// 将当前关键词高亮状态应用到样式构建器并重绘
+  void _applyKeywordHighlightState() {
+    final bool active = _keywordHighlightActive;
+    final ReEditorSpanBuilder? spanBuilder = widget.spanBuilder;
+    if (spanBuilder != null) {
+      spanBuilder.ctrlPressed = active;
+      spanBuilder.update(context: context, text: widget.controller.text);
+    }
+    widget.controller.forceRepaint();
+  }
+
+  /// 将关键词修饰键状态同步到编辑器与样式构建器
+  void _syncKeywordModifierState() {
+    final bool pressed = _readKeywordModifierPressed();
+    if (pressed == _keywordModifierPressed) return;
+    _keywordModifierPressed = pressed;
+    _applyKeywordHighlightState();
+    if (!_keywordHighlightActive) _hideKeywordCard();
+  }
+
+  /// 关键词修饰键状态变化时刷新关键词高亮
+  ///
+  /// 仅在按下状态真正变化时重算高亮并重绘；松开时立即收起悬浮卡片。
+  /// 非激活标签页不响应，避免后台编辑器做无意义的重新排版。
+  bool _onHardwareKeyEvent(KeyEvent event) {
+    if (!mounted || !widget.isActive) return false;
+    _syncKeywordModifierState();
+    return false;
+  }
+
+  /// 指针进入大纲关键词
+  ///
+  /// 悬浮卡片的插入延后到帧末执行：鼠标注解的进入回调发生在命中测试过程中，
+  /// 此时同步插入浮层会挂载新的鼠标追踪区域并触发再次命中测试，导致无限递归。
+  void _onKeywordHover(String keyword, List<Rect> rects) {
+    if (!_keywordHighlightActive || !mounted || rects.isEmpty) return;
+    final OutlineKeywordEntry? entry = _outlineKeywordService?.entryForKeyword(keyword);
+    if (entry == null) return;
+    _keywordHoverExitTimer?.cancel();
+    _hoveredKeyword = keyword;
+    _hoveredKeywordRects = rects;
+    _scheduleKeywordCard(entry, rects.first, _keywordAccentOf(entry, keyword));
+  }
+
+  /// 取关键词绑定的颜色，作为卡片主色
+  Color _keywordAccentOf(OutlineKeywordEntry entry, String keyword) {
+    for (final item in entry.keywords) {
+      if (item.keyword == keyword) return item.color;
+    }
+    return entry.keywords.isNotEmpty ? entry.keywords.first.color : const Color(0xFF1565C0);
+  }
+
+  /// 安排在当前帧结束后展示悬浮卡片
+  void _scheduleKeywordCard(OutlineKeywordEntry entry, Rect anchorRect, Color accentColor) {
+    _pendingKeywordCard = entry;
+    _pendingKeywordCardAnchor = anchorRect;
+    _pendingKeywordCardAccent = accentColor;
+    if (_keywordCardScheduled) return;
+    _keywordCardScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _keywordCardScheduled = false;
+      final OutlineKeywordEntry? pendingEntry = _pendingKeywordCard;
+      final Rect? pendingAnchor = _pendingKeywordCardAnchor;
+      final Color? pendingAccent = _pendingKeywordCardAccent;
+      _pendingKeywordCard = null;
+      _pendingKeywordCardAnchor = null;
+      _pendingKeywordCardAccent = null;
+      if (!mounted || pendingEntry == null || pendingAnchor == null || pendingAccent == null) return;
+      // 延后期间关键词高亮已关闭或指针已离开关键词时不再展示
+      if (!_keywordHighlightActive || _hoveredKeyword == null) return;
+      _showKeywordCard(pendingEntry, pendingAnchor, pendingAccent);
+    });
+  }
+
+  /// 指针离开大纲关键词
+  ///
+  /// 延迟收起卡片，避免在两处相同关键词之间移动或移向卡片时出现闪动。
+  void _onKeywordHoverExit(String keyword) {
+    if (_hoveredKeyword != keyword) return;
+    _keywordHoverExitTimer?.cancel();
+    _keywordHoverExitTimer = Timer(const Duration(milliseconds: 150), () {
+      if (_hoveredKeyword == keyword) _hideKeywordCard();
+    });
+  }
+
+  /// 指针进入悬浮卡片
+  ///
+  /// 取消离开关键词时启动的收起定时器，使卡片在指针移入后保持显示。
+  void _onKeywordCardEnter() {
+    _keywordHoverExitTimer?.cancel();
+    _keywordHoverExitTimer = null;
+  }
+
+  /// 指针离开悬浮卡片
+  void _onKeywordCardExit() {
+    _hideKeywordCard();
+  }
+
+  /// 当前视口底部被软键盘占用的逻辑高度
+  ///
+  /// 直接读取视图内边距并换算为逻辑像素，避免受 Scaffold 收缩子树后的 MediaQuery 影响。
+  double get _keyboardBottomInset {
+    final view = View.of(context);
+    final double ratio = view.devicePixelRatio;
+    return ratio <= 0 ? 0 : view.viewInsets.bottom / ratio;
+  }
+
+  /// 展示关键词悬浮卡片
+  ///
+  /// 优先显示在关键词下方，下方空间不足时翻到上方；
+  /// 卡片内容为该节点的全部子孙节点，超过最大高度时在卡片内滚动。
+  void _showKeywordCard(OutlineKeywordEntry entry, Rect anchorRect, Color accentColor) {
+    // 同一条目已展示时直接复用，避免鼠标追踪重复命中导致浮层反复重建与位置抖动
+    if (_keywordCardEntry != null && identical(_displayedKeywordEntry, entry)) return;
+    _removeKeywordCardEntry();
+    final OverlayState? overlay = Overlay.maybeOf(context);
+    if (overlay == null) return;
+
+    final Size screen = MediaQuery.sizeOf(context);
+    const double margin = OutlineKeywordHoverCard.screenMargin;
+    // 软键盘占用的底部区域不参与定位，避免移动端卡片落在键盘之下
+    final double visibleBottom = screen.height - _keyboardBottomInset;
+    final double maxHeight = (visibleBottom * 0.5).clamp(160.0, 380.0).toDouble();
+    // 窄屏时卡片宽度收缩到屏幕可用宽度
+    final double cardWidth = (screen.width - margin * 2)
+        .clamp(200.0, OutlineKeywordHoverCard.width)
+        .toDouble();
+
+    // 水平方向：默认与关键词左对齐，右侧放不下时改为与关键词右对齐（向左展开）
+    double left = anchorRect.left;
+    if (left + cardWidth > screen.width - margin) {
+      left = anchorRect.right - cardWidth;
+    }
+    _keywordCardLeft = left
+        .clamp(margin, math.max(margin, screen.width - cardWidth - margin))
+        .toDouble();
+
+    // 垂直方向：先按估算高度决定显示在下方还是上方，
+    // 显示在上方时改用底部对齐，保证卡片底部始终贴在关键词上方
+    final double estimated = OutlineKeywordHoverCard.estimateHeight(entry, maxHeight);
+    _keywordCardAbove = anchorRect.bottom + 6 + estimated > visibleBottom - margin;
+
+    final OverlayEntry cardEntry = OverlayEntry(
+      // OverlayEntry 的内容不是 Stack，Positioned 必须放在 Stack 内部才能生效
+      builder: (_) => Stack(
+        children: [
+          Positioned(
+            left: _keywordCardLeft,
+            top: _keywordCardAbove ? null : anchorRect.bottom + 6,
+            bottom: _keywordCardAbove ? math.max(margin, screen.height - anchorRect.top + 6) : null,
+            width: cardWidth,
+            child: OutlineKeywordHoverCard(
+              entry: entry,
+              accentColor: accentColor,
+              maxHeight: maxHeight,
+              onTap: () => _jumpToOutlineKeyword(entry),
+              onMouseEnter: _onKeywordCardEnter,
+              onMouseExit: _onKeywordCardExit,
+              // 实测高度超出下方空间时改为显示在上方（只翻转一次，避免位置来回跳动）
+              onMeasuredHeight: (height) =>
+                  _ensureKeywordCardVisible(anchorRect, height, visibleBottom, margin),
+            ),
+          ),
+        ],
+      ),
+    );
+    _keywordCardEntry = cardEntry;
+    _displayedKeywordEntry = entry;
+    overlay.insert(cardEntry);
+  }
+
+  /// 根据实测高度确保卡片完整可见
+  ///
+  /// 仅在「按估算高度显示在下方、实际高度却放不下」时翻到上方；
+  /// 翻到上方后不再回调修正，避免位置在两个状态间来回切换。
+  void _ensureKeywordCardVisible(
+    Rect anchorRect,
+    double cardHeight,
+    double visibleBottom,
+    double margin,
+  ) {
+    if (_keywordCardAbove) return;
+    if (anchorRect.bottom + 6 + cardHeight <= visibleBottom - margin) return;
+    _keywordCardAbove = true;
+    _keywordCardEntry?.markNeedsBuild();
+  }
+
+  /// 移除悬浮卡片浮层（保留悬停关键词状态）
+  ///
+  /// 构建/布局阶段移除浮层会触发 markNeedsBuild 断言（如滚动监听在布局期间回调），
+  /// 此时延后到帧末再移除。
+  void _removeKeywordCardEntry() {
+    _displayedKeywordEntry = null;
+    final OverlayEntry? entry = _keywordCardEntry;
+    _keywordCardEntry = null;
+    if (entry == null) return;
+    if (SchedulerBinding.instance.schedulerPhase == SchedulerPhase.persistentCallbacks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => entry.remove());
+    } else {
+      entry.remove();
+    }
+  }
+
+  /// 收起悬浮卡片并清除悬停状态
+  void _hideKeywordCard() {
+    _keywordHoverExitTimer?.cancel();
+    _keywordHoverExitTimer = null;
+    // 丢弃尚未插入的卡片请求，避免收起后又重新出现
+    _pendingKeywordCard = null;
+    _pendingKeywordCardAnchor = null;
+    _pendingKeywordCardAccent = null;
+    _removeKeywordCardEntry();
+    _hoveredKeyword = null;
+    _hoveredKeywordRects = const [];
+  }
+
+  /// 滚动导致悬停位置失效时收起卡片
+  void _hideKeywordCardOnScroll() {
+    if (_keywordCardEntry != null) _hideKeywordCard();
+  }
+
+  /// 处理编辑器内的指针按下
+  ///
+  /// 按住关键词修饰键（Ctrl / Command）且指针落在当前悬停的关键词上时，
+  /// 跳转到绑定的节点。
+  void _onEditorPointerDown(PointerDownEvent event) {
+    if (!_keywordModifierPressed) return;
+    final String? keyword = _hoveredKeyword;
+    if (keyword == null) return;
+    if (!_hoveredKeywordRects.any((rect) => rect.contains(event.position))) return;
+    final OutlineKeywordEntry? entry = _outlineKeywordService?.entryForKeyword(keyword);
+    if (entry == null) return;
+    _jumpToOutlineKeyword(entry);
+  }
+
+  /// 处理编辑器内的指针抬起
+  ///
+  /// 移动端开启关键词高亮后，点按落在关键词上时弹出预览卡片，
+  /// 点按空白处则收起已有卡片。
+  void _onEditorPointerUp(PointerUpEvent event) {
+    if (!PlatformCapabilities.isMobile || !_keywordHighlightPinned) return;
+    final Offset position = event.position;
+    // 延后到帧末读取光标，确保点按引起的光标移动已经完成
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_keywordHighlightPinned) return;
+      final TextSelection flatSelection = CodeLineSelectionUtils.flatSelectionOf(
+        widget.controller.text,
+        widget.controller.selection,
+      );
+      if (!flatSelection.isValid || !flatSelection.isCollapsed) return;
+
+      // 点按会先移动光标；光标落在词尾时向前取一个字符，避免单字关键词漏判
+      final int caret = flatSelection.baseOffset;
+      final ReEditorSpanBuilder? spanBuilder = widget.spanBuilder;
+      String? keyword = spanBuilder?.outlineKeywordAt(caret);
+      if (keyword == null && caret > 0) {
+        keyword = spanBuilder?.outlineKeywordAt(caret - 1);
+      }
+      if (keyword == null) {
+        _hideKeywordCard();
+        return;
+      }
+
+      final OutlineKeywordEntry? entry = _outlineKeywordService?.entryForKeyword(keyword);
+      if (entry == null) return;
+      // 以点按位置上方一小段作为锚点，卡片优先显示在手指上方
+      final Rect anchor = Rect.fromLTWH(position.dx, position.dy - 20, 0, 20);
+      _showKeywordCard(entry, anchor, _keywordAccentOf(entry, keyword));
+    });
+  }
+
+  /// 跳转到关键词绑定的节点
+  void _jumpToOutlineKeyword(OutlineKeywordEntry entry) {
+    final WorkspaceProvider provider = context.read<WorkspaceProvider>();
+    // 先发起跳转，再把浮层移除延后到帧末：
+    // 直接在浮层自身的指针回调里销毁浮层，会中断本次事件分发
+    unawaited(provider.navigateToOutlineKeyword(entry));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _hideKeywordCard();
     });
   }
 
@@ -507,6 +909,9 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   void _onFocusChanged() {
     if (_focusNode.hasFocus) {
       _scrollGuard.protect(const Duration(milliseconds: 150));
+    } else {
+      // 失焦后悬停位置不再有效，收起关键词悬浮卡片
+      _hideKeywordCard();
     }
     // 选区颜色随焦点变化（失焦时灰显），需要重建编辑器
     if (mounted) setState(() {});
@@ -1268,66 +1673,71 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
           )
         : null;
 
-    return ReEditorImeReporter(
-      key: _imeReporterKey,
-      controller: widget.controller,
-      focusNode: _focusNode,
-      scrollController: _scrollController,
-      child: ListenableBuilder(
-        listenable: _focusNode,
-        builder: (context, child) {
-          return CodeEditor(
-            controller: widget.controller,
-            focusNode: _focusNode,
-            scrollController: _codeScrollController,
-            // 编辑器不承载滚动：高度随内容自适应，滚动由外层容器统一负责
-            viewportScroller: _scrollController,
-            viewportContentOffset: contentOffset,
-            // 内容不足视口时按下限撑开编辑器，使下方空白区仍属于编辑区
-            viewportMinHeight: minHeight,
-            style: CodeEditorStyle(
-              fontSize: settings.fontSize,
-              fontFamily: settings.fontFamily,
-              fontHeight: settings.lineHeight,
-              letterSpacing: settings.letterSpacing,
-              textColor: ColorUtils.getFontColorForTheme(context),
-              backgroundColor: Colors.transparent,
-              cursorColor: colorScheme.primary,
-              cursorWidth: _cursorWidth,
-              selectionColor: _focusNode.hasFocus ? focusedSelectionColor : unfocusedSelectionColor,
-              highlightColor: focusedSelectionColor,
-              lineSeparator: lineSeparator,
-              // 视觉首行缩进：首行缩进改由排版实现，正文不再写入全角空格
-              firstLineIndent: _resolveFirstLineIndentWidth(settings),
-            ),
-            // 小说正文需要自动换行，且不显示行号与代码折叠标记
-            wordWrap: true,
-            readOnly: widget.readOnly,
-            // 关闭编辑器自身的自动聚焦：是否聚焦由外部按平台决定，
-            // 移动端打开作品或切换标签页时不主动唤起输入法
-            autofocus: false,
-            // 只读预览（如历史版本备份）不显示输入光标
-            showCursorWhenReadOnly: false,
-            // 成对符号自动补全仅移动端启用，符号表取自标点符号表；
-            // 表中未列出的 ASCII 引号与括号不会被写入正文
-            autocompleteSymbols: PlatformCapabilities.isMobile &&
-                SettingsService.instance.punctuationAutoCompleteEnabled,
-            autocompletePairs: _punctuationPairs,
-            // 移动端软键盘换行交由段落缩进策略处理，与桌面端回车共用补空行与首行缩进规则；
-            // 只读编辑器与桌面端不接管，沿用编辑器默认换行
-            onNewLine: PlatformCapabilities.isMobile && !widget.readOnly
-                ? _indentPolicy.handleNewLine
-                : null,
-            chunkAnalyzer: const NonCodeChunkAnalyzer(),
-            padding: padding,
-            margin: EdgeInsets.zero,
-            // hint: '开始输入内容……',
-            toolbarController: _toolbarController,
-            shortcutOverrideActions: _resolveShortcutOverrides(context.read<WorkspaceProvider>()),
-            // 滚动条由外层统一绘制，这里屏蔽编辑器自带的滚动条
-            scrollbarBuilder: (context, child, details) => child,
-          );
-        },
+    return Listener(
+      // 桌面端按住修饰键点击关键词时跳转，移动端点按关键词时弹出预览卡片
+      onPointerDown: _onEditorPointerDown,
+      onPointerUp: _onEditorPointerUp,
+      child: ReEditorImeReporter(
+        key: _imeReporterKey,
+        controller: widget.controller,
+        focusNode: _focusNode,
+        scrollController: _scrollController,
+        child: ListenableBuilder(
+          listenable: _focusNode,
+          builder: (context, child) {
+            return CodeEditor(
+              controller: widget.controller,
+              focusNode: _focusNode,
+              scrollController: _codeScrollController,
+              // 编辑器不承载滚动：高度随内容自适应，滚动由外层容器统一负责
+              viewportScroller: _scrollController,
+              viewportContentOffset: contentOffset,
+              // 内容不足视口时按下限撑开编辑器，使下方空白区仍属于编辑区
+              viewportMinHeight: minHeight,
+              style: CodeEditorStyle(
+                fontSize: settings.fontSize,
+                fontFamily: settings.fontFamily,
+                fontHeight: settings.lineHeight,
+                letterSpacing: settings.letterSpacing,
+                textColor: ColorUtils.getFontColorForTheme(context),
+                backgroundColor: Colors.transparent,
+                cursorColor: colorScheme.primary,
+                cursorWidth: _cursorWidth,
+                selectionColor: _focusNode.hasFocus ? focusedSelectionColor : unfocusedSelectionColor,
+                highlightColor: focusedSelectionColor,
+                lineSeparator: lineSeparator,
+                // 视觉首行缩进：首行缩进改由排版实现，正文不再写入全角空格
+                firstLineIndent: _resolveFirstLineIndentWidth(settings),
+              ),
+              // 小说正文需要自动换行，且不显示行号与代码折叠标记
+              wordWrap: true,
+              readOnly: widget.readOnly,
+              // 关闭编辑器自身的自动聚焦：是否聚焦由外部按平台决定，
+              // 移动端打开作品或切换标签页时不主动唤起输入法
+              autofocus: false,
+              // 只读预览（如历史版本备份）不显示输入光标
+              showCursorWhenReadOnly: false,
+              // 成对符号自动补全仅移动端启用，符号表取自标点符号表；
+              // 表中未列出的 ASCII 引号与括号不会被写入正文
+              autocompleteSymbols: PlatformCapabilities.isMobile &&
+                  SettingsService.instance.punctuationAutoCompleteEnabled,
+              autocompletePairs: _punctuationPairs,
+              // 移动端软键盘换行交由段落缩进策略处理，与桌面端回车共用补空行与首行缩进规则；
+              // 只读编辑器与桌面端不接管，沿用编辑器默认换行
+              onNewLine: PlatformCapabilities.isMobile && !widget.readOnly
+                  ? _indentPolicy.handleNewLine
+                  : null,
+              chunkAnalyzer: const NonCodeChunkAnalyzer(),
+              padding: padding,
+              margin: EdgeInsets.zero,
+              // hint: '开始输入内容……',
+              toolbarController: _toolbarController,
+              shortcutOverrideActions: _resolveShortcutOverrides(context.read<WorkspaceProvider>()),
+              // 滚动条由外层统一绘制，这里屏蔽编辑器自带的滚动条
+              scrollbarBuilder: (context, child, details) => child,
+            );
+          },
+        ),
       ),
     );
   }

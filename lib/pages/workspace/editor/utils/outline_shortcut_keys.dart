@@ -29,6 +29,10 @@ class OutlineShortcutKeys {
     }
   }
 
+  /// 判断按键是否为绑定关键词快捷键（Alt+=）
+  static bool isBindKeywordKey(LogicalKeyboardKey key) =>
+      key == LogicalKeyboardKey.equal;
+
   // ================= 颜色 =================
 
   /// 字母按键到调色板索引的映射（红橙黄绿青蓝紫，不含灰色）

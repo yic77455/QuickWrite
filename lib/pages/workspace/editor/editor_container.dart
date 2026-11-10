@@ -115,6 +115,7 @@ class _EditorContainerState extends State<EditorContainer> {
 
       final spanBuilder = ReEditorSpanBuilder(
         customHighlightService: workspaceProvider.customHighlightService,
+        outlineKeywordService: workspaceProvider.outlineKeywordService,
       );
       currentTab.spanBuilder = spanBuilder;
       currentTab.textController = CodeLineEditingController(
@@ -550,6 +551,8 @@ class _EditorContainerState extends State<EditorContainer> {
             restoreLastEditPosition: tab.restoreLastEditPosition,
             // 标记是否为当前激活的标签页，非激活标签页恢复定位后不抢占键盘焦点
             isActive: index == provider.currentTabIndex,
+            // 关键词服务用于读写节点关键词并同步书籍级索引
+            keywordService: provider.outlineKeywordService,
             // 大纲内容异步加载完成后，若查找替换栏处于打开状态则刷新查找结果，
             // 并通知等待内容就绪的调用方（如全文搜索跳转）
             onContentLoaded: () {
@@ -587,6 +590,8 @@ class _EditorContainerState extends State<EditorContainer> {
             colorScheme: colorScheme,
             filePath: tab.backupFilePath,
             readOnly: true,
+            // 备份预览展示关键词标签，但不写盘（只读由编辑器内部拦截）
+            keywordService: provider.outlineKeywordService,
             // 备份预览展示原始标题，只读不可编辑
             title: tab.originalChapterTitle ?? tab.title,
             // 查找替换栏可见时为编辑器预留顶边距，避免内容被遮挡

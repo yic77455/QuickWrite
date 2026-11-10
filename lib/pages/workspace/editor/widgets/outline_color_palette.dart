@@ -1,4 +1,4 @@
-import 'dart:ui' show Color;
+import 'package:flutter/material.dart';
 
 /// 大纲编辑器颜色调色板
 ///
@@ -25,4 +25,19 @@ class OutlineColorPalette {
     // 灰色：前景用 Gray 700，背景用 Gray 300
     (foreground: Color(0xFF616161), background: Color(0xFFE0E0E0), name: '灰色'),
   ];
+
+  /// 按主题明暗调整颜色亮度，使其作为文字色时在对应背景上保持可读
+  ///
+  /// 颜色自身不变色相与明暗倾向，只把亮度过低/过高的颜色拉回可读区间：
+  /// 暗色主题下提亮，浅色主题下压暗。
+  static Color readableTextColor(Color color, Brightness brightness) {
+    final HSLColor hsl = HSLColor.fromColor(color);
+    if (brightness == Brightness.dark) {
+      return hsl
+          .withLightness(hsl.lightness.clamp(0.62, 0.78).toDouble())
+          .withSaturation(hsl.saturation.clamp(0.45, 0.9).toDouble())
+          .toColor();
+    }
+    return hsl.withLightness(hsl.lightness.clamp(0.28, 0.46).toDouble()).toColor();
+  }
 }

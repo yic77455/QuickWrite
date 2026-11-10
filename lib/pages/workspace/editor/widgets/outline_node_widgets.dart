@@ -5,8 +5,11 @@ import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/persistent_selection.dart';
 import 'package:quick_write/core/utils/rich_text_controller.dart';
 import 'package:quick_write/core/models/outline_models.dart';
+import 'package:quick_write/core/models/outline_keyword.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
+import 'package:quick_write/pages/workspace/editor/widgets/outline_color_palette.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_connection_painter.dart';
+import 'package:quick_write/pages/workspace/editor/widgets/outline_editor_widgets.dart';
 
 /// 单个节点行组件
 ///
@@ -264,6 +267,33 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
   /// 与持久化选区绘制器组合注入 RenderEditable，绘制在选区之上、文字之下。
   final CurrentMatchHighlightPainter _currentMatchPainter = CurrentMatchHighlightPainter();
 
+  /// 关键词标签的锚点（相对于文本输入框左上角）
+  ///
+  /// 由节点文本末尾的光标矩形决定，标签紧随文本末尾排布；
+  /// 为空表示尚未完成测量，此时不渲染标签。
+  Rect? _keywordAnchor;
+
+  /// 测量锚点时文本输入框的宽度
+  double _keywordFieldWidth = 0;
+
+  /// 测量锚点时文本输入框的高度
+  double _keywordFieldHeight = 0;
+
+  /// 关键词标签换行到文本下方时占用的额外高度
+  double _keywordOverflowHeight = 0;
+
+  /// 测量锚点时的文本内容
+  String? _measuredText;
+
+  /// 测量锚点时的字号
+  double _measuredFontSize = 0;
+
+  /// 测量锚点时的字体
+  String _measuredFontFamily = '';
+
+  /// 是否已排队等待测量，避免同一帧内重复排队
+  bool _keywordMeasureScheduled = false;
+
   /// TextField 的 GlobalKey，用于查找 RenderEditable 注入 Painter
   final GlobalKey _textFieldKey = GlobalKey();
 
@@ -307,6 +337,66 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
   /// 选区变化时同步给 Painter
   void _onSelectionChanged() {
     _persistentSelectionPainter.update(selection: widget.controller.selection);
+    // 文本变化会改变文本末尾位置，重新测量关键词标签锚点
+    _scheduleKeywordMeasure();
+  }
+
+  /// 安排一次关键词锚点测量
+  ///
+  /// 测量依赖节点行完成布局后的 RenderEditable，因此延后到帧末执行；
+  /// 同一帧内多次调用只排队一次。
+  void _scheduleKeywordMeasure() {
+    if (_keywordMeasureScheduled) return;
+    _keywordMeasureScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _keywordMeasureScheduled = false;
+      if (!mounted) return;
+      _measureKeywordAnchor();
+    });
+  }
+
+  /// 测量节点文本末尾的位置，作为关键词标签的锚点
+  ///
+  /// 文本、框宽或字体均未变化时跳过，避免测量结果触发无意义的重建。
+  void _measureKeywordAnchor() {
+    final renderEditable = findPersistentRenderEditable(_textFieldKey);
+    if (renderEditable == null || !renderEditable.attached) return;
+    final Size fieldSize = renderEditable.size;
+    if (fieldSize.width <= 0 || fieldSize.height <= 0) return;
+
+    final String text = widget.controller.text;
+    final double fontSize = _fontSize;
+    final String fontFamily = SettingsService.instance.outlineFontFamily;
+    if (text == _measuredText &&
+        fieldSize.width == _keywordFieldWidth &&
+        fontSize == _measuredFontSize &&
+        fontFamily == _measuredFontFamily) {
+      return;
+    }
+
+    // 优先取末尾字符的紧致字形框作为锚点：光标矩形以整行行框为准，
+    // 行框含有上下留白，直接使用会让标签浮到文字上方
+    Rect anchorRect = renderEditable.getLocalRectForCaret(TextPosition(offset: text.length));
+    if (text.isNotEmpty) {
+      final List<TextBox> boxes = renderEditable.getBoxesForSelection(
+        TextSelection(baseOffset: text.length - 1, extentOffset: text.length),
+      );
+      if (boxes.isNotEmpty) {
+        final TextBox box = boxes.last;
+        anchorRect = Rect.fromLTRB(box.left, box.top, box.right, box.bottom);
+      }
+    }
+
+    setState(() {
+      _keywordAnchor = anchorRect;
+      _keywordFieldWidth = fieldSize.width;
+      _keywordFieldHeight = fieldSize.height;
+      _measuredText = text;
+      _measuredFontSize = fontSize;
+      _measuredFontFamily = fontFamily;
+      // 锚点变化后标签可能重新换行，交由测量控件重新上报占用高度
+      _keywordOverflowHeight = 0;
+    });
   }
 
   /// 将持久化选区 Painter 注入到 RenderEditable
@@ -392,7 +482,7 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
         // 右侧留白由外层内容区的内边距统一承担，为行尾竖条与左右边距预留空间
         final Widget rowContent = Padding(
           padding: EdgeInsets.only(left: connectionWidth, bottom: widget.nodeSpacing),
-          child: _buildTextField(node, colorScheme),
+          child: _buildNodeTextArea(node, colorScheme),
         );
 
         final Widget row = Stack(
@@ -542,6 +632,131 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
           },
         );
       },
+    );
+  }
+
+  /// 构建节点文本区
+  ///
+  /// 关键词标签按文本末尾位置排布：末行剩余空间足够时紧跟其后，
+  /// 不足时换到文本下方，并通过底部内边距为标签预留高度，避免压住下一节点。
+  Widget _buildNodeTextArea(OutlineNode node, ColorScheme colorScheme) {
+    // 文本、字体或关键词变化后重新测量锚点（帧末执行，内部按指纹去重）
+    _scheduleKeywordMeasure();
+
+    final Widget textField = Padding(
+      // 没有关键词时忽略历史遗留的预留高度，避免节点行下方多出空白
+      padding: EdgeInsets.only(bottom: node.keywords.isEmpty ? 0 : _keywordOverflowHeight),
+      child: _buildTextField(node, colorScheme),
+    );
+
+    final Rect? anchor = _keywordAnchor;
+    // 锚点必须与当前文本和字体一致，否则说明尚未重新测量，先不绘制避免错位
+    if (anchor == null || !_isKeywordAnchorCurrent()) return textField;
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        textField,
+        if (node.keywords.isNotEmpty) _buildKeywordTags(node, colorScheme, anchor),
+      ],
+    );
+  }
+
+  /// 当前锚点是否对应当前文本与字体
+  bool _isKeywordAnchorCurrent() {
+    return _measuredText == widget.controller.text &&
+        _measuredFontSize == _fontSize &&
+        _measuredFontFamily == SettingsService.instance.outlineFontFamily;
+  }
+
+  /// 关键词标签的字号
+  double get _keywordTagFontSize => (_fontSize - 5).clamp(8.0, 10.0).toDouble();
+
+  /// 计算关键词标签组的摆放位置
+  ///
+  /// 锚点取末尾字符的紧致字形框，末行剩余宽度足够时紧跟文本末尾，
+  /// 否则另起一行放在文本起始位置。
+  ({double left, double top, double width}) _keywordTagLayout(Rect anchor) {
+    // 与文末文字留出间距，避免标签紧贴文本
+    const double gap = 24;
+    // 末行剩余空间小于该值时换行，避免标签被挤压成多行碎片
+    const double minInlineWidth = 80;
+    final double remaining = _keywordFieldWidth - anchor.right - gap;
+    if (remaining >= minInlineWidth) {
+      // 以文字顶部为基准整体下移，偏移随字号等比变化，
+      // 保证任意字号下标签与文字的相对位置一致
+      final double verticalOffset = _fontSize * 0.32;
+      return (left: anchor.right + gap, top: anchor.top + verticalOffset, width: remaining);
+    }
+    return (left: 0, top: anchor.bottom + 2, width: _keywordFieldWidth);
+  }
+
+  /// 构建节点关键词标签组
+  Widget _buildKeywordTags(OutlineNode node, ColorScheme colorScheme, Rect anchor) {
+    final layout = _keywordTagLayout(anchor);
+
+    return Positioned(
+      left: layout.left,
+      top: layout.top,
+      width: layout.width,
+      child: MeasureSize(
+        onSizeChanged: (size) {
+          // 标签超出文本区底部时补足底部内边距，避免压住下一节点
+          final double overflow = layout.top + size.height + 2 - _keywordFieldHeight;
+          final double height = overflow > 0 ? overflow : 0.0;
+          if ((height - _keywordOverflowHeight).abs() <= 0.5 || !mounted) return;
+          setState(() => _keywordOverflowHeight = height);
+        },
+        child: Wrap(
+          spacing: 6,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [for (final keyword in node.keywords) _buildKeywordTag(keyword, colorScheme)],
+        ),
+      ),
+    );
+  }
+
+  /// 构建单个关键词标签
+  ///
+  /// 采用胶囊样式：关键词色淡底 + 同色描边 + 前置小圆点与文字，
+  /// 颜色按主题明暗做可读性调整。
+  Widget _buildKeywordTag(OutlineKeyword keyword, ColorScheme colorScheme) {
+    final bool isDark = colorScheme.brightness == Brightness.dark;
+    final Color accent = OutlineColorPalette.readableTextColor(keyword.color, colorScheme.brightness);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: isDark ? 0.18 : 0.10),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: accent.withValues(alpha: 0.24)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 4,
+            height: 4,
+            decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              keyword.keyword,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontFamily: SettingsService.instance.outlineFontFamily,
+                fontSize: _keywordTagFontSize,
+                height: 1.2,
+                fontWeight: FontWeight.w500,
+                color: accent,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

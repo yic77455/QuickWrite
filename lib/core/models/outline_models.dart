@@ -4,6 +4,7 @@
 library;
 
 import 'dart:ui' show Color;
+import 'package:quick_write/core/models/outline_keyword.dart';
 import 'package:quick_write/core/utils/text_style_range.dart';
 
 /// 大纲节点数据模型
@@ -38,6 +39,12 @@ class OutlineNode {
   /// 文字颜色（null 表示使用默认颜色）
   Color? foregroundColor;
 
+  /// 节点绑定的关键词列表
+  ///
+  /// 一个节点可绑定多个关键词，关键词在整本书内唯一；
+  /// 持久化到设定项文件旁的伴生 `.kw.json`，不写入大纲 Markdown。
+  List<OutlineKeyword> keywords;
+
   OutlineNode({
     required this.id,
     this.text = '',
@@ -46,8 +53,10 @@ class OutlineNode {
     this.headingLevel = 0,
     List<TextStyleRange>? styleRanges,
     this.foregroundColor,
+    List<OutlineKeyword>? keywords,
   })  : children = children ?? [],
-        styleRanges = styleRanges ?? [];
+        styleRanges = styleRanges ?? [],
+        keywords = keywords ?? [];
 
   /// 深拷贝节点（包括所有子孙节点）
   ///
@@ -63,6 +72,8 @@ class OutlineNode {
       // 深拷贝样式区间列表，避免快照与原节点共享引用
       styleRanges: styleRanges.map((r) => r.copyWith()).toList(),
       foregroundColor: foregroundColor,
+      // 关键词为不可变对象，复制列表即可使快照与原节点互不影响
+      keywords: List<OutlineKeyword>.of(keywords),
       children: children.map((c) => c.clone()).toList(),
     );
   }

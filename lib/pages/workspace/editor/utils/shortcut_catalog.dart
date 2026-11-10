@@ -104,6 +104,7 @@ final List<ShortcutGroup> outlineEditorShortcutGroups = [
     ShortcutEntry(description: '缩进为子节点', keys: 'Tab'),
     ShortcutEntry(description: '提升层级', keys: 'Shift+Tab'),
     ShortcutEntry(description: '空节点删除 / 合并到上一节点', keys: 'Backspace'),
+    ShortcutEntry(description: '为节点绑定关键词', keys: 'Alt+='),
   ]),
   ShortcutGroup(title: '文字样式', entries: [
     ShortcutEntry(description: '加粗', keys: 'Ctrl+B'),

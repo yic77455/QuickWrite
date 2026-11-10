@@ -21,12 +21,16 @@ class HighlightRange {
   /// 颜色的呈现方式：true 作为文字底色，false 覆盖文字颜色
   final bool background;
 
+  /// 叠加到文字上的字重（null 表示沿用编辑器基础字重）
+  final FontWeight? fontWeight;
+
   const HighlightRange(
     this.start,
     this.end,
     this.color,
     this.priority, {
     this.background = false,
+    this.fontWeight,
   });
 
   @override
@@ -48,11 +52,14 @@ class HighlightRangeResolver {
   /// 自定义关键词高亮优先级
   static const int customKeywordPriority = 1;
 
+  /// 大纲关键词高亮优先级（仅按住关键词修饰键时参与）
+  static const int outlineKeywordPriority = 2;
+
   /// 查找匹配高亮优先级
-  static const int findMatchPriority = 2;
+  static const int findMatchPriority = 3;
 
   /// 当前选中查找匹配的高亮优先级（最高）
-  static const int currentFindMatchPriority = 3;
+  static const int currentFindMatchPriority = 4;
 
   /// 中文引号对定义
   ///
@@ -167,16 +174,17 @@ class HighlightRangeResolver {
       }
       if (best == null) continue;
 
-      // 与上一段颜色、呈现方式相同且连续时合并为一段
+      // 与上一段颜色、呈现方式、字重相同且连续时合并为一段
       if (result.isNotEmpty &&
           result.last.color == best.color &&
           result.last.background == best.background &&
+          result.last.fontWeight == best.fontWeight &&
           result.last.end == segStart) {
         result[result.length - 1] = HighlightRange(result.last.start, segEnd,
-            best.color, best.priority, background: best.background);
+            best.color, best.priority, background: best.background, fontWeight: best.fontWeight);
       } else {
         result.add(HighlightRange(segStart, segEnd, best.color, best.priority,
-            background: best.background));
+            background: best.background, fontWeight: best.fontWeight));
       }
     }
     return result;

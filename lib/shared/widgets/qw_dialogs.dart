@@ -27,12 +27,16 @@ const double _keyboardDialogGap = 16;
 /// [anchorTop] 是否锚定顶部，为 true 时高度变化仅调整底部，顶部位置不变（需配合 adaptiveHeight 使用）
 /// [draggable] 是否允许拖拽，默认为 true；移动端始终禁用拖拽
 /// [dialogInteractiveNotifier] 动态控制对话框的交互状态（拖拽和关闭），为 false 时禁止拖拽和点击遮罩关闭
+/// [titleIcon] 标题栏图标，为空时标题栏只显示主标题
+/// [subtitle] 标题栏副标题，为空时不显示副标题
 ///
 /// 移动端会将弹窗宽度收窄至左右两侧各留出 [_mobileDialogHorizontalMargin] 的间距
 Future<T?> showDialogBase<T>({
   required BuildContext context,
   required String title,
   required Widget content,
+  IconData? titleIcon,
+  String? subtitle,
   double width = 400,
   double height = 300,
   bool showCloseButton = true,
@@ -61,6 +65,8 @@ Future<T?> showDialogBase<T>({
     builder: (context) => _DraggableDialog(
       title: title,
       content: content,
+      titleIcon: titleIcon,
+      subtitle: subtitle,
       width: effectiveWidth,
       height: height,
       showCloseButton: showCloseButton,
@@ -78,6 +84,8 @@ Future<T?> showDialogBase<T>({
 class _DraggableDialog extends StatefulWidget {
   final String title;
   final Widget content;
+  final IconData? titleIcon;
+  final String? subtitle;
   final double width;
   final double height;
   final bool showCloseButton;
@@ -93,6 +101,8 @@ class _DraggableDialog extends StatefulWidget {
     required this.content,
     required this.width,
     required this.height,
+    this.titleIcon,
+    this.subtitle,
     required this.showCloseButton,
     this.adaptiveHeight = false,
     this.anchorTop = false,
@@ -258,13 +268,44 @@ class _DraggableDialogState extends State<_DraggableDialog> {
           // 标题栏（拖拽区域）- 仅当标题不为空时显示
           if (widget.title.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 12, 0),
+              // 副标题存在时在标题栏下方留出间距，避免与内容贴得过近
+              padding: EdgeInsets.fromLTRB(20, 16, 12, widget.subtitle == null ? 0 : 12),
               child: Row(
                 children: [
+                  // 图标：圆角方块底色 + 主题色图标，作为弹窗的视觉标识
+                  if (widget.titleIcon != null) ...[
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: colorScheme.primary.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(widget.titleIcon, size: 18, color: colorScheme.primary),
+                    ),
+                    const SizedBox(width: 12),
+                  ],
                   Expanded(
-                    child: Text(
-                      widget.title,
-                      style: context.titleLarge?.copyWith(fontSize: widget.titleFontSize, fontWeight: FontWeight.w600),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          widget.title,
+                          style: context.titleLarge?.copyWith(
+                            fontSize: widget.titleFontSize,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        // 副标题：补充说明弹窗用途
+                        if (widget.subtitle != null) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            widget.subtitle!,
+                            style: TextStyle(fontSize: 11.5, color: colorScheme.onSurfaceVariant),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                   if (widget.showCloseButton)

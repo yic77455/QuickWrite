@@ -95,4 +95,21 @@ class BookFolderService {
         : settingItemFilePath;
     return '$base$_foldStateFileSuffix';
   }
+
+  /// 大纲关键词文件后缀
+  static const String _keywordFileSuffix = '.kw.json';
+
+  /// 由设定项文件路径派生大纲关键词文件路径
+  ///
+  /// 关键词文件与设定项文件同目录同名，扩展名替换为 `.kw.json`；
+  /// 独立存放可避免关键词混入大纲 Markdown，影响导出与备份内容。
+  /// 路径为空时返回 null。
+  static String? keywordFilePath(String? settingItemFilePath) {
+    if (settingItemFilePath == null || settingItemFilePath.isEmpty) return null;
+    const String extension = GlobalConstants.settingFileExtension;
+    final String base = settingItemFilePath.endsWith(extension)
+        ? settingItemFilePath.substring(0, settingItemFilePath.length - extension.length)
+        : settingItemFilePath;
+    return '$base$_keywordFileSuffix';
+  }
 }

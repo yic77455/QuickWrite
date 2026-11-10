@@ -43,7 +43,7 @@ enum OutlineToolbarPanel {
 /// 移动端大纲编辑器键盘工具栏
 ///
 /// 软键盘弹出时贴在键盘上方：主工具栏左侧为二级面板入口（快捷输入、文字格式、
-/// 字体颜色、字底颜色，数量较多时横向滚动），右侧为节点层级调整按钮；
+/// 字体颜色、字底颜色）与关键词绑定入口，数量较多时横向滚动；右侧为节点层级调整按钮；
 /// 点击面板入口时在其上方展开对应的二级面板，唤起键盘时默认展开快捷输入面板。
 class MobileOutlineToolbar extends StatefulWidget {
   const MobileOutlineToolbar({super.key});
@@ -262,14 +262,21 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
                   Icons.format_color_fill_rounded,
                   '字底颜色',
                 ),
+                // 关键词绑定仅作用于当前节点，批量选择模式下不提供
+                if (!batchMode)
+                  _buildActionButton(
+                    icon: Icons.sell_outlined,
+                    tooltip: '绑定关键词',
+                    onPressed: state.showKeywordCardForActiveNode,
+                  ),
                 // 批量选择模式下的复制与删除
                 if (batchMode) ...[
-                  _buildBatchActionButton(
+                  _buildActionButton(
                     icon: Icons.copy_rounded,
                     tooltip: '复制选中节点',
                     onPressed: state.copySelectedNodes,
                   ),
-                  _buildBatchActionButton(
+                  _buildActionButton(
                     icon: Icons.delete_outline_rounded,
                     tooltip: '删除选中节点',
                     onPressed: state.deleteSelectedNodes,
@@ -302,8 +309,8 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
     );
   }
 
-  /// 构建批量选择模式下的操作按钮
-  Widget _buildBatchActionButton({
+  /// 构建主工具栏中的单次操作按钮
+  Widget _buildActionButton({
     required IconData icon,
     required String tooltip,
     required VoidCallback onPressed,

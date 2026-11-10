@@ -12,6 +12,7 @@ import 'package:quick_write/core/constants/punctuation_symbols.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/services/cache_services/outline_last_edit_cache_service.dart';
 import 'package:quick_write/core/services/workspace/book_folder_service.dart';
+import 'package:quick_write/core/services/workspace/outline_keyword_service.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/providers/window_provider.dart';
 import 'package:quick_write/core/utils/batch_selection_controller.dart';
@@ -30,10 +31,12 @@ import 'package:quick_write/core/utils/text_style_range.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/utils/word_count_utils.dart';
 import 'package:quick_write/core/models/outline_models.dart';
+import 'package:quick_write/core/models/outline_keyword.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 import 'utils/outline_shortcut_keys.dart';
 import 'widgets/outline_color_palette.dart';
 import 'widgets/outline_connection_painter.dart';
+import 'widgets/outline_keyword_card.dart';
 import 'widgets/outline_node_widgets.dart';
 import 'widgets/outline_editor_widgets.dart';
 import 'widgets/outline_settings_card.dart';
@@ -105,6 +108,12 @@ class OutlineEditor extends StatefulWidget {
   /// 恢复定位后只在激活的标签页上获取焦点，避免会话恢复时后台标签页抢走当前标签页的键盘焦点。
   final bool isActive;
 
+  /// 大纲关键词服务
+  ///
+  /// 用于读写当前设定项的关键词伴生文件，并同步书籍级关键词索引；
+  /// 为空时不启用关键词功能（如未提供工作台的场景）。
+  final OutlineKeywordService? keywordService;
+
   const OutlineEditor({
     super.key,
     required this.colorScheme,
@@ -122,6 +131,7 @@ class OutlineEditor extends StatefulWidget {
     this.autoFocusFirstNode = false,
     this.restoreLastEditPosition = false,
     this.isActive = true,
+    this.keywordService,
   });
 
   @override
@@ -393,6 +403,12 @@ class OutlineEditorState extends State<OutlineEditor>
   /// 连续点击节点会频繁切换焦点，合并短时间内的多次记录，避免反复写文件
   Timer? _lastEditedPathSaveTimer;
 
+  /// 关键词伴生文件的写入防抖定时器
+  ///
+  /// 节点文本变化会影响悬浮卡片中的子孙节点快照，合并短时间内的多次修改，
+  /// 避免输入过程中反复写文件。
+  Timer? _keywordSaveTimer;
+
   /// 节点折叠动画控制器（节点ID -> 控制器）
   ///
   /// 值从 1 收敛到 0 表示子节点收进圆点，从 0 增长到 1 表示子节点从圆点展开；
@@ -468,6 +484,7 @@ class OutlineEditorState extends State<OutlineEditor>
     _stopEdgeAutoScroll();
     _loadingIndicatorTimer?.cancel();
     _lastEditedPathSaveTimer?.cancel();
+    _keywordSaveTimer?.cancel();
     _scrollGuard.dispose();
     SettingsService.instance.removeListener(_onSettingsChanged);
     _undoManager.dispose();
@@ -532,6 +549,8 @@ class OutlineEditorState extends State<OutlineEditor>
     // 大纲文件改名后同步迁移折叠状态文件
     if (widget.filePath != oldWidget.filePath) {
       _renameFoldStateFile(oldWidget.filePath, widget.filePath);
+      // 关键词伴生文件同样随大纲文件迁移
+      widget.keywordService?.renameSettingKeywords(oldWidget.filePath, widget.filePath);
     }
     // 查找替换栏显示/隐藏导致额外顶边距变化时，记录变化量供 Layout 阶段补偿滚动偏移
     if (widget.extraTopPadding != oldWidget.extraTopPadding) {
@@ -991,6 +1010,8 @@ class OutlineEditorState extends State<OutlineEditor>
       }
       final text = await file.readAsString();
       parseFromText(text);
+      // 回填节点关键词（伴生文件不存在时保持为空）
+      await _loadKeywords();
       // 恢复上次退出时的节点折叠状态
       await _loadFoldState();
     } catch (e) {
@@ -1245,6 +1266,8 @@ class OutlineEditorState extends State<OutlineEditor>
         await parentDir.create(recursive: true);
       }
       await file.writeAsString(serializeToText());
+      // 关键词与节点树同在保存流程中落盘，保证正文编辑器索引同步更新
+      await _saveKeywords();
       // 结构变化会改变节点路径，随内容一并刷新折叠状态
       _saveFoldState();
       // 节点路径同样可能变化，同步刷新缓存中的上一次编辑节点
@@ -1393,6 +1416,187 @@ class OutlineEditorState extends State<OutlineEditor>
     }
   }
 
+  // ================= 大纲关键词 =================
+
+  /// 从伴生文件读取关键词并回填到当前节点树
+  ///
+  /// 关键词按「层级索引路径」与节点对应，与折叠状态使用同一套路径规则；
+  /// 文件中已不存在的节点路径会被忽略。
+  Future<void> _loadKeywords() async {
+    final OutlineKeywordService? service = widget.keywordService;
+    if (service == null) return;
+    final Map<String, OutlineKeywordFileNode> nodes = await service.readSettingKeywords(widget.filePath);
+    if (nodes.isEmpty) return;
+    for (final entry in nodes.entries) {
+      final OutlineNode? node = _nodeAtPath(entry.key);
+      if (node == null) continue;
+      node.keywords = List<OutlineKeyword>.of(entry.value.keywords);
+    }
+    // 让书籍级索引与本次加载结果保持一致（如伴生文件被外部修改过）
+    _syncKeywordsToService();
+    // 回写一次以补全快照中的节点样式；内容未变化时保存流程会跳过写盘
+    _scheduleKeywordSave();
+  }
+
+  /// 将当前树中带关键词的节点写入伴生文件
+  Future<void> _saveKeywords() async {
+    final OutlineKeywordService? service = widget.keywordService;
+    final String? filePath = widget.filePath;
+    final String? itemUuid = widget.settingItemUuid;
+    if (service == null || filePath == null || itemUuid == null || itemUuid.isEmpty) return;
+    await service.saveSettingKeywords(
+      settingItemFilePath: filePath,
+      settingItemUuid: itemUuid,
+      settingItemTitle: widget.title,
+      nodes: _collectKeywordNodes(),
+    );
+  }
+
+  /// 安排一次关键词伴生文件写入
+  ///
+  /// 节点文本变化会改变悬浮卡片中的子孙节点快照，连续输入时合并为一次写入。
+  void _scheduleKeywordSave() {
+    if (widget.readOnly) return;
+    _keywordSaveTimer?.cancel();
+    _keywordSaveTimer = Timer(const Duration(milliseconds: 800), () {
+      _keywordSaveTimer = null;
+      unawaited(_saveKeywords());
+    });
+  }
+
+  /// 将当前树的关键词同步到书籍级索引（不写盘）
+  ///
+  /// 关键词修改、撤销恢复后立即调用，保证正文编辑器与冲突校验使用的索引是最新状态。
+  void _syncKeywordsToService() {
+    final OutlineKeywordService? service = widget.keywordService;
+    final String? itemUuid = widget.settingItemUuid;
+    if (service == null || itemUuid == null || itemUuid.isEmpty) return;
+    service.applySettingKeywords(
+      settingItemUuid: itemUuid,
+      settingItemTitle: widget.title,
+      nodes: _collectKeywordNodes(),
+    );
+  }
+
+  /// 收集整棵树中带关键词的节点
+  ///
+  /// 每个条目同时记录节点文本与其全部子孙节点快照，供正文悬浮卡片直接展示；
+  /// 快照包含子孙节点的标题级别与文字样式，卡片内容区据此还原节点样式。
+  Map<String, OutlineKeywordFileNode> _collectKeywordNodes() {
+    final result = <String, OutlineKeywordFileNode>{};
+
+    // 收集节点的全部子孙节点，depth 以绑定节点为基准（子节点为 1）
+    List<OutlineKeywordSubNode> collectChildren(OutlineNode node) {
+      final children = <OutlineKeywordSubNode>[];
+      void walk(OutlineNode parent, int depth) {
+        for (final child in parent.children) {
+          children.add(OutlineKeywordSubNode(
+            depth: depth,
+            text: child.text,
+            headingLevel: child.headingLevel,
+            styleRanges: List<TextStyleRange>.of(child.styleRanges),
+          ));
+          walk(child, depth + 1);
+        }
+      }
+
+      walk(node, 1);
+      return children;
+    }
+
+    void walk(OutlineNode node, String path) {
+      if (node.keywords.isNotEmpty) {
+        result[path] = OutlineKeywordFileNode(
+          text: node.text,
+          children: collectChildren(node),
+          keywords: List<OutlineKeyword>.of(node.keywords),
+        );
+      }
+      for (int i = 0; i < node.children.length; i++) {
+        walk(node.children[i], '$path.$i');
+      }
+    }
+
+    for (int i = 0; i < _roots.length; i++) {
+      walk(_roots[i], '$i');
+    }
+    return result;
+  }
+
+  /// 设置节点的关键词列表
+  ///
+  /// 关键词在整本书内唯一：已被其他节点绑定的关键词会被拒绝，
+  /// 返回值即被拒绝的关键词集合，供关键词卡片提示冲突。
+  Set<String> _setNodeKeywords(String nodeId, List<OutlineKeyword> keywords) {
+    final OutlineNode? node = _findNode(nodeId);
+    if (node == null) return {};
+
+    final OutlineKeywordService? service = widget.keywordService;
+    final String? nodePath = _pathOfNode(nodeId);
+    final String currentItemUuid = widget.settingItemUuid ?? '';
+    final Set<String> rejected = {};
+    final Set<String> seen = {};
+    final List<OutlineKeyword> accepted = [];
+
+    for (final keyword in keywords) {
+      final String text = keyword.keyword.trim();
+      if (text.isEmpty || !seen.add(text)) continue;
+      final OutlineKeywordEntry? owner = service?.findKeywordOwner(text);
+      // 已被其他设定项或其他节点绑定时拒绝
+      final bool conflict = owner != null &&
+          (owner.settingItemUuid != currentItemUuid || owner.nodePath != nodePath);
+      if (conflict) {
+        rejected.add(text);
+        continue;
+      }
+      accepted.add(keyword.copyWith(keyword: text));
+    }
+
+    // 关键词未发生变化时只返回校验结果，避免产生无意义的撤销记录与保存
+    if (_isSameKeywords(node.keywords, accepted)) return rejected;
+
+    final TextSelection? selection = _controllers[nodeId]?.selection;
+    _undoManager.beginBatch();
+    setState(() {
+      node.keywords = accepted;
+    });
+    _endBatchAndNotify(description: '设置关键词', focusNodeId: nodeId, focusSelection: selection);
+    // 关键词变更立即落盘，不等待自动保存
+    unawaited(_saveKeywords());
+    return rejected;
+  }
+
+  /// 判断两组关键词是否完全一致
+  bool _isSameKeywords(List<OutlineKeyword> a, List<OutlineKeyword> b) {
+    if (a.length != b.length) return false;
+    for (int i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  /// 打开节点关键词编辑卡片
+  ///
+  /// 卡片以居中弹窗展示（弹窗外区域变暗），每次增删改都通过 [_setNodeKeywords] 立即落库。
+  Future<void> _showKeywordCard(String nodeId) async {
+    if (widget.readOnly || widget.keywordService == null) return;
+    final OutlineNode? node = _findNode(nodeId);
+    if (node == null) return;
+    await OutlineKeywordCard.show(
+      context: context,
+      keywords: List<OutlineKeyword>.of(node.keywords),
+      onChanged: (keywords) => _setNodeKeywords(nodeId, keywords),
+    );
+  }
+
+  /// 为当前活动节点打开关键词绑定卡片
+  ///
+  /// 供移动端工具栏等外部入口调用；无活动节点或只读时不响应。
+  void showKeywordCardForActiveNode() {
+    final String? nodeId = _activeNodeId;
+    if (nodeId != null) _showKeywordCard(nodeId);
+  }
+
   /// 收集全部折叠节点的路径
   ///
   /// 节点 ID 每次解析文件都会重新生成，无法跨次加载对应到同一节点，
@@ -1481,6 +1685,8 @@ class OutlineEditorState extends State<OutlineEditor>
   void _notifyContentChanged() {
     widget.onContentChanged?.call();
     _notifyStatsChanged();
+    // 文本变化会影响关键词悬浮卡片中的子孙节点快照，防抖刷新伴生文件
+    _scheduleKeywordSave();
   }
 
   /// 通知统计信息变化
@@ -1533,8 +1739,9 @@ class OutlineEditorState extends State<OutlineEditor>
   void _endBatchAndNotify({required String description, String? focusNodeId, TextSelection? focusSelection}) {
     _undoManager.endBatch(description: description, focusNodeId: focusNodeId, focusSelection: focusSelection);
     _notifyContentChanged();
-    // 结构变化会改变节点路径，同步刷新折叠状态，避免下次加载对应到错误的节点
+    // 结构变化会改变节点路径，同步刷新折叠状态与关键词索引，避免对应到错误的节点
     _saveFoldState();
+    _syncKeywordsToService();
   }
 
   // ================= 撤销/恢复 =================
@@ -1669,6 +1876,9 @@ class OutlineEditorState extends State<OutlineEditor>
     }
 
     setState(() {});
+
+    // 撤销/重做可能恢复关键词，同步刷新书籍级索引
+    _syncKeywordsToService();
 
     // 同步恢复焦点和选区，不依赖 post-frame，避免多次撤销/重做时回调交叉
     _restoreFocusFromSnapshot(snapshot);
@@ -5171,7 +5381,23 @@ class OutlineEditorState extends State<OutlineEditor>
           ),
         ],
       ),
+
+      ContextMenuItem.divider(),
+
+      // 关键词：单节点绑定，节点选区下不提供（批量绑定语义不清）
+      ContextMenuItem(
+        labelText: '关键词',
+        icon: Icons.sell_outlined,
+        enabled: !isReadOnly && !hasNodeSelection && hasTarget,
+        onTap: () => _showKeywordCardForContextMenu(nodeId),
+      ),
     ];
+  }
+
+  /// 从右键菜单打开目标节点的关键词卡片
+  void _showKeywordCardForContextMenu(String? nodeId) {
+    if (nodeId == null) return;
+    _showKeywordCard(nodeId);
   }
 
   /// 构建右键菜单项列表
@@ -5544,6 +5770,12 @@ class OutlineEditorState extends State<OutlineEditor>
       }
     }
 
+    // Alt+=：打开当前节点的关键词绑定卡片
+    if (isAlt && !isCommand && OutlineShortcutKeys.isBindKeywordKey(event.logicalKey)) {
+      _showKeywordCard(nodeId);
+      return KeyEventResult.handled;
+    }
+
     // Ctrl/Cmd+Alt+字母：设置字底颜色（D 为清除）
     if (isCommand && isAlt && OutlineShortcutKeys.isColorLetterKey(event.logicalKey)) {
       if (OutlineShortcutKeys.isClearColorKey(event.logicalKey)) {
@@ -5702,6 +5934,16 @@ class OutlineEditorState extends State<OutlineEditor>
         }
       }
       return KeyEventResult.ignored;
+    }
+
+    // Alt+=：为活动节点打开关键词绑定卡片（存在节点选区时不响应）
+    if (isAlt && !isCommand && _selectedNodeIds.isEmpty &&
+        OutlineShortcutKeys.isBindKeywordKey(event.logicalKey)) {
+      final String? activeNodeId = _activeNodeId;
+      if (activeNodeId != null) {
+        _showKeywordCard(activeNodeId);
+        return KeyEventResult.handled;
+      }
     }
 
     // Ctrl/Cmd+Z：撤销；Ctrl/Cmd+Shift+Z：重做（macOS 习惯）；Ctrl+Y：重做（Windows 习惯）
@@ -6369,6 +6611,18 @@ class OutlineEditorState extends State<OutlineEditor>
     if (resolved != null) {
       _scrollToNode(resolved.nodeId);
     }
+  }
+
+  /// 按节点层级路径定位并聚焦节点
+  ///
+  /// 供正文关键词跳转使用：先展开全部祖先使节点可见，再滚动到视口中央，
+  /// 最后把焦点与光标交给该节点。返回 false 表示节点尚未解析出来（如内容仍在加载）。
+  bool revealNodeByPath(String path) {
+    final OutlineNode? node = _nodeAtPath(path);
+    if (node == null) return false;
+    _ensureAncestorsExpanded(node.id);
+    _focusAndScrollToNode(node.id, moveCursorToEnd: false);
+    return true;
   }
 
   @override

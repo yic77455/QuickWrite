@@ -9,6 +9,7 @@ import 'package:quick_write/core/models/setting_item.dart';
 import 'package:quick_write/core/services/app_paths.dart';
 import 'package:quick_write/core/services/cloud_sync/chapter_archive.dart';
 import 'package:quick_write/core/services/cloud_sync/sync_models.dart';
+import 'package:quick_write/core/services/workspace/book_folder_service.dart';
 import 'package:quick_write/core/services/workspace/custom_highlight_service.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/relative_path_utils.dart';
@@ -286,6 +287,11 @@ class WorkspaceIndexer {
       for (final item
           in settingItemsByBook[book.uuid] ?? const <SettingItemModel>[]) {
         if (item.filePath.isEmpty) continue;
+        final String settingLocalPath = _joinPath([
+          bookFolder,
+          _settingsDirName,
+          relativePathToPlatform(item.filePath),
+        ]);
         await _collectPlainFile(
           baselines: baselines,
           files: files,
@@ -293,12 +299,24 @@ class WorkspaceIndexer {
           key:
               '$_booksKeyPrefix${book.uuid}/settings/'
               '${item.uuid}${GlobalConstants.settingFileExtension}',
-          localPath: _joinPath([
-            bookFolder,
-            _settingsDirName,
-            relativePathToPlatform(item.filePath),
-          ]),
+          localPath: settingLocalPath,
         );
+
+        // 关键词伴生文件：与设定项文件同目录同名
+        final String? keywordFileName = BookFolderService.keywordFilePath(
+          '${item.uuid}${GlobalConstants.settingFileExtension}',
+        );
+        final String? keywordLocalPath =
+            BookFolderService.keywordFilePath(settingLocalPath);
+        if (keywordFileName != null && keywordLocalPath != null) {
+          await _collectPlainFile(
+            baselines: baselines,
+            files: files,
+            plainPaths: plainPaths,
+            key: '$_booksKeyPrefix${book.uuid}/settings/$keywordFileName',
+            localPath: keywordLocalPath,
+          );
+        }
       }
 
       // 封面（远端保留原扩展名，避免不同格式互相覆盖）

@@ -13,6 +13,7 @@ import 'package:quick_write/core/models/chapter.dart';
 import 'package:quick_write/core/models/volume.dart';
 import 'package:quick_write/core/models/setting_group.dart';
 import 'package:quick_write/core/models/setting_item.dart';
+import 'package:quick_write/core/models/outline_keyword.dart';
 import 'package:quick_write/core/providers/writing_session_tracker.dart';
 import 'package:quick_write/core/services/app_paths.dart';
 import 'package:quick_write/core/services/database_service.dart';
@@ -27,6 +28,7 @@ import 'package:quick_write/core/services/multi_window_service.dart';
 import 'package:quick_write/core/services/cache_services/window_cache_service.dart';
 import 'package:quick_write/core/services/workspace/book_folder_service.dart';
 import 'package:quick_write/core/services/workspace/custom_highlight_service.dart';
+import 'package:quick_write/core/services/workspace/outline_keyword_service.dart';
 import 'package:quick_write/core/services/workspace/volume_migration_service.dart';
 import 'package:quick_write/core/utils/code_line_selection_utils.dart';
 import 'package:quick_write/core/utils/find_replace_target.dart';
@@ -103,6 +105,9 @@ class WorkspaceProvider extends WorkspaceStateBase
   /// 自定义高亮服务（按书籍独立加载，配置持久化到书籍根目录）
   final CustomHighlightService _customHighlightService = CustomHighlightService();
 
+  /// 大纲关键词服务（按书籍独立加载，聚合全部设定项的关键词绑定）
+  final OutlineKeywordService _outlineKeywordService = OutlineKeywordService();
+
   // ================= Getters =================
 
   bool get isLeftSidebarExpanded => _isLeftSidebarExpanded;
@@ -118,6 +123,9 @@ class WorkspaceProvider extends WorkspaceStateBase
 
   /// 获取自定义高亮服务
   CustomHighlightService get customHighlightService => _customHighlightService;
+
+  /// 获取大纲关键词服务
+  OutlineKeywordService get outlineKeywordService => _outlineKeywordService;
 
   // ================= 初始化方法 =================
 
@@ -181,6 +189,12 @@ class WorkspaceProvider extends WorkspaceStateBase
 
     // 加载自定义高亮配置（持久化在书籍根目录下）
     await _customHighlightService.load(bookFolderPath);
+
+    // 聚合全部设定项的大纲关键词绑定，供正文编辑器高亮与跳转
+    await _outlineKeywordService.load(
+      bookFolderPath: bookFolderPath,
+      settingItems: _settingItems,
+    );
 
     // 按设置恢复上次退出时打开的标签页
     _restoreTabSessionIfEnabled();
@@ -397,6 +411,9 @@ class WorkspaceProvider extends WorkspaceStateBase
 
     // 释放自定义高亮服务
     _customHighlightService.dispose();
+
+    // 释放大纲关键词服务
+    _outlineKeywordService.dispose();
 
     // 调用父类的 dispose 方法
     super.dispose();

@@ -870,6 +870,55 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
     });
   }
 
+  // ================= 大纲关键词跳转 =================
+
+  /// 跳转到大纲关键词绑定的节点
+  ///
+  /// 目标设定项未打开时以预览标签页打开并等待内容加载完成；
+  /// 随后逐帧等待大纲编辑器就绪，定位并聚焦对应节点。
+  Future<void> navigateToOutlineKeyword(OutlineKeywordEntry entry) async {
+    final int existingIndex = _openedTabs.indexWhere((t) => t.id == entry.settingItemUuid);
+    if (existingIndex != -1) {
+      _currentTabIndex = existingIndex;
+      notifyListeners();
+      _revealOutlineNodeWhenReady(_openedTabs[existingIndex], entry.nodePath, 10);
+      return;
+    }
+
+    // 目标设定项已被删除时不跳转
+    final item = _settingItems.where((i) => i.uuid == entry.settingItemUuid).firstOrNull;
+    if (item == null) return;
+
+    final EditorTab tab = EditorTab(
+      id: item.uuid,
+      title: item.title,
+      type: EditorTabType.settings,
+      isPreview: true,
+    );
+    await _openSearchResultTab(tab);
+    notifyListeners();
+
+    final EditorTab? openedTab = _openedTabs.where((t) => t.id == entry.settingItemUuid).firstOrNull;
+    if (openedTab == null) return;
+    _revealOutlineNodeWhenReady(openedTab, entry.nodePath, 10);
+  }
+
+  /// 在大纲编辑器就绪后定位并聚焦指定路径的节点
+  ///
+  /// 编辑器尚未挂载或内容尚未解析完成时逐帧重试，
+  /// [maxFrames] 用尽后放弃，避免标签页被切换等情况导致无限等待。
+  void _revealOutlineNodeWhenReady(EditorTab tab, String nodePath, int maxFrames) {
+    final editorState = tab.editorKey.currentState;
+    if (editorState is OutlineEditorState) {
+      final bool revealed = editorState.revealNodeByPath(nodePath);
+      if (revealed) return;
+    }
+    if (maxFrames <= 0 || !_openedTabs.contains(tab)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _revealOutlineNodeWhenReady(tab, nodePath, maxFrames - 1);
+    });
+  }
+
   /// 通知指定标签页的内容已加载完成
   ///
   /// 由编辑器完成异步内容读取后调用，用于唤醒等待该标签页内容就绪的调用方

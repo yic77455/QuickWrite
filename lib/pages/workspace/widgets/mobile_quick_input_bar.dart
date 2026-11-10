@@ -11,7 +11,7 @@ import 'package:re_editor/re_editor.dart';
 /// 移动端快捷输入栏
 ///
 /// 软键盘弹出时贴在键盘上方，提供常用标点符号的快捷输入；
-/// 右端提供前往「其他设置」的入口。
+/// 右端提供关键词高亮开关与前往「其他设置」的入口。
 class MobileQuickInputBar extends StatefulWidget {
   const MobileQuickInputBar({super.key});
 
@@ -146,12 +146,21 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
     context.read<WorkspaceProvider>().openRightSidebar(RightSidebarType.other);
   }
 
+  /// 切换正文关键词高亮
+  void _handleKeywordToggle(NovelEditorState state) {
+    state.toggleKeywordHighlight();
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     // 切换标签页时重新判断显隐
     context.watch<WorkspaceProvider>();
 
     if (!_shouldShow) return const SizedBox.shrink();
+
+    final NovelEditorState? editorState = _currentEditorState();
+    if (editorState == null) return const SizedBox.shrink();
 
     final colorScheme = Theme.of(context).colorScheme;
 
@@ -183,6 +192,17 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
                   },
                 ),
               ),
+
+              // 关键词高亮开关：开启后正文常驻关键词高亮，点按关键词可预览
+              if (editorState.hasOutlineKeywords)
+                ToggleToolButton(
+                  icon: Icons.sell_outlined,
+                  tooltip: '关键词高亮',
+                  isSelected: editorState.keywordHighlightEnabled,
+                  size: 44,
+                  iconSize: 20,
+                  onChanged: (_) => _handleKeywordToggle(editorState),
+                ),
 
               // 与设置入口之间的分隔线，上下留白避免顶满整栏
               Container(

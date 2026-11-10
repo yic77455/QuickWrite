@@ -38,6 +38,8 @@ Future<void> showMobileNameGeneratorDialog({required BuildContext context}) {
   return showDialogBase(
     context: context,
     title: '随机取名',
+    subtitle: '按类别与词典随机组合名字',
+    titleIcon: Icons.casino_outlined,
     width: 420,
     height: 620,
     content: const _MobileNameGeneratorDialog(),

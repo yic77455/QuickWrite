@@ -21,6 +21,8 @@ Future<void> showNameGeneratorDialog({
   return showDialogBase(
     context: context,
     title: '随机取名',
+    subtitle: '按类别与词典随机组合名字',
+    titleIcon: Icons.casino_outlined,
     width: 880,
     height: 600,
     content: const _NameGeneratorDialog(),

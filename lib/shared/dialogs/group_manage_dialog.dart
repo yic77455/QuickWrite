@@ -13,8 +13,10 @@ Future<void> showGroupManageDialog(BuildContext context) {
   return showDialogBase(
     context: context,
     title: '管理分组',
-    width: 420,
-    height: 380,
+    subtitle: '拖动可调整分组顺序',
+    titleIcon: Icons.folder_copy_outlined,
+    width: 360,
+    height: 400,
     content: const _GroupManageContent(),
   );
 }

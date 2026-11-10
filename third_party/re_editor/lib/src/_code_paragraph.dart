@@ -79,16 +79,33 @@ class _ParagraphImpl extends IParagraph {
   @override
   TextRange getRangeForSpan(InlineSpan span) {
     int offset = 0;
-    this.span.visitChildren((child) {
-      if (identical(child, span)) {
+    int? start;
+    // 按先序遍历累计字符偏移；不能使用 visitChildren，
+    // 它会把当前分段自身也回调一次，导致自身文本被重复计入偏移
+    bool visit(InlineSpan node) {
+      if (identical(node, span)) {
+        start = offset;
         return false;
       }
-      offset += child.length;
+      if (node is TextSpan) {
+        final String? text = node.text;
+        if (text != null) {
+          offset += text.length;
+        }
+        for (final InlineSpan child in node.children ?? const <InlineSpan>[]) {
+          if (!visit(child)) {
+            return false;
+          }
+        }
+      }
       return true;
-    });
+    }
+
+    visit(this.span);
+    final int rangeStart = start ?? offset;
     return TextRange(
-      start: offset,
-      end: offset + span.length
+      start: rangeStart,
+      end: rangeStart + span.length
     );
   }
 
@@ -258,6 +275,7 @@ TextSpan _subSpan(TextSpan span, int start, int end) {
   int cursor = 0;
 
   TextSpan? slice(TextSpan node) {
+    final int nodeStart = cursor;
     String? slicedText;
     final String? text = node.text;
     if (text != null) {
@@ -279,6 +297,12 @@ TextSpan _subSpan(TextSpan span, int start, int end) {
         }
       }
     }
+    final int nodeEnd = cursor;
+    // 整个分段都落在截取区间内时直接复用原对象，
+    // 保留其运行时类型（如带鼠标悬停注解的分段）与对象标识
+    if (nodeStart >= start && nodeEnd <= end) {
+      return node;
+    }
     if (slicedText == null && children.isEmpty) {
       return null;
     }
@@ -297,15 +321,21 @@ bool _containsSpan(InlineSpan root, InlineSpan target) {
   if (identical(root, target)) {
     return true;
   }
-  bool found = false;
-  root.visitChildren((child) {
+  // 直接遍历子分段：visitChildren 会连同 root 自身一起回调，
+  // 在其回调里再次调用本函数会回到同一对象造成无限递归
+  if (root is! TextSpan) {
+    return false;
+  }
+  final List<InlineSpan>? children = root.children;
+  if (children == null) {
+    return false;
+  }
+  for (final InlineSpan child in children) {
     if (_containsSpan(child, target)) {
-      found = true;
-      return false;
+      return true;
     }
-    return true;
-  });
-  return found;
+  }
+  return false;
 }
 
 /// 视觉首行缩进段落
