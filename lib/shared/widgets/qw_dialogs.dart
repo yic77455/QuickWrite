@@ -20,6 +20,21 @@ const double _dialogVerticalMargin = 24;
 /// 输入法顶部距弹窗底部不足该间距时即视为过于接近，弹窗需上移避让以保证底部按钮可见
 const double _keyboardDialogGap = 16;
 
+/// 标题栏同时带图标与副标题时关闭按钮的图标尺寸
+///
+/// 该结构下标题区域纵向较高，放大图标使关闭按钮与标题在视觉上更平衡
+const double _richHeaderCloseIconSize = 22;
+
+/// 标题栏同时带图标与副标题时关闭按钮的内边距
+///
+/// 用于扩大按钮的点击区域，让放大后的关闭按钮更易点中
+const EdgeInsets _richHeaderClosePadding = EdgeInsets.all(6);
+
+/// 标题栏同时带图标与副标题时关闭按钮的上移距离
+///
+/// 关闭按钮默认纵向居中，会偏向副标题一侧，上移后与标题首行对齐
+const double _richHeaderCloseRise = 6;
+
 /// 通用弹窗外壳
 ///
 /// 提供可拖拽、圆角、阴影的弹窗容器
@@ -230,6 +245,11 @@ class _DraggableDialogState extends State<_DraggableDialog> {
     return notifier == null || notifier.value;
   }
 
+  /// 标题栏是否同时带图标与副标题
+  ///
+  /// 该结构下标题区域纵向较高，关闭按钮需要放大并上移以保持视觉平衡
+  bool get _hasRichTitleHeader => widget.titleIcon != null && widget.subtitle != null;
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -309,14 +329,18 @@ class _DraggableDialogState extends State<_DraggableDialog> {
                     ),
                   ),
                   if (widget.showCloseButton)
-                    IconButton(
-                      icon: const Icon(Icons.close, size: 20),
-                      onPressed: () => Navigator.of(context).pop(),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                      color: colorScheme.onSurfaceVariant,
-                      hoverColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.08),
-                      highlightColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.12),
+                    // 带图标与副标题的标题栏较高，关闭按钮放大并上移，与标题首行对齐
+                    Transform.translate(
+                      offset: Offset(0, _hasRichTitleHeader ? -_richHeaderCloseRise : 0),
+                      child: IconButton(
+                        icon: Icon(Icons.close, size: _hasRichTitleHeader ? _richHeaderCloseIconSize : 20),
+                        onPressed: () => Navigator.of(context).pop(),
+                        padding: _hasRichTitleHeader ? _richHeaderClosePadding : EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        color: colorScheme.onSurfaceVariant,
+                        hoverColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.08),
+                        highlightColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.12),
+                      ),
                     ),
                 ],
               ),
