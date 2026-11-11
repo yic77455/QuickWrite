@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/models/outline_keyword.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
@@ -8,7 +10,8 @@ import 'package:quick_write/pages/workspace/editor/widgets/outline_editor_widget
 /// 正文大纲关键词悬浮卡片
 ///
 /// 参照人物卡 / 物品卡 / 设定卡的形态：以绑定节点文本为标题、设定项名称为副标题，
-/// 内容区展示该节点的全部子孙节点（按层级缩进），并还原各节点自身的文字样式；
+/// 标题栏右侧展示绑定节点的图片缩略图，内容区展示该节点的全部子孙节点
+/// （按层级缩进）及其备注与图片，并还原各节点自身的文字样式；
 /// 内容超出最大高度时在卡片内滚动。
 /// 卡片自身响应鼠标进入/离开，便于指针从关键词移入卡片时保持显示。
 class OutlineKeywordHoverCard extends StatelessWidget {
@@ -17,6 +20,9 @@ class OutlineKeywordHoverCard extends StatelessWidget {
 
   /// 标题区域高度估算（用于判断弹出方向）
   static const double _headerHeight = 86;
+
+  /// 标题栏图片缩略图的边长
+  static const double _headerImageSize = 54;
 
   /// 子节点行高估算
   static const double _rowHeight = 24;
@@ -28,6 +34,18 @@ class OutlineKeywordHoverCard extends StatelessWidget {
   ///
   /// 与大纲编辑器一致：H1~H3 逐级缩小字号，正文无偏移。
   static const int _maxHeadingLevel = 3;
+
+  /// 子节点图片缩略图的最大宽度
+  static const double _childImageMaxWidth = 150;
+
+  /// 子节点图片缩略图的最大高度
+  static const double _childImageMaxHeight = 110;
+
+  /// 子节点备注最大行数
+  static const int _childNoteMaxLines = 3;
+
+  /// 子节点备注行高估算
+  static const double _childNoteLineHeight = 17;
 
   /// 底部提示高度估算
   static const double _hintHeight = 38;
@@ -73,13 +91,28 @@ class OutlineKeywordHoverCard extends StatelessWidget {
   static double estimateHeight(OutlineKeywordEntry entry, double maxHeight) {
     double rowsHeight = 0;
     for (final child in entry.children) {
-      // 空文本子节点不会渲染，估算时同样跳过
-      if (child.text.isEmpty) continue;
+      // 不会渲染的子节点在估算时同样跳过
+      if (!_shouldRenderChild(child)) continue;
       rowsHeight += _rowHeight + _headingHeightExtra(child.headingLevel);
+      // 图片按最大展示高度估算，备注按字符数折算行数
+      if (child.imagePath.isNotEmpty) {
+        rowsHeight += 6 + _childImageMaxHeight;
+      }
+      if (child.note.isNotEmpty) {
+        final int noteLines =
+            (child.note.length / 26).ceil().clamp(1, _childNoteMaxLines).toInt();
+        rowsHeight += 4 + noteLines * _childNoteLineHeight;
+      }
     }
     final double estimated = _headerHeight + rowsHeight + _hintHeight;
     return estimated.clamp(_headerHeight + _hintHeight, maxHeight).toDouble();
   }
+
+  /// 子节点是否需要渲染
+  ///
+  /// 文字为空但带有备注或图片的节点同样展示，避免附加内容被丢弃。
+  static bool _shouldRenderChild(OutlineKeywordSubNode child) =>
+      child.text.isNotEmpty || child.note.isNotEmpty || child.imagePath.isNotEmpty;
 
   /// 子节点字号：基础字号叠加标题级别偏移（H1 最大，正文无偏移）
   static double _childFontSizeFor(int headingLevel) {
@@ -208,7 +241,34 @@ class OutlineKeywordHoverCard extends StatelessWidget {
               ],
             ),
           ),
+          // 绑定节点带有图片时，在标题栏右侧空白处展示缩放后的缩略图
+          if (entry.imagePath.isNotEmpty) ...[
+            const SizedBox(width: 10),
+            _buildHeaderImage(colorScheme),
+          ],
         ],
+      ),
+    );
+  }
+
+  /// 构建标题栏图片缩略图
+  ///
+  /// 固定边长内等比填充并圆角裁剪；图片未同步到本机时显示占位图标。
+  Widget _buildHeaderImage(ColorScheme colorScheme) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: SizedBox(
+        width: _headerImageSize,
+        height: _headerImageSize,
+        child: Image.file(
+          File(entry.imagePath),
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => _buildImagePlaceholder(
+            colorScheme,
+            width: _headerImageSize,
+            height: _headerImageSize,
+          ),
+        ),
       ),
     );
   }
@@ -216,7 +276,7 @@ class OutlineKeywordHoverCard extends StatelessWidget {
   /// 构建子节点列表
   Widget _buildChildren(ColorScheme colorScheme) {
     final List<OutlineKeywordSubNode> children = entry.children
-        .where((child) => child.text.isNotEmpty)
+        .where(_shouldRenderChild)
         .toList();
     if (children.isEmpty) {
       return Padding(
@@ -272,11 +332,88 @@ class OutlineKeywordHoverCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 9),
-              Expanded(child: _buildChildText(child, colorScheme)),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (child.text.isNotEmpty) _buildChildText(child, colorScheme),
+                    // 子节点的图片与备注顺序与大纲编辑器一致：图片在上、备注在下
+                    if (child.imagePath.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      _buildChildImage(child, colorScheme),
+                    ],
+                    if (child.note.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      _buildChildNote(child, colorScheme),
+                    ],
+                  ],
+                ),
+              ),
             ],
           ),
         );
       },
+    );
+  }
+
+  /// 构建子节点图片缩略图
+  ///
+  /// 在最大宽高范围内等比缩放，不裁剪图片；图片缺失时显示占位图标。
+  Widget _buildChildImage(OutlineKeywordSubNode child, ColorScheme colorScheme) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(
+          maxWidth: _childImageMaxWidth,
+          maxHeight: _childImageMaxHeight,
+        ),
+        child: Image.file(
+          File(child.imagePath),
+          fit: BoxFit.contain,
+          errorBuilder: (context, error, stackTrace) => _buildImagePlaceholder(
+            colorScheme,
+            width: 120,
+            height: 70,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 构建子节点备注
+  ///
+  /// 最多展示 [maxLines] 行，超出部分以省略号收尾。
+  Widget _buildChildNote(OutlineKeywordSubNode child, ColorScheme colorScheme) {
+    return Text(
+      child.note,
+      maxLines: _childNoteMaxLines,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        fontSize: 11.5,
+        height: 1.45,
+        color: colorScheme.onSurfaceVariant.withValues(alpha: 0.75),
+      ),
+    );
+  }
+
+  /// 构建图片缺失占位
+  Widget _buildImagePlaceholder(
+    ColorScheme colorScheme, {
+    required double width,
+    required double height,
+  }) {
+    return SizedBox(
+      width: width,
+      height: height,
+      child: ColoredBox(
+        color: colorScheme.onSurfaceVariant.withValues(alpha: 0.08),
+        child: Icon(
+          Icons.broken_image_outlined,
+          size: 24,
+          color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+        ),
+      ),
     );
   }
 

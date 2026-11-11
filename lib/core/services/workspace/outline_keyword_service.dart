@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:quick_write/core/models/outline_keyword.dart';
 import 'package:quick_write/core/models/setting_item.dart';
+import 'package:quick_write/core/services/workspace/book_folder_service.dart';
 import 'package:quick_write/core/services/workspace/outline_companion_store.dart';
 import 'package:quick_write/core/utils/relative_path_utils.dart';
 
@@ -58,7 +59,12 @@ class OutlineKeywordService extends ChangeNotifier {
       final Map<String, OutlineKeywordFileNode> nodes =
           await OutlineCompanionStore.instance.readKeywords(settingItemPath);
       if (nodes.isEmpty) continue;
-      _appendEntries(settingItemUuid: item.uuid, settingItemTitle: item.title, nodes: nodes);
+      _appendEntries(
+        settingItemUuid: item.uuid,
+        settingItemTitle: item.title,
+        settingItemFilePath: settingItemPath,
+        nodes: nodes,
+      );
     }
 
     _rebuildKeywordIndex();
@@ -99,6 +105,7 @@ class OutlineKeywordService extends ChangeNotifier {
       applySettingKeywords(
         settingItemUuid: settingItemUuid,
         settingItemTitle: settingItemTitle,
+        settingItemFilePath: settingItemFilePath,
         nodes: serialized,
       );
     }
@@ -109,13 +116,20 @@ class OutlineKeywordService extends ChangeNotifier {
   ///
   /// 大纲编辑器在关键词变化后立即调用，使「关键词全局唯一」的冲突校验
   /// 不被自动保存的延迟影响；正文编辑器也会据此刷新高亮。
+  /// [settingItemFilePath] 用于把节点图片文件名解析为绝对路径。
   void applySettingKeywords({
     required String settingItemUuid,
     required String settingItemTitle,
+    required String? settingItemFilePath,
     required Map<String, OutlineKeywordFileNode> nodes,
   }) {
     _entries.removeWhere((entry) => entry.settingItemUuid == settingItemUuid);
-    _appendEntries(settingItemUuid: settingItemUuid, settingItemTitle: settingItemTitle, nodes: nodes);
+    _appendEntries(
+      settingItemUuid: settingItemUuid,
+      settingItemTitle: settingItemTitle,
+      settingItemFilePath: settingItemFilePath,
+      nodes: nodes,
+    );
     _rebuildKeywordIndex();
   }
 
@@ -131,10 +145,13 @@ class OutlineKeywordService extends ChangeNotifier {
 
   /// 将单个设定项的关键词节点追加到索引列表
   ///
-  /// 同一节点内的重复关键词会被忽略，无关键词的节点不产生条目。
+  /// 同一节点内的重复关键词会被忽略，无关键词的节点不产生条目；
+  /// 节点与子孙节点的图片文件名在此按设定项目录解析为绝对路径，
+  /// 供正文悬浮卡片直接展示缩略图。
   void _appendEntries({
     required String settingItemUuid,
     required String settingItemTitle,
+    required String? settingItemFilePath,
     required Map<String, OutlineKeywordFileNode> nodes,
   }) {
     final List<String> paths = nodes.keys.toList()..sort(_compareNodePaths);
@@ -147,10 +164,23 @@ class OutlineKeywordService extends ChangeNotifier {
         settingItemTitle: settingItemTitle,
         nodePath: path,
         nodeText: node.text,
-        children: node.children,
+        imagePath: _resolveImagePath(settingItemFilePath, node.imageFileName),
+        children: [
+          for (final child in node.children)
+            child.withImagePath(_resolveImagePath(settingItemFilePath, child.imageFileName)),
+        ],
         keywords: keywords,
       ));
     }
+  }
+
+  /// 把节点图片文件名解析为绝对路径
+  ///
+  /// 图片统一存放在设定项文件所在目录的 image 文件夹，
+  /// 文件名为空或路径缺失时返回空字符串。
+  String _resolveImagePath(String? settingItemFilePath, String imageFileName) {
+    if (imageFileName.isEmpty) return '';
+    return BookFolderService.settingImageFilePath(settingItemFilePath, imageFileName) ?? '';
   }
 
   /// 过滤空关键词与同一节点内的重复关键词

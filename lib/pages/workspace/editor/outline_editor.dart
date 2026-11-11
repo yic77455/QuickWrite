@@ -1078,12 +1078,12 @@ class OutlineEditorState extends State<OutlineEditor>
       }
       final text = await file.readAsString();
       parseFromText(text);
+      // 回填节点备注与附加图片（伴生文件不存在时保持为空）
+      await _loadNotes();
       // 回填节点关键词（伴生文件不存在时保持为空）
       await _loadKeywords();
       // 回填节点关联文本（伴生文件不存在时保持为空）
       await _loadLinks();
-      // 回填节点备注与附加图片（伴生文件不存在时保持为空）
-      await _loadNotes();
       // 恢复上次退出时的节点折叠状态
       await _loadFoldState();
     } catch (e) {
@@ -1512,7 +1512,7 @@ class OutlineEditorState extends State<OutlineEditor>
     }
     // 让书籍级索引与本次加载结果保持一致（如伴生文件被外部修改过）
     _syncKeywordsToService();
-    // 回写一次以补全快照中的节点样式；内容未变化时保存流程会跳过写盘
+    // 回写一次以补全快照中的节点样式、备注与图片；内容未变化时保存流程会跳过写盘
     _scheduleKeywordSave();
   }
 
@@ -1552,14 +1552,15 @@ class OutlineEditorState extends State<OutlineEditor>
     service.applySettingKeywords(
       settingItemUuid: itemUuid,
       settingItemTitle: widget.title,
+      settingItemFilePath: widget.filePath,
       nodes: _collectKeywordNodes(),
     );
   }
 
   /// 收集整棵树中带关键词的节点
   ///
-  /// 每个条目同时记录节点文本与其全部子孙节点快照，供正文悬浮卡片直接展示；
-  /// 快照包含子孙节点的标题级别与文字样式，卡片内容区据此还原节点样式。
+  /// 每个条目同时记录节点文本、图片与其全部子孙节点快照，供正文悬浮卡片直接展示；
+  /// 快照包含子孙节点的标题级别、文字样式、备注与图片，卡片内容区据此还原节点样式。
   Map<String, OutlineKeywordFileNode> _collectKeywordNodes() {
     final result = <String, OutlineKeywordFileNode>{};
 
@@ -1571,6 +1572,8 @@ class OutlineEditorState extends State<OutlineEditor>
           children.add(OutlineKeywordSubNode(
             depth: depth,
             text: child.text,
+            note: child.note,
+            imageFileName: child.imageFileName,
             headingLevel: child.headingLevel,
             styleRanges: List<TextStyleRange>.of(child.styleRanges),
           ));
@@ -1586,6 +1589,7 @@ class OutlineEditorState extends State<OutlineEditor>
       if (node.keywords.isNotEmpty) {
         result[path] = OutlineKeywordFileNode(
           text: node.text,
+          imageFileName: node.imageFileName,
           children: collectChildren(node),
           keywords: List<OutlineKeyword>.of(node.keywords),
         );

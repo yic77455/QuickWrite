@@ -53,13 +53,25 @@ class OutlineKeyword {
 ///
 /// [depth] 为相对绑定节点的层级（子节点为 1，孙节点为 2），
 /// 供正文悬浮卡片按层级缩进展示，无需在悬停时重新读取大纲文件。
-/// 同时记录节点的标题级别与文字样式区间，使卡片内容区还原节点自身的排版样式。
+/// 同时记录节点的标题级别、文字样式区间、备注与图片，
+/// 使卡片内容区还原节点自身的排版样式并展示节点的附加内容。
 class OutlineKeywordSubNode {
   /// 相对绑定节点的层级
   final int depth;
 
   /// 节点文本
   final String text;
+
+  /// 节点备注
+  final String note;
+
+  /// 节点图片文件名（相对设定项目录下的 image 文件夹）
+  final String imageFileName;
+
+  /// 节点图片的绝对路径
+  ///
+  /// 由关键词索引按设定项目录解析后写入内存，不参与伴生文件序列化。
+  final String imagePath;
 
   /// 节点文字样式区间（相对 [text] 的偏移量）
   final List<TextStyleRange> styleRanges;
@@ -70,6 +82,9 @@ class OutlineKeywordSubNode {
   const OutlineKeywordSubNode({
     required this.depth,
     required this.text,
+    this.note = '',
+    this.imageFileName = '',
+    this.imagePath = '',
     this.styleRanges = const [],
     this.headingLevel = 0,
   });
@@ -80,6 +95,8 @@ class OutlineKeywordSubNode {
     return OutlineKeywordSubNode(
       depth: (json['depth'] as num?)?.toInt() ?? 1,
       text: (json['text'] as String?) ?? '',
+      note: (json['note'] as String?) ?? '',
+      imageFileName: (json['image'] as String?) ?? '',
       headingLevel: (json['headingLevel'] as num?)?.toInt() ?? 0,
       styleRanges: [
         if (rawRanges is List)
@@ -93,11 +110,28 @@ class OutlineKeywordSubNode {
   Map<String, dynamic> toJson() => {
     'depth': depth,
     'text': text,
+    if (note.isNotEmpty) 'note': note,
+    if (imageFileName.isNotEmpty) 'image': imageFileName,
     // 正文节点不写入标题级别，保持文件简洁
     if (headingLevel > 0) 'headingLevel': headingLevel,
     if (styleRanges.isNotEmpty)
       'styleRanges': styleRanges.map(_styleRangeToJson).toList(),
   };
+
+  /// 创建一份替换了图片绝对路径的副本
+  ///
+  /// 图片路径依赖设定项所在目录，由索引构建时统一解析，序列化时只保留文件名。
+  OutlineKeywordSubNode withImagePath(String imagePath) {
+    return OutlineKeywordSubNode(
+      depth: depth,
+      text: text,
+      note: note,
+      imageFileName: imageFileName,
+      imagePath: imagePath,
+      styleRanges: styleRanges,
+      headingLevel: headingLevel,
+    );
+  }
 
   /// 将文字样式区间序列化为 JSON
   ///
@@ -151,6 +185,9 @@ class OutlineKeywordFileNode {
   /// 节点文本
   final String text;
 
+  /// 节点图片文件名（相对设定项目录下的 image 文件夹）
+  final String imageFileName;
+
   /// 绑定节点全部子孙节点的扁平快照
   final List<OutlineKeywordSubNode> children;
 
@@ -159,6 +196,7 @@ class OutlineKeywordFileNode {
 
   const OutlineKeywordFileNode({
     this.text = '',
+    this.imageFileName = '',
     this.children = const [],
     this.keywords = const [],
   });
@@ -169,6 +207,7 @@ class OutlineKeywordFileNode {
     final rawKeywords = json['keywords'];
     return OutlineKeywordFileNode(
       text: (json['text'] as String?) ?? '',
+      imageFileName: (json['image'] as String?) ?? '',
       children: [
         if (rawChildren is List)
           for (final child in rawChildren)
@@ -187,6 +226,7 @@ class OutlineKeywordFileNode {
   /// 序列化为 JSON
   Map<String, dynamic> toJson() => {
     'text': text,
+    if (imageFileName.isNotEmpty) 'image': imageFileName,
     'children': children.map((e) => e.toJson()).toList(),
     'keywords': keywords.map((e) => e.toJson()).toList(),
   };
@@ -209,6 +249,11 @@ class OutlineKeywordEntry {
   /// 绑定节点的文本
   final String nodeText;
 
+  /// 绑定节点图片的绝对路径（空字符串表示没有图片）
+  ///
+  /// 由关键词索引按设定项目录解析，供正文悬浮卡片在标题栏展示缩略图。
+  final String imagePath;
+
   /// 绑定节点全部子孙节点的扁平快照
   final List<OutlineKeywordSubNode> children;
 
@@ -220,6 +265,7 @@ class OutlineKeywordEntry {
     required this.settingItemTitle,
     required this.nodePath,
     required this.nodeText,
+    this.imagePath = '',
     this.children = const [],
     this.keywords = const [],
   });
