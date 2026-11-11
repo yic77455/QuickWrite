@@ -143,9 +143,9 @@ class OutlineKeywordSubNode {
   }
 }
 
-/// 单个节点的关键词文件内容
+/// 单个节点的关键词数据
 ///
-/// 对应伴生文件 `xxx.kw.json` 中 `nodes` 下某一项，
+/// 对应合并伴生文件 `xxx.json` 中 `keywords` 下某一项，
 /// 同时用于大纲编辑器加载时回填节点关键词。
 class OutlineKeywordFileNode {
   /// 节点文本

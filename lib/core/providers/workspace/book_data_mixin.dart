@@ -1655,7 +1655,9 @@ mixin BookDataMixin on WorkspaceStateBase {
       return false;
     }
 
-    // 折叠状态文件随正文一同迁移
+    // 伴生文件随正文一同迁移
+    await _moveSettingCompanionFile(oldFilePath, newFilePath);
+    // 折叠状态为本地专用文件，随正文一同迁移
     await _moveSettingFoldStateFile(oldFilePath, newFilePath);
 
     // 重命名备份目录（沿用标题变更后的新目录名）
@@ -1845,6 +1847,28 @@ mixin BookDataMixin on WorkspaceStateBase {
     } catch (e) {
       debugPrint('删除设定项折叠状态文件失败: $e');
     }
+  }
+
+  /// 迁移设定项的大纲伴生文件
+  ///
+  /// 伴生文件按设定项文件路径派生，正文改名或移动分组后需要同步迁移，
+  /// 否则关键词、关联与备注会残留在旧路径下。
+  Future<void> _moveSettingCompanionFile(String oldItemFilePath, String newItemFilePath) async {
+    await OutlineCompanionStore.instance.move(oldItemFilePath, newItemFilePath);
+
+    // 节点附加图片位于设定项所在目录，随文件一并迁移
+    final Map<String, OutlineNoteData> notes =
+        await OutlineCompanionStore.instance.readNotes(newItemFilePath);
+    final List<String> imageFileNames = [
+      for (final note in notes.values)
+        if (note.imageFileName.isNotEmpty) note.imageFileName,
+    ];
+    if (imageFileNames.isEmpty) return;
+    await OutlineNoteService().moveImages(
+      oldSettingItemFilePath: oldItemFilePath,
+      newSettingItemFilePath: newItemFilePath,
+      imageFileNames: imageFileNames,
+    );
   }
 
   /// 迁移设定项的大纲折叠状态文件
@@ -2074,7 +2098,9 @@ mixin BookDataMixin on WorkspaceStateBase {
       return false;
     }
 
-    // 折叠状态文件随正文一同迁移
+    // 伴生文件随正文一同迁移
+    await _moveSettingCompanionFile(oldFilePath, newFilePath);
+    // 折叠状态为本地专用文件，随正文一同迁移
     await _moveSettingFoldStateFile(oldFilePath, newFilePath);
 
     // 更新组内序号
@@ -2238,7 +2264,9 @@ mixin BookDataMixin on WorkspaceStateBase {
         debugPrint('移动设定项文件失败: $e');
       }
 
-      // 折叠状态文件随正文一同迁移
+      // 伴生文件随正文一同迁移
+      await _moveSettingCompanionFile(oldFilePath, newFilePath);
+      // 折叠状态为本地专用文件，随正文一同迁移
       await _moveSettingFoldStateFile(oldFilePath, newFilePath);
     }
 

@@ -13,7 +13,7 @@ Future<void> showShortcutDialog({required BuildContext context}) {
     context: context,
     title: '快捷键',
     width: 680,
-    height: 500,
+    height: 820,
     content: const _ShortcutDialogContent(),
   );
 }

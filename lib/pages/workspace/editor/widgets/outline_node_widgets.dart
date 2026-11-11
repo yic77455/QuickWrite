@@ -11,6 +11,7 @@ import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_color_palette.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_connection_painter.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_editor_widgets.dart';
+import 'package:quick_write/pages/workspace/editor/widgets/outline_node_attachment.dart';
 
 /// 单个节点行组件
 ///
@@ -143,6 +144,29 @@ class OutlineNodeTile extends StatefulWidget {
   /// 点击关联文本回调（参数为文本样式区间中记录的关联标识）
   final ValueChanged<String>? onLinkTap;
 
+  /// 节点附加图片的绝对路径（空字符串表示没有图片）
+  final String imagePath;
+
+  /// 是否正在编辑节点备注
+  final bool isEditingNote;
+
+  /// 节点备注内容变化回调
+  final ValueChanged<String> onNoteChanged;
+
+  /// 开始编辑节点备注回调
+  final VoidCallback onStartNoteEdit;
+
+  /// 结束编辑节点备注回调
+  final VoidCallback onStopNoteEdit;
+
+  /// 删除节点图片回调
+  final VoidCallback onDeleteNodeImage;
+
+  /// 附加备注区的全局键
+  ///
+  /// 供编辑器判断指针是否落在备注区，从而把手势让给备注输入框。
+  final Key? attachmentKey;
+
   const OutlineNodeTile({
     super.key,
     required this.node,
@@ -178,6 +202,13 @@ class OutlineNodeTile extends StatefulWidget {
     this.dotFoldProgress,
     required this.shouldPersistSelectionOnFocusLoss,
     this.onLinkTap,
+    this.imagePath = '',
+    this.isEditingNote = false,
+    required this.onNoteChanged,
+    required this.onStartNoteEdit,
+    required this.onStopNoteEdit,
+    required this.onDeleteNodeImage,
+    this.attachmentKey,
   });
 
   /// 计算指定深度节点行首连接线区域的总宽度
@@ -286,6 +317,12 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
 
   /// 关键词标签换行到文本下方时占用的额外高度
   double _keywordOverflowHeight = 0;
+
+  /// 节点文本相对输入框左边缘的水平偏移
+  ///
+  /// 输入框的装饰内边距会让文字比输入框本身更靠右，
+  /// 附加备注区据此对齐到文字左边缘而不是输入框边缘。
+  double _textLeftInset = 0;
 
   /// 测量锚点时的文本内容
   String? _measuredText;
@@ -453,6 +490,7 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
 
   /// 测量节点文本末尾的位置，作为关键词标签的锚点
   ///
+  /// 同时测量文字相对输入框左边缘的偏移，供附加备注区对齐文字左边缘。
   /// 文本、框宽或字体均未变化时跳过，避免测量结果触发无意义的重建。
   void _measureKeywordAnchor() {
     final renderEditable = findPersistentRenderEditable(_textFieldKey);
@@ -460,10 +498,21 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
     final Size fieldSize = renderEditable.size;
     if (fieldSize.width <= 0 || fieldSize.height <= 0) return;
 
+    // 文字实际起点与输入框左边缘的差值：输入框装饰内边距会让文字更靠右
+    final RenderBox? fieldBox = _textFieldKey.currentContext?.findRenderObject() as RenderBox?;
+    double textLeftInset = _textLeftInset;
+    if (fieldBox != null && fieldBox.attached) {
+      final double fieldLeft = fieldBox.localToGlobal(Offset.zero).dx;
+      final double textLeft = renderEditable.localToGlobal(Offset.zero).dx;
+      textLeftInset = (textLeft - fieldLeft).clamp(0.0, 32.0).toDouble();
+    }
+    final bool insetChanged = (textLeftInset - _textLeftInset).abs() > 0.5;
+
     final String text = widget.controller.text;
     final double fontSize = _fontSize;
     final String fontFamily = SettingsService.instance.outlineFontFamily;
-    if (text == _measuredText &&
+    if (!insetChanged &&
+        text == _measuredText &&
         fieldSize.width == _keywordFieldWidth &&
         fontSize == _measuredFontSize &&
         fontFamily == _measuredFontFamily) {
@@ -490,6 +539,7 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
       _measuredText = text;
       _measuredFontSize = fontSize;
       _measuredFontFamily = fontFamily;
+      _textLeftInset = textLeftInset;
       // 锚点变化后标签可能重新换行，交由测量控件重新上报占用高度
       _keywordOverflowHeight = 0;
     });
@@ -573,12 +623,40 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
         // 折叠态圆点外轮廓色：与圆点同色但更透明，作为子节点被收起的视觉提示
         final collapsedDotBackground = colorScheme.onSurfaceVariant.withValues(alpha: 0.1);
 
-        // 节点行内容：文本输入区
+        // 节点行内容：文本输入区与附加备注区
         // 底部间距纳入内容区高度，使连接线的 Positioned 能覆盖间距区域
         // 右侧留白由外层内容区的内边距统一承担，为行尾竖条与左右边距预留空间
         final Widget rowContent = Padding(
           padding: EdgeInsets.only(left: connectionWidth, bottom: widget.nodeSpacing),
-          child: _buildNodeTextArea(node, colorScheme),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildNodeTextArea(node, colorScheme),
+              // 图片与备注位于节点文字下方，与文字左对齐
+              if (node.note.isNotEmpty ||
+                  widget.imagePath.isNotEmpty ||
+                  widget.isEditingNote)
+                OutlineNodeAttachment(
+                  key: widget.attachmentKey,
+                  note: node.note,
+                  imagePath: widget.imagePath,
+                  colorScheme: colorScheme,
+                  // 备注字号比设置的大纲字号小 4 号
+                  noteFontSize: (SettingsService.instance.outlineFontSize - 4)
+                      .clamp(8.0, 72.0)
+                      .toDouble(),
+                  // 对齐节点文字左边缘
+                  textLeftInset: _textLeftInset,
+                  readOnly: widget.readOnly || widget.isBatchMode,
+                  isEditingNote: widget.isEditingNote,
+                  onNoteChanged: widget.onNoteChanged,
+                  onStartNoteEdit: widget.onStartNoteEdit,
+                  onStopNoteEdit: widget.onStopNoteEdit,
+                  onDeleteImage: widget.onDeleteNodeImage,
+                ),
+            ],
+          ),
         );
 
         final Widget row = Stack(

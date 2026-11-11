@@ -35,12 +35,38 @@ String settingSyncKeyOf(String bookUuid, String settingItemUuid) =>
 
 /// 生成设定项伴生文件的逻辑键
 ///
-/// [suffix] 为伴生文件后缀（关键词、关联），与设定文件同目录、同 UUID
+/// [suffix] 为伴生文件后缀，与设定文件同目录、同 UUID
 String settingCompanionSyncKeyOf(
   String bookUuid,
   String settingItemUuid,
   String suffix,
 ) => '$kBooksKeyPrefix$bookUuid/settings/$settingItemUuid$suffix';
+
+/// 设定项备注图片在同步命名空间中的路径段
+const String kSettingImagesKeySegment = 'images';
+
+/// 生成设定项备注图片的逻辑键
+///
+/// [relativeImagePath] 为图片相对设定项 settings 目录的路径，统一使用正斜杠分隔，
+/// 例如 `image/xxx.png` 或 `分组/image/xxx.png`
+String settingImageSyncKeyOf(String bookUuid, String relativeImagePath) =>
+    '$kBooksKeyPrefix$bookUuid/$kSettingImagesKeySegment/$relativeImagePath';
+
+/// 判断逻辑键是否为设定项备注图片
+bool isSettingImageSyncKey(String key) {
+  final List<String> segments = key.split('/');
+  return segments.length >= 4 &&
+      segments[0] == 'books' &&
+      segments[1].isNotEmpty &&
+      segments[2] == kSettingImagesKeySegment;
+}
+
+/// 由备注图片逻辑键解析所属书籍 UUID，无法解析时返回空字符串
+String bookUuidOfSettingImageSyncKey(String key) {
+  final List<String> segments = key.split('/');
+  if (segments.length < 3 || segments[0] != 'books') return '';
+  return segments[1];
+}
 
 /// 生成回收项对应的全部远端文件逻辑键
 ///
@@ -264,9 +290,9 @@ enum SyncAction {
   /// 两端都存在无法自动合并的修改，保留双份
   keepBoth,
 
-  /// 删除远端已失去本地对应内容的伴生文件
+  /// 删除远端已失去本地对应内容的伴生文件或备注图片
   ///
-  /// 仅用于可从设定项内容重新派生的关键词、关联等伴生文件，
+  /// 仅用于可从设定项内容重新派生的关键词、关联、备注等伴生文件及备注图片，
   /// 避免本地删除后旧副本在下次同步被重新下载
   deleteRemote,
 }

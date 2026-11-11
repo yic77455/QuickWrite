@@ -13,7 +13,7 @@ import 'package:quick_write/core/services/workspace/book_folder_service.dart';
 /// - 两端都未变更：跳过
 ///
 /// 文件的缺失是歧义的（被删除、尚未下载、本地丢失），因此本层一般不做删除决策；
-/// 仅有设定项派生的伴生文件（关键词、关联）在确认本地删除时清理远端副本，
+/// 仅有设定项派生的伴生文件（关键词、关联、备注）与备注图片在确认本地删除时清理远端副本，
 /// 避免旧副本在下次同步被重新下载。实体删除仍由元数据同步通过删除记录统一负责
 class SyncPlanner {
   const SyncPlanner();
@@ -91,9 +91,17 @@ class SyncPlanner {
     if (local != null && remote == null) return SyncAction.upload;
 
     // 仅远端存在：本地缺少该文件，通常重新下载；
-    // 设定项伴生文件被主动删除时改为清理远端副本
+    // 设定项伴生文件或备注图片被主动删除时改为清理远端副本
     if (local == null && remote != null) {
       if (_shouldDeleteRemoteCompanion(
+        key: key,
+        remote: remote,
+        baseline: baseline,
+        localKeys: localKeys,
+      )) {
+        return SyncAction.deleteRemote;
+      }
+      if (_shouldDeleteRemoteImage(
         key: key,
         remote: remote,
         baseline: baseline,
@@ -143,5 +151,32 @@ class SyncPlanner {
       return '$base${GlobalConstants.settingFileExtension}';
     }
     return null;
+  }
+
+  /// 判断本地缺失的远端备注图片是否应删除远端副本
+  ///
+  /// 满足以下条件时才删除，避免误删：
+  /// - 上次同步留有基线，说明该图片曾在本地存在
+  /// - 远端内容自上次同步后未变化，其他设备新增的图片不被覆盖
+  /// - 所属书籍仍有设定文件在本地，整本书被删除时不会误删云端图片
+  bool _shouldDeleteRemoteImage({
+    required String key,
+    required RemoteSyncFile remote,
+    required SyncBaselineRecord? baseline,
+    required Set<String> localKeys,
+  }) {
+    if (baseline == null || baseline.deleted) return false;
+    if (!isSettingImageSyncKey(key)) return false;
+
+    final String bookUuid = bookUuidOfSettingImageSyncKey(key);
+    if (bookUuid.isEmpty) return false;
+
+    // 书籍的设定文件整体缺失时视为书籍尚未就绪或已被删除，保留云端图片
+    final String settingsPrefix = '$kBooksKeyPrefix$bookUuid/settings/';
+    if (!localKeys.any((localKey) => localKey.startsWith(settingsPrefix))) {
+      return false;
+    }
+
+    return baseline.remoteContentId == remote.contentId;
   }
 }

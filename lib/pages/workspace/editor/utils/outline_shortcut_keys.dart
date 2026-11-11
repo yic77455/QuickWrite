@@ -29,9 +29,11 @@ class OutlineShortcutKeys {
     }
   }
 
-  /// 判断按键是否为绑定关键词快捷键（Alt+=）
-  static bool isBindKeywordKey(LogicalKeyboardKey key) =>
-      key == LogicalKeyboardKey.equal;
+  /// 判断按键是否为绑定关键词快捷键（Ctrl/Cmd+K）
+  static bool isKeywordKey(LogicalKeyboardKey key) => key == LogicalKeyboardKey.keyK;
+
+  /// 判断按键是否为添加关联快捷键（Ctrl/Cmd+L）
+  static bool isLinkKey(LogicalKeyboardKey key) => key == LogicalKeyboardKey.keyL;
 
   // ================= 颜色 =================
 

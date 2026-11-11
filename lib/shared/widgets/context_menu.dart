@@ -336,6 +336,12 @@ class ContextMenu extends StatefulWidget {
   /// 便于调用方在菜单显示前完成异步状态刷新（如剪贴板内容检测）。
   final FutureOr<void> Function(Offset position)? onSecondaryTapDown;
 
+  /// 右键拦截过滤（可选）
+  ///
+  /// 返回 false 时该位置的右键不弹出本菜单，事件交还给子组件处理，
+  /// 用于让子组件内部的输入框在该区域内使用自身的文字菜单。
+  final bool Function(Offset globalPosition)? shouldHandleSecondaryTap;
+
   /// 菜单关闭回调（可选）
   ///
   /// 当菜单被关闭（无论是点击外部、点击菜单项还是按ESC键）时触发。
@@ -383,6 +389,7 @@ class ContextMenu extends StatefulWidget {
     this.menuItems,
     this.getMenuItems,
     this.onSecondaryTapDown,
+    this.shouldHandleSecondaryTap,
     this.onDismissed,
     this.showIcons = true,
     this.fontSize,
@@ -472,10 +479,14 @@ class _SecondaryButtonGestureRecognizer extends EagerGestureRecognizer {
   /// 右键按下时的回调
   void Function(PointerDownEvent event)? onSecondaryDown;
 
+  /// 右键拦截过滤，返回 false 时不消费该右键，交由子组件处理
+  bool Function(Offset globalPosition)? shouldHandle;
+
   @override
   void addAllowedPointer(PointerDownEvent event) {
-    // 仅处理右键（buttons == 2），左键/中键等忽略并正常传递给子组件
-    if (event.buttons == 2) {
+    // 仅处理右键（buttons == 2），左键/中键等忽略并正常传递给子组件；
+    // 过滤回调放行的位置也不消费，使子组件内部的输入框能弹出自身的文字菜单
+    if (event.buttons == 2 && (shouldHandle?.call(event.position) ?? true)) {
       super.addAllowedPointer(event);
       onSecondaryDown?.call(event);
     }
@@ -583,6 +594,7 @@ class _ContextMenuState extends State<ContextMenu> {
             _SecondaryButtonGestureRecognizer>(
           () => _SecondaryButtonGestureRecognizer(),
           (_SecondaryButtonGestureRecognizer instance) {
+            instance.shouldHandle = widget.shouldHandleSecondaryTap;
             instance.onSecondaryDown = (PointerDownEvent event) {
               _handleTrigger(event.position);
             };

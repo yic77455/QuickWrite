@@ -79,22 +79,28 @@ class BookFolderService {
     return '${bookFolderPath(book)}${Platform.pathSeparator}settings${Platform.pathSeparator}$relativePath';
   }
 
+  /// 大纲合并伴生文件后缀
+  ///
+  /// 关键词、关联与备注统一存放在该文件中；
+  /// 与设定项文件同目录同名，扩展名替换为 `.json`。
+  static const String outlineMetaFileSuffix = '.json';
+
   /// 大纲折叠状态文件后缀
-  static const String _foldStateFileSuffix = '.fold.json';
+  ///
+  /// 折叠状态属于本地界面状态，单独存放且不参与云同步。
+  static const String foldStateFileSuffix = '.fold.json';
 
-  /// 大纲关键词文件后缀
-  static const String keywordFileSuffix = '.kw.json';
-
-  /// 大纲关联文件后缀
-  static const String linkFileSuffix = '.link.json';
+  /// 设定项附加图片的目录名
+  ///
+  /// 图片存放在设定项文件所在目录的 image 文件夹下，
+  /// 目录不存在时在插入图片时创建。
+  static const String settingImageDirName = 'image';
 
   /// 设定项的伴生文件后缀集合
   ///
-  /// 关键词与关联信息均由设定项正文派生，随正文一同创建、迁移与删除；
-  /// 折叠状态属于本地界面状态，不参与云同步，不在此列。
+  /// 合并伴生文件由设定项正文派生，随正文一同创建、迁移与删除。
   static const List<String> settingCompanionFileSuffixes = [
-    keywordFileSuffix,
-    linkFileSuffix,
+    outlineMetaFileSuffix,
   ];
 
   /// 由设定项文件路径派生指定后缀的伴生文件路径
@@ -111,24 +117,40 @@ class BookFolderService {
     return '$base$suffix';
   }
 
+  /// 由设定项文件路径派生合并伴生文件路径
+  static String? outlineMetaFilePath(String? settingItemFilePath) =>
+      companionFilePath(settingItemFilePath, outlineMetaFileSuffix);
+
   /// 由设定项文件路径派生大纲折叠状态文件路径
   ///
-  /// 折叠状态文件与设定项文件同目录同名，扩展名替换为 `.fold.json`，
-  /// 独立存放可避免折叠标记混入正文，影响导出与备份的内容。
+  /// 折叠状态文件与设定项文件同目录同名，扩展名替换为 `.fold.json`；
+  /// 该文件只在本机使用，不参与云同步。
   static String? foldStateFilePath(String? settingItemFilePath) =>
-      companionFilePath(settingItemFilePath, _foldStateFileSuffix);
+      companionFilePath(settingItemFilePath, foldStateFileSuffix);
 
-  /// 由设定项文件路径派生大纲关键词文件路径
-  static String? keywordFilePath(String? settingItemFilePath) =>
-      companionFilePath(settingItemFilePath, keywordFileSuffix);
+  /// 获取设定项附加图片所在目录
+  ///
+  /// 目录固定为设定项文件所在目录下的 image 文件夹；
+  /// 设定项路径为空时返回 null。
+  static String? settingImageDirectory(String? settingItemFilePath) {
+    if (settingItemFilePath == null || settingItemFilePath.isEmpty) return null;
+    final String parentPath = File(settingItemFilePath).parent.path;
+    return '$parentPath${Platform.pathSeparator}$settingImageDirName';
+  }
 
-  /// 由设定项文件路径派生大纲关联文件路径
-  static String? linkFilePath(String? settingItemFilePath) =>
-      companionFilePath(settingItemFilePath, linkFileSuffix);
+  /// 获取设定项附加图片的完整路径
+  ///
+  /// [imageFileName] 为空或设定项路径为空时返回 null。
+  static String? settingImageFilePath(String? settingItemFilePath, String imageFileName) {
+    if (imageFileName.isEmpty) return null;
+    final String? directory = settingImageDirectory(settingItemFilePath);
+    if (directory == null) return null;
+    return '$directory${Platform.pathSeparator}$imageFileName';
+  }
 
   /// 判断路径是否为设定项的伴生文件
   ///
-  /// 伴生文件由设定项内容派生（关键词、关联），删除后需要同步清理远端副本，
+  /// 伴生文件由设定项内容派生，删除后需要同步清理远端副本，
   /// 否则文件层会把本地缺失当成待补齐内容，重新下载已删除的旧文件。
   static bool isSettingCompanionFile(String path) =>
       settingCompanionFileSuffixes.any((suffix) => path.endsWith(suffix));

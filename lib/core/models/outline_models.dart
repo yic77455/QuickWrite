@@ -42,8 +42,20 @@ class OutlineNode {
   /// 节点绑定的关键词列表
   ///
   /// 一个节点可绑定多个关键词，关键词在整本书内唯一；
-  /// 持久化到设定项文件旁的伴生 `.kw.json`，不写入大纲 Markdown。
+  /// 持久化到设定项文件旁的合并伴生 `.json`，不写入大纲 Markdown。
   List<OutlineKeyword> keywords;
+
+  /// 节点备注文本
+  ///
+  /// 备注与图片共同构成节点的附加备注区，独立于节点正文；
+  /// 持久化到设定项文件旁的合并伴生 `.json`，不写入大纲 Markdown。
+  String note;
+
+  /// 节点附加图片的文件名（不含路径）
+  ///
+  /// 图片文件存放在设定项文件所在目录的 image 文件夹下，
+  /// 完整路径由设定项文件路径与文件名拼接得到；空字符串表示没有图片。
+  String imageFileName;
 
   OutlineNode({
     required this.id,
@@ -54,6 +66,8 @@ class OutlineNode {
     List<TextStyleRange>? styleRanges,
     this.foregroundColor,
     List<OutlineKeyword>? keywords,
+    this.note = '',
+    this.imageFileName = '',
   })  : children = children ?? [],
         styleRanges = styleRanges ?? [],
         keywords = keywords ?? [];
@@ -74,6 +88,9 @@ class OutlineNode {
       foregroundColor: foregroundColor,
       // 关键词为不可变对象，复制列表即可使快照与原节点互不影响
       keywords: List<OutlineKeyword>.of(keywords),
+      // 备注与图片文件名均为不可变字符串，直接复制即可
+      note: note,
+      imageFileName: imageFileName,
       children: children.map((c) => c.clone()).toList(),
     );
   }

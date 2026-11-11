@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -12,8 +13,10 @@ import 'package:quick_write/core/constants/punctuation_symbols.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/services/cache_services/outline_last_edit_cache_service.dart';
 import 'package:quick_write/core/services/workspace/book_folder_service.dart';
+import 'package:quick_write/core/services/workspace/outline_companion_store.dart';
 import 'package:quick_write/core/services/workspace/outline_keyword_service.dart';
 import 'package:quick_write/core/services/workspace/outline_link_service.dart';
+import 'package:quick_write/core/services/workspace/outline_note_service.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/providers/window_provider.dart';
 import 'package:quick_write/core/utils/batch_selection_controller.dart';
@@ -35,6 +38,7 @@ import 'package:quick_write/core/utils/word_count_utils.dart';
 import 'package:quick_write/core/models/outline_models.dart';
 import 'package:quick_write/core/models/outline_keyword.dart';
 import 'package:quick_write/core/models/outline_link.dart';
+import 'package:quick_write/core/models/outline_note.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 import 'utils/outline_shortcut_keys.dart';
 import 'widgets/outline_color_palette.dart';
@@ -426,6 +430,23 @@ class OutlineEditorState extends State<OutlineEditor>
   /// 关联文本随文字编辑移动位置，合并短时间内的多次修改，避免输入过程中反复写文件。
   Timer? _linkSaveTimer;
 
+  /// 大纲备注服务（读写备注伴生文件与附加图片）
+  final OutlineNoteService _noteService = OutlineNoteService();
+
+  /// 备注伴生文件的写入防抖定时器
+  ///
+  /// 备注内容随输入持续变化，合并短时间内的多次修改，避免反复写文件。
+  Timer? _noteSaveTimer;
+
+  /// 正在编辑备注的节点 ID（null 表示没有节点处于备注编辑状态）
+  String? _noteEditingNodeId;
+
+  /// 节点附加备注区的全局键（节点 ID → 键）
+  ///
+  /// 备注区内部包含输入框与图片，编辑器据此判断指针是否落在该区域，
+  /// 从而把手势交给备注输入框自身处理。
+  final Map<String, GlobalKey> _attachmentKeys = {};
+
   /// 节点折叠动画控制器（节点ID -> 控制器）
   ///
   /// 值从 1 收敛到 0 表示子节点收进圆点，从 0 增长到 1 表示子节点从圆点展开；
@@ -503,6 +524,7 @@ class OutlineEditorState extends State<OutlineEditor>
     _lastEditedPathSaveTimer?.cancel();
     _keywordSaveTimer?.cancel();
     _linkSaveTimer?.cancel();
+    _noteSaveTimer?.cancel();
     _scrollGuard.dispose();
     SettingsService.instance.removeListener(_onSettingsChanged);
     _undoManager.dispose();
@@ -569,13 +591,22 @@ class OutlineEditorState extends State<OutlineEditor>
         !_titleFocusNode.hasFocus) {
       _titleController.text = widget.title;
     }
-    // 大纲文件改名后同步迁移折叠状态文件
-    if (widget.filePath != oldWidget.filePath) {
+    // 大纲文件改名或移动后迁移伴生数据与图片
+    if (widget.filePath != oldWidget.filePath && !widget.readOnly) {
+      // 先取消防抖中的保存，避免迁移完成后旧路径又被写回新数据
+      _keywordSaveTimer?.cancel();
+      _linkSaveTimer?.cancel();
+      _noteSaveTimer?.cancel();
+      // 折叠状态为本地专用文件，随大纲文件迁移
       _renameFoldStateFile(oldWidget.filePath, widget.filePath);
-      // 关键词伴生文件同样随大纲文件迁移
-      widget.keywordService?.renameSettingKeywords(oldWidget.filePath, widget.filePath);
-      // 关联伴生文件同样随大纲文件迁移
-      _linkService.rename(oldWidget.filePath, widget.filePath);
+      // 关键词、关联与备注统一存放，一并迁移到新路径
+      OutlineCompanionStore.instance.move(oldWidget.filePath, widget.filePath);
+      // 节点附加图片随设定项所在目录一并迁移
+      _noteService.moveImages(
+        oldSettingItemFilePath: oldWidget.filePath,
+        newSettingItemFilePath: widget.filePath,
+        imageFileNames: _flattenAll().map((node) => node.imageFileName).toList(),
+      );
     }
     // 查找替换栏显示/隐藏导致额外顶边距变化时，记录变化量供 Layout 阶段补偿滚动偏移
     if (widget.extraTopPadding != oldWidget.extraTopPadding) {
@@ -1002,6 +1033,7 @@ class OutlineEditorState extends State<OutlineEditor>
       _focusNodes[id]?.dispose();
       _focusNodes.remove(id);
       _nodeTileKeys.remove(id);
+      _attachmentKeys.remove(id);
     }
   }
 
@@ -1050,6 +1082,8 @@ class OutlineEditorState extends State<OutlineEditor>
       await _loadKeywords();
       // 回填节点关联文本（伴生文件不存在时保持为空）
       await _loadLinks();
+      // 回填节点备注与附加图片（伴生文件不存在时保持为空）
+      await _loadNotes();
       // 恢复上次退出时的节点折叠状态
       await _loadFoldState();
     } catch (e) {
@@ -1221,6 +1255,8 @@ class OutlineEditorState extends State<OutlineEditor>
     _roots.clear();
     // 重新解析内容后旧的主题节点可能已不存在，回到显示全部节点的视图
     _focusNodeId = null;
+    // 节点 ID 全部重新生成，正在编辑备注的节点已不存在
+    _noteEditingNodeId = null;
     // 栈中保存 (节点, 深度) 对
     final stack = <(OutlineNode, int)>[];
 
@@ -1308,6 +1344,8 @@ class OutlineEditorState extends State<OutlineEditor>
       await _saveKeywords();
       // 关联文本位置随内容变化，与节点树一同落盘
       await _saveLinks();
+      // 节点备注与附加图片随内容变化，与节点树一同落盘
+      await _saveNotes();
       // 结构变化会改变节点路径，随内容一并刷新折叠状态
       _saveFoldState();
       // 节点路径同样可能变化，同步刷新缓存中的上一次编辑节点
@@ -1322,7 +1360,7 @@ class OutlineEditorState extends State<OutlineEditor>
   /// 折叠状态文件路径
   ///
   /// 与大纲文件同目录同名、扩展名替换为 `.fold.json`，
-  /// 独立存放可避免折叠标记混入正文，影响导出与备份的内容。
+  /// 独立存放且只在本机使用，不参与云同步。
   String? get _foldStateFilePath => BookFolderService.foldStateFilePath(widget.filePath);
 
   /// 从文件读取折叠状态并应用到当前大纲树
@@ -2044,6 +2082,179 @@ class OutlineEditorState extends State<OutlineEditor>
     return node;
   }
 
+  // ================= 节点备注与图片 =================
+
+  /// 从伴生文件读取备注与图片并回填到当前节点树
+  ///
+  /// 备注按「层级索引路径」与节点对应，与关键词、关联使用同一套路径规则；
+  /// 文件中已不存在的节点路径会被忽略。
+  Future<void> _loadNotes() async {
+    final OutlineNoteFile file = await _noteService.read(widget.filePath);
+    if (file.nodes.isEmpty) return;
+
+    for (final entry in file.nodes.entries) {
+      final OutlineNode? node = _nodeAtPath(entry.key);
+      if (node == null) continue;
+      node.note = entry.value.note;
+      node.imageFileName = entry.value.imageFileName;
+    }
+
+    if (mounted) setState(() {});
+  }
+
+  /// 将当前树中的备注与图片写入伴生文件
+  Future<void> _saveNotes() async {
+    if (widget.readOnly) return;
+    await _noteService.save(
+      settingItemFilePath: widget.filePath,
+      nodes: _collectNoteNodes(),
+    );
+  }
+
+  /// 安排一次备注伴生文件写入
+  ///
+  /// 备注输入与结构变化都会改变节点路径，连续操作时合并为一次写入。
+  void _scheduleNoteSave() {
+    if (widget.readOnly) return;
+    _noteSaveTimer?.cancel();
+    _noteSaveTimer = Timer(const Duration(milliseconds: 800), () {
+      _noteSaveTimer = null;
+      unawaited(_saveNotes());
+    });
+  }
+
+  /// 收集整棵树中存在备注或图片的节点
+  ///
+  /// 返回「节点路径 → 备注与图片数据」，仅包含有内容的节点。
+  Map<String, OutlineNoteData> _collectNoteNodes() {
+    final result = <String, OutlineNoteData>{};
+
+    void walk(OutlineNode node, String path) {
+      if (node.note.isNotEmpty || node.imageFileName.isNotEmpty) {
+        result[path] = OutlineNoteData(
+          note: node.note,
+          imageFileName: node.imageFileName,
+        );
+      }
+      for (int i = 0; i < node.children.length; i++) {
+        walk(node.children[i], '$path.$i');
+      }
+    }
+
+    for (int i = 0; i < _roots.length; i++) {
+      walk(_roots[i], '$i');
+    }
+    return result;
+  }
+
+  /// 开始编辑指定节点的备注
+  ///
+  /// 右键菜单选择「添加备注」或点击已有备注时进入编辑，
+  /// 备注区展开为多行输入框并自动获取焦点。
+  void _startNoteEditing(String nodeId) {
+    if (widget.readOnly) return;
+    if (_findNode(nodeId) == null) return;
+    if (_noteEditingNodeId == nodeId) return;
+
+    // 备注输入框拥有焦点时删除键用于编辑备注文字，
+    // 先清除节点选区，避免按键冒泡到编辑器时误删选中的节点
+    _selectedNodeIds.clear();
+    _selectAllLevel = 0;
+    _selectionAnchorIndex = null;
+
+    setState(() => _noteEditingNodeId = nodeId);
+  }
+
+  /// 结束指定节点的备注编辑
+  ///
+  /// 备注为空或只含空白字符时视为未填写，清空后隐藏备注区。
+  void _stopNoteEditing(String nodeId) {
+    if (_noteEditingNodeId != nodeId) return;
+
+    final OutlineNode? node = _findNode(nodeId);
+    if (node != null && node.note.isNotEmpty && node.note.trim().isEmpty) {
+      node.note = '';
+      _notifyContentChanged();
+      _scheduleNoteSave();
+    }
+
+    if (mounted) setState(() => _noteEditingNodeId = null);
+  }
+
+  /// 节点备注内容变化
+  ///
+  /// 备注输入过程中不刷新节点列表，由备注输入框自身维护显示内容。
+  void _onNodeNoteChanged(String nodeId, String note) {
+    if (widget.readOnly) return;
+    final OutlineNode? node = _findNode(nodeId);
+    if (node == null || node.note == note) return;
+    node.note = note;
+    _notifyContentChanged();
+    _scheduleNoteSave();
+  }
+
+  /// 选择图片并插入到指定节点
+  ///
+  /// 选中的图片会被复制到设定项文件所在目录的 image 文件夹，
+  /// 节点只记录文件名；替换已有图片时删除原图片文件。
+  Future<void> _pickImageForNode(String nodeId) async {
+    if (widget.readOnly) return;
+    if (widget.filePath == null || widget.filePath!.isEmpty) return;
+    if (_findNode(nodeId) == null) return;
+
+    FilePickerResult? result;
+    try {
+      result = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: false,
+      );
+    } catch (e) {
+      debugPrint('选择备注图片失败: $e');
+      return;
+    }
+
+    final String? sourcePath = result?.files.single.path;
+    if (sourcePath == null || !mounted) return;
+
+    final String? imageFileName = await _noteService.importImage(
+      settingItemFilePath: widget.filePath,
+      sourcePath: sourcePath,
+    );
+    if (imageFileName == null || !mounted) return;
+
+    final OutlineNode? node = _findNode(nodeId);
+    if (node == null) return;
+
+    final String oldImageFileName = node.imageFileName;
+    setState(() => node.imageFileName = imageFileName);
+    _notifyContentChanged();
+    unawaited(_saveNotes());
+
+    // 旧图片不再被引用，删除对应文件避免残留
+    if (oldImageFileName.isNotEmpty) {
+      unawaited(_noteService.deleteImage(
+        settingItemFilePath: widget.filePath,
+        imageFileName: oldImageFileName,
+      ));
+    }
+  }
+
+  /// 删除指定节点的图片并同步移除图片文件
+  Future<void> _deleteNodeImage(String nodeId) async {
+    if (widget.readOnly) return;
+    final OutlineNode? node = _findNode(nodeId);
+    if (node == null || node.imageFileName.isEmpty) return;
+
+    final String imageFileName = node.imageFileName;
+    setState(() => node.imageFileName = '');
+    _notifyContentChanged();
+    unawaited(_saveNotes());
+    await _noteService.deleteImage(
+      settingItemFilePath: widget.filePath,
+      imageFileName: imageFileName,
+    );
+  }
+
   // ================= 统计与通知 =================
 
   /// 通知内容已变化
@@ -2111,6 +2322,8 @@ class OutlineEditorState extends State<OutlineEditor>
     // 结构变化会改变节点路径，同步刷新折叠状态与关键词索引，避免对应到错误的节点
     _saveFoldState();
     _syncKeywordsToService();
+    // 备注与图片同样按节点路径记录，结构变化后刷新伴生文件
+    _scheduleNoteSave();
   }
 
   // ================= 撤销/恢复 =================
@@ -2243,11 +2456,17 @@ class OutlineEditorState extends State<OutlineEditor>
     if (_focusNodeId != null && _findNode(_focusNodeId!) == null) {
       _focusNodeId = null;
     }
+    // 撤销后正在编辑备注的节点可能已不存在，退出备注编辑
+    if (_noteEditingNodeId != null && _findNode(_noteEditingNodeId!) == null) {
+      _noteEditingNodeId = null;
+    }
 
     setState(() {});
 
     // 撤销/重做可能恢复关键词，同步刷新书籍级索引
     _syncKeywordsToService();
+    // 撤销/重做可能恢复备注与图片，刷新伴生文件
+    _scheduleNoteSave();
 
     // 同步恢复焦点和选区，不依赖 post-frame，避免多次撤销/重做时回调交叉
     _restoreFocusFromSnapshot(snapshot);
@@ -3860,14 +4079,21 @@ class OutlineEditorState extends State<OutlineEditor>
   // ================= 命中检测 =================
 
   /// 查找节点对应的 RenderEditable（文本渲染对象）
+  ///
+  /// 只返回节点文字本身所在的渲染对象：附加备注区处于编辑状态时同样包含
+  /// 可编辑文本，遍历时整体跳过，避免取到备注输入框的渲染对象。
   RenderEditable? _findRenderEditable(String nodeId) {
     final key = _nodeTileKeys[nodeId];
     final context = key?.currentContext;
     if (context == null) return null;
     final root = context.findRenderObject();
     if (root == null) return null;
+
+    // 备注区根节点，遍历到它时不再向下查找
+    final attachmentRoot = _attachmentKeys[nodeId]?.currentContext?.findRenderObject();
     RenderEditable? result;
     void visit(RenderObject child) {
+      if (result != null || child == attachmentRoot) return;
       if (child is RenderEditable) {
         result = child;
         return;
@@ -4090,6 +4316,28 @@ class OutlineEditorState extends State<OutlineEditor>
     return globalPosition.dy >= rect.top && globalPosition.dy <= rect.bottom;
   }
 
+  /// 判断全局坐标是否落在指定节点的附加备注区内
+  bool _isPositionOnAttachmentOf(String nodeId, Offset globalPosition) {
+    final RenderObject? renderObject = _attachmentKeys[nodeId]?.currentContext?.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.attached) return false;
+    final Rect rect = MatrixUtils.transformRect(
+      renderObject.getTransformTo(null),
+      Offset.zero & renderObject.size,
+    );
+    return rect.contains(globalPosition);
+  }
+
+  /// 判断全局坐标是否落在任意节点的附加备注区内
+  ///
+  /// 备注区包含图片缩略图与备注输入框，指针落在其中时编辑器的拖拽选区手势
+  /// 需要让出，保证备注文字选中、图片点击等交互不被节点选区抢走。
+  bool _isPositionOnNodeAttachment(Offset globalPosition) {
+    for (final String nodeId in _attachmentKeys.keys) {
+      if (_isPositionOnAttachmentOf(nodeId, globalPosition)) return true;
+    }
+    return false;
+  }
+
   /// 判断全局坐标是否落在滚动条所在的右侧条带上
   ///
   /// 滚动条 thumb 位于可滚动区域的右边缘，宽度等于 [editorScrollbarThickness]。
@@ -4123,9 +4371,16 @@ class OutlineEditorState extends State<OutlineEditor>
       return;
     }
 
-    // 指针位于滚动条区域时跳过编辑器自身的指针处理，让滚动条正常响应点击与拖拽
+    // 指针落在滚动条区域时跳过编辑器自身的指针处理，让滚动条正常响应点击与拖拽
     if (_isPositionOnScrollbar(event.position)) {
       _dragStartPosition = null;
+      return;
+    }
+
+    // 指针落在节点附加备注区时跳过编辑器级处理，交互交由备注输入框与图片控件
+    if (_isPositionOnNodeAttachment(event.position)) {
+      _dragStartPosition = null;
+      _dragMode = _DragMode.none;
       return;
     }
 
@@ -4166,6 +4421,11 @@ class OutlineEditorState extends State<OutlineEditor>
 
     if (_dragMode == _DragMode.none && _dragStartPosition != null) {
       final startPosition = _dragStartPosition!;
+      // 备注区内的点击由备注控件处理，不在此清除节点选区或抢占焦点
+      if (_isPositionOnNodeAttachment(startPosition)) {
+        _dragStartPosition = null;
+        return;
+      }
       // 批量选择模式下节点选中由节点行自身处理，不在此处清除节点选区
       if (!_isBatchSelectionMode) {
         if (_isPositionOnTextField(startPosition)) {
@@ -5708,15 +5968,6 @@ class OutlineEditorState extends State<OutlineEditor>
     final currentFg = _getContextMenuColor(targetNodes, styleSelection, true);
     final currentBg = _getContextMenuColor(targetNodes, styleSelection, false);
 
-    // 关联文本仅作用于单个节点的文字选区，节点选区下不提供
-    final OutlineNode? contextNode = nodeId != null ? _findNode(nodeId) : null;
-    final TextSelection? contextSelection = nodeId != null ? _controllers[nodeId]?.selection : null;
-    final bool hasTextSelection = contextSelection != null &&
-        contextSelection.isValid &&
-        !contextSelection.isCollapsed;
-    final bool canAddLink =
-        !isReadOnly && !hasNodeSelection && contextNode != null && hasTextSelection;
-
     return [
       // 标题/正文格式行
       ContextMenuItem(label: _buildHeadingRow(nodeId), enabled: false),
@@ -5801,25 +6052,60 @@ class OutlineEditorState extends State<OutlineEditor>
           ),
         ],
       ),
-
-      ContextMenuItem.divider(),
-
-      // 节点内容绑定区：关键词与关联
-      // 关键词：单节点绑定，节点选区下不提供（批量绑定语义不清）
-      ContextMenuItem(
-        labelText: '关键词',
-        icon: Icons.sell_outlined,
-        enabled: !isReadOnly && !hasNodeSelection && hasTarget,
-        onTap: () => _showKeywordCardForContextMenu(nodeId),
-      ),
-      // 关联：把选中文字关联到其他正文文件或设定文件
-      ContextMenuItem(
-        labelText: '添加关联',
-        icon: Icons.link,
-        enabled: canAddLink,
-        onTap: () => _showLinkDialog(nodeId),
-      ),
     ];
+  }
+
+  /// 构建「插入」子菜单
+  ///
+  /// 集中节点内容绑定与附加内容的入口：关键词、关联、备注、图片。
+  /// 关键词与关联作用于单个节点及其文字选区，备注与图片属于节点附加内容，
+  /// 节点选区与批量选择下均不提供。
+  ContextMenuItem _buildInsertContextMenu(String? nodeId) {
+    final controller = nodeId != null ? _controllers[nodeId] : null;
+    final bool hasTarget = nodeId != null && controller != null;
+    final bool hasNodeSelection = _selectedNodeIds.isNotEmpty;
+    final bool isReadOnly = widget.readOnly;
+
+    // 关联文本仅作用于节点内的文字选区
+    final TextSelection? selection = controller?.selection;
+    final bool hasTextSelection =
+        selection != null && selection.isValid && !selection.isCollapsed;
+    final bool canAddNote = !isReadOnly && !hasNodeSelection && !_isBatchSelectionMode && hasTarget;
+
+    return ContextMenuItem(
+      labelText: '插入',
+      icon: Icons.library_add_outlined,
+      children: [
+        ContextMenuItem(
+          labelText: '关键词',
+          icon: Icons.sell_outlined,
+          enabled: !isReadOnly && !hasNodeSelection && hasTarget,
+          onTap: () => _showKeywordCardForContextMenu(nodeId),
+        ),
+        ContextMenuItem(
+          labelText: '关联',
+          icon: Icons.link,
+          enabled: !isReadOnly && !hasNodeSelection && hasTarget && hasTextSelection,
+          onTap: () => _showLinkDialog(nodeId),
+        ),
+        ContextMenuItem(
+          labelText: '备注',
+          icon: Icons.post_add_rounded,
+          enabled: canAddNote,
+          onTap: () {
+            if (nodeId != null) _startNoteEditing(nodeId);
+          },
+        ),
+        ContextMenuItem(
+          labelText: '图片',
+          icon: Icons.image_outlined,
+          enabled: canAddNote && widget.filePath != null,
+          onTap: () {
+            if (nodeId != null) _pickImageForNode(nodeId);
+          },
+        ),
+      ],
+    );
   }
 
   /// 从右键菜单打开目标节点的关键词卡片
@@ -5832,6 +6118,7 @@ class OutlineEditorState extends State<OutlineEditor>
   ///
   /// 菜单结构：
   /// - 文字样式相关菜单项（标题级别、文字样式、字体颜色、字底颜色）
+  /// - 插入子菜单：关键词、关联、备注、图片
   /// - 常规菜单项：剪切、复制、粘贴、删除、全选
   List<ContextMenuItem> _buildContextMenuItems() {
     final nodeId = _contextMenuNodeId;
@@ -5845,6 +6132,11 @@ class OutlineEditorState extends State<OutlineEditor>
     return [
       // 文字样式相关菜单项
       ..._buildStyleContextMenuItems(nodeId),
+
+      ContextMenuItem.divider(),
+
+      // 节点内容绑定与附加内容入口
+      _buildInsertContextMenu(nodeId),
 
       ContextMenuItem.divider(),
 
@@ -6200,9 +6492,15 @@ class OutlineEditorState extends State<OutlineEditor>
       }
     }
 
-    // Alt+=：打开当前节点的关键词绑定卡片
-    if (isAlt && !isCommand && OutlineShortcutKeys.isBindKeywordKey(event.logicalKey)) {
+    // Ctrl/Cmd+K：打开当前节点的关键词绑定卡片
+    if (isCommand && !isAlt && OutlineShortcutKeys.isKeywordKey(event.logicalKey)) {
       _showKeywordCard(nodeId);
+      return KeyEventResult.handled;
+    }
+
+    // Ctrl/Cmd+L：为当前节点选中的文字添加关联
+    if (isCommand && !isAlt && OutlineShortcutKeys.isLinkKey(event.logicalKey)) {
+      _showLinkDialog(nodeId);
       return KeyEventResult.handled;
     }
 
@@ -6216,11 +6514,16 @@ class OutlineEditorState extends State<OutlineEditor>
       return KeyEventResult.handled;
     }
 
-    // Enter：创建同级新节点（Ctrl/Cmd+Enter 切换删除线）
+    // Enter：创建同级新节点
+    // Shift+Enter：添加/编辑备注；Alt+Enter：插入图片；Ctrl/Cmd+Enter：切换删除线
     if (event.logicalKey == LogicalKeyboardKey.enter) {
-      if (isCommand || isAlt) {
+      if (isShift && !isCommand && !isAlt) {
+        _startNoteEditing(nodeId);
+      } else if (isAlt && !isCommand && !isShift) {
+        _pickImageForNode(nodeId);
+      } else if (isCommand || isAlt) {
         _toggleTextStyle([nodeId], TextStyleFlags.toggleStrikethrough);
-      } else if (!isShift) {
+      } else {
         _createSibling(nodeId);
       }
       return KeyEventResult.handled;
@@ -6379,12 +6682,22 @@ class OutlineEditorState extends State<OutlineEditor>
       return KeyEventResult.ignored;
     }
 
-    // Alt+=：为活动节点打开关键词绑定卡片（存在节点选区时不响应）
-    if (isAlt && !isCommand && _selectedNodeIds.isEmpty &&
-        OutlineShortcutKeys.isBindKeywordKey(event.logicalKey)) {
+    // Ctrl/Cmd+K：为活动节点打开关键词绑定卡片（存在节点选区时不响应）
+    if (isCommand && !isAlt && _selectedNodeIds.isEmpty &&
+        OutlineShortcutKeys.isKeywordKey(event.logicalKey)) {
       final String? activeNodeId = _activeNodeId;
       if (activeNodeId != null) {
         _showKeywordCard(activeNodeId);
+        return KeyEventResult.handled;
+      }
+    }
+
+    // Ctrl/Cmd+L：为活动节点选中的文字添加关联（存在节点选区时不响应）
+    if (isCommand && !isAlt && _selectedNodeIds.isEmpty &&
+        OutlineShortcutKeys.isLinkKey(event.logicalKey)) {
+      final String? activeNodeId = _activeNodeId;
+      if (activeNodeId != null) {
+        _showLinkDialog(activeNodeId);
         return KeyEventResult.handled;
       }
     }
@@ -7427,7 +7740,8 @@ class OutlineEditorState extends State<OutlineEditor>
                                           _isPositionOnScrollbar(position) ||
                                           _isPositionOnTitle(position) ||
                                           _isPositionOnNodeDot(position) ||
-                                          _isPositionOnNodeArrow(position);
+                                          _isPositionOnNodeArrow(position) ||
+                                          _isPositionOnNodeAttachment(position);
                                     },
                                   ),
                             }
@@ -7714,6 +8028,12 @@ class OutlineEditorState extends State<OutlineEditor>
       itemBuilder: (context, index) => ContextMenu(
         getMenuItems: _buildContextMenuItems,
         onSecondaryTapDown: _handleSecondaryTapDown,
+        // 备注输入框编辑时右键交还输入框自身，使用默认的文字编辑菜单
+        shouldHandleSecondaryTap: (position) {
+          final String? editingNoteNodeId = _noteEditingNodeId;
+          return editingNoteNodeId == null ||
+              !_isPositionOnAttachmentOf(editingNoteNodeId, position);
+        },
         onDismissed: _handleContextMenuDismissed,
         enableMobileLongPress: !PlatformCapabilities.isMobile,
         child: _buildNodeTile(
@@ -7920,6 +8240,18 @@ class OutlineEditorState extends State<OutlineEditor>
       onDotTap: !_isBatchSelectionMode ? () => _enterNodeTopic(flatNode.node.id) : null,
       // 点击关联文本跳转到关联目标
       onLinkTap: widget.readOnly || _isBatchSelectionMode ? null : _handleLinkTap,
+      // 节点附加备注区：图片路径按设定文件所在目录解析
+      imagePath: BookFolderService.settingImageFilePath(
+            widget.filePath,
+            flatNode.node.imageFileName,
+          ) ??
+          '',
+      isEditingNote: _noteEditingNodeId == flatNode.node.id,
+      onNoteChanged: (note) => _onNodeNoteChanged(flatNode.node.id, note),
+      onStartNoteEdit: () => _startNoteEditing(flatNode.node.id),
+      onStopNoteEdit: () => _stopNoteEditing(flatNode.node.id),
+      onDeleteNodeImage: () => _deleteNodeImage(flatNode.node.id),
+      attachmentKey: _attachmentKeys.putIfAbsent(flatNode.node.id, () => GlobalKey()),
       isDragging: _reorderNodeId == flatNode.node.id,
       // 折叠动画进度：子节点行据此收进父节点圆点，节点自身据此同步圆点轮廓
       subtreeFoldProgress: displayRow.foldProgress,

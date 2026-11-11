@@ -143,7 +143,7 @@ class WorkspaceIndex {
 /// 将本地数据库记录与磁盘文件映射为「逻辑文件表」，供同步比对使用。
 /// 索引范围包括：
 /// - 书籍的章节正文（归档包模式下按每 [kChapterChunkSize] 章合并，其余情况逐章）
-/// - 书籍的设定项正文、封面、自定义高亮配置
+/// - 书籍的设定项正文、伴生文件与备注图片、封面、自定义高亮配置
 /// - 用户自定义的取名词典
 /// - 用户自定义主题
 /// - 应用配置文件
@@ -183,6 +183,7 @@ class WorkspaceIndexer {
       files: files,
       plainPaths: plainPaths,
       archiveMembers: archiveMembers,
+      dirMappings: dirMappings,
       collectedHashes: collectedHashes,
       packChapters: packChapters,
     );
@@ -234,6 +235,7 @@ class WorkspaceIndexer {
     required List<LocalSyncFile> files,
     required Map<String, String> plainPaths,
     required Map<String, List<ChapterArchiveMember>> archiveMembers,
+    required Map<String, String> dirMappings,
     required Map<String, LocalHashCacheEntry> collectedHashes,
     required bool packChapters,
   }) async {
@@ -282,6 +284,14 @@ class WorkspaceIndexer {
         );
       }
 
+      // 备注图片统一登记「书籍/图片目录」前缀映射，
+      // 使远端新增的图片也能定位到本机的 settings 目录
+      dirMappings['$_booksKeyPrefix${book.uuid}/$kSettingImagesKeySegment/'] =
+          _joinPath([bookFolder, _settingsDirName]);
+
+      // 备注图片按目录扫描，同一目录下的多个设定项只需扫描一次
+      final Set<String> scannedImageDirs = {};
+
       // 设定项正文
       for (final item
           in settingItemsByBook[book.uuid] ?? const <SettingItemModel>[]) {
@@ -299,10 +309,10 @@ class WorkspaceIndexer {
           localPath: settingLocalPath,
         );
 
-        // 关键词伴生文件：与设定项文件同目录同名
-        final String? keywordLocalPath =
-            BookFolderService.keywordFilePath(settingLocalPath);
-        if (keywordLocalPath != null) {
+        // 大纲合并伴生文件：关键词、关联与备注统一存放
+        final String? metaLocalPath =
+            BookFolderService.outlineMetaFilePath(settingLocalPath);
+        if (metaLocalPath != null) {
           await _collectPlainFile(
             baselines: baselines,
             files: files,
@@ -310,26 +320,23 @@ class WorkspaceIndexer {
             key: settingCompanionSyncKeyOf(
               book.uuid,
               item.uuid,
-              BookFolderService.keywordFileSuffix,
+              BookFolderService.outlineMetaFileSuffix,
             ),
-            localPath: keywordLocalPath,
+            localPath: metaLocalPath,
           );
         }
 
-        // 关联伴生文件：与设定项文件同目录同名
-        final String? linkLocalPath =
-            BookFolderService.linkFilePath(settingLocalPath);
-        if (linkLocalPath != null) {
-          await _collectPlainFile(
+        // 节点附加图片：设定项文件所在目录下的 image 文件夹
+        final String? imageDirPath =
+            BookFolderService.settingImageDirectory(settingLocalPath);
+        if (imageDirPath != null && scannedImageDirs.add(imageDirPath)) {
+          await _collectSettingImages(
+            bookUuid: book.uuid,
+            settingsDirPath: _joinPath([bookFolder, _settingsDirName]),
+            imageDirPath: imageDirPath,
             baselines: baselines,
             files: files,
             plainPaths: plainPaths,
-            key: settingCompanionSyncKeyOf(
-              book.uuid,
-              item.uuid,
-              BookFolderService.linkFileSuffix,
-            ),
-            localPath: linkLocalPath,
           );
         }
       }
@@ -617,6 +624,56 @@ class WorkspaceIndexer {
         contentHash: resolved.hash,
       ),
     );
+  }
+
+  /// 收集设定项 image 目录下的全部图片
+  ///
+  /// 图片目录直接位于设定项文件所在目录下，逻辑键记录其相对 settings 目录的路径，
+  /// 云端按同一相对路径还原，使不同分组下的同名图片互不覆盖。
+  Future<void> _collectSettingImages({
+    required String bookUuid,
+    required String settingsDirPath,
+    required String imageDirPath,
+    required Map<String, SyncBaselineRecord> baselines,
+    required List<LocalSyncFile> files,
+    required Map<String, String> plainPaths,
+  }) async {
+    final Directory dir = Directory(imageDirPath);
+    if (!await dir.exists()) return;
+
+    // 图片目录相对 settings 目录的路径，例如 `image` 或 `人物/image`
+    final String relativeDir = _relativePathOf(imageDirPath, settingsDirPath);
+
+    await for (final entity in dir.list(followLinks: false)) {
+      if (entity is! File) continue;
+      final String fileName = entity.path.split(Platform.pathSeparator).last;
+      // 跳过空的以及同步过程产生的临时文件
+      if (fileName.isEmpty || fileName.endsWith(kSyncTempSuffix)) continue;
+
+      final String relativeKey =
+          relativeDir.isEmpty ? fileName : '$relativeDir/$fileName';
+      await _collectPlainFile(
+        baselines: baselines,
+        files: files,
+        plainPaths: plainPaths,
+        key: settingImageSyncKeyOf(bookUuid, relativeKey),
+        localPath: entity.path,
+      );
+    }
+  }
+
+  /// 计算 [path] 相对 [parentPath] 的路径，统一使用正斜杠分隔
+  ///
+  /// 路径不在父目录下时返回空字符串，交由调用方按目录自身处理。
+  String _relativePathOf(String path, String parentPath) {
+    final String prefix = parentPath.endsWith(Platform.pathSeparator)
+        ? parentPath
+        : '$parentPath${Platform.pathSeparator}';
+    if (!path.startsWith(prefix)) return '';
+    return path
+        .substring(prefix.length)
+        .split(Platform.pathSeparator)
+        .join('/');
   }
 
   /// 解析文件内容特征

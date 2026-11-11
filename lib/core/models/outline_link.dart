@@ -2,7 +2,7 @@
 ///
 /// 描述大纲编辑器中被关联的文本片段及其跳转目标。
 /// 文本片段的位置记录在节点的样式区间中（通过关联标识关联），
-/// 关联目标信息持久化到设定项文件旁的伴生 `.link.json`。
+/// 关联目标信息持久化到设定项文件旁的合并伴生 `.json`。
 library;
 
 /// 关联目标类型
@@ -156,7 +156,7 @@ class OutlineLinkRange {
       };
 }
 
-/// 单个设定项的关联伴生文件内容
+/// 单个设定项的关联数据（从统一伴生文件中读取的关联部分）
 class OutlineLinkFile {
   /// 关联标识到关联目标的映射
   final Map<String, OutlineLinkTarget> links;
@@ -168,7 +168,4 @@ class OutlineLinkFile {
     this.links = const {},
     this.nodes = const {},
   });
-
-  /// 空文件内容
-  static const OutlineLinkFile empty = OutlineLinkFile();
 }
