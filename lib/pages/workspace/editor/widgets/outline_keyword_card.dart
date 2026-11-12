@@ -1,5 +1,4 @@
 import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/models/outline_keyword.dart';
 import 'package:quick_write/core/utils/color_utils.dart';
@@ -42,6 +41,7 @@ class OutlineKeywordCard extends StatefulWidget {
       title: '节点关键词',
       subtitle: '同一关键词只能绑定一个节点',
       titleIcon: Icons.sell_outlined,
+      titleAction: _buildHelpButton(context),
       titleFontSize: 15,
       width: width,
       // 高度随关键词数量自适应，超出该高度时内容整体滚动
@@ -54,8 +54,110 @@ class OutlineKeywordCard extends StatefulWidget {
     );
   }
 
+  /// 构建标题栏的帮助按钮，点击弹出功能说明
+  static Widget _buildHelpButton(BuildContext context) {
+    return CursorTooltipTarget(
+      tooltipContent: const Text('功能说明'),
+      // 按钮整体上移，使图标与标题文字视觉居中对齐
+      child: Transform.translate(
+        offset: const Offset(0, -1),
+        child: IconButton(
+          onPressed: () => _showHelp(context),
+          icon: const Icon(Icons.help_outline_rounded, size: 16),
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
+          visualDensity: VisualDensity.compact,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+
+  /// 弹出功能说明弹窗
+  ///
+  /// 说明在正文编辑器中按住 Ctrl 键悬停关键词即可预览所绑定的节点信息，
+  /// 并以动图演示该交互效果。
+  static Future<void> _showHelp(BuildContext context) {
+    return showDialogBase<void>(
+      context: context,
+      title: '功能说明',
+      subtitle: '在正文编辑器中快速查看绑定了关键词的节点信息',
+      titleIcon: Icons.lightbulb_outline_rounded,
+      titleFontSize: 15,
+      width: 600,
+      height: 620,
+      adaptiveHeight: true,
+      content: const _KeywordPreviewHelpContent(),
+    );
+  }
+
   @override
   State<OutlineKeywordCard> createState() => _OutlineKeywordCardState();
+}
+
+/// 功能说明内容
+///
+/// 说明关键词预览的操作方式，并以动图演示在正文编辑器中悬停关键词的预览效果。
+class _KeywordPreviewHelpContent extends StatelessWidget {
+  /// 功能演示动图路径
+  static const String _previewImage = 'assets/image/Preview_Keywords.gif';
+
+  const _KeywordPreviewHelpContent();
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colorScheme = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text.rich(
+            TextSpan(
+              style: TextStyle(fontSize: 13, height: 1.6, color: colorScheme.onSurface.withValues(alpha: 0.85)),
+              children: [
+                const TextSpan(text: '为节点绑定关键词后，可在正文编辑器中按住 '),
+                // 键名渲染为按键样式，与正文文字区分
+                WidgetSpan(
+                  alignment: PlaceholderAlignment.middle,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: colorScheme.surfaceContainerLowest,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: colorScheme.outlineVariant),
+                    ),
+                    child: Text(
+                      'Ctrl',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        height: 1.2,
+                        letterSpacing: 0.3,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ),
+                const TextSpan(text: ' 键，将鼠标移到关键词上，预览所绑定的节点信息：'),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          // 演示动图：圆角裁剪并加浅色底，图片按原始比例完整显示
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: ColoredBox(
+              color: colorScheme.surfaceContainerHigh,
+              child: Image.asset(_previewImage, fit: BoxFit.contain),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _OutlineKeywordCardState extends State<OutlineKeywordCard> {

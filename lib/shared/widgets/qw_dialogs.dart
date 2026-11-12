@@ -43,6 +43,7 @@ const double _richHeaderCloseRise = 6;
 /// [draggable] 是否允许拖拽，默认为 true；移动端始终禁用拖拽
 /// [dialogInteractiveNotifier] 动态控制对话框的交互状态（拖拽和关闭），为 false 时禁止拖拽和点击遮罩关闭
 /// [titleIcon] 标题栏图标，为空时标题栏只显示主标题
+/// [titleAction] 标题文字右侧的操作组件（如帮助按钮），为空时不显示
 /// [subtitle] 标题栏副标题，为空时不显示副标题
 ///
 /// 移动端会将弹窗宽度收窄至左右两侧各留出 [_mobileDialogHorizontalMargin] 的间距
@@ -51,6 +52,7 @@ Future<T?> showDialogBase<T>({
   required String title,
   required Widget content,
   IconData? titleIcon,
+  Widget? titleAction,
   String? subtitle,
   double width = 400,
   double height = 300,
@@ -81,6 +83,7 @@ Future<T?> showDialogBase<T>({
       title: title,
       content: content,
       titleIcon: titleIcon,
+      titleAction: titleAction,
       subtitle: subtitle,
       width: effectiveWidth,
       height: height,
@@ -100,6 +103,9 @@ class _DraggableDialog extends StatefulWidget {
   final String title;
   final Widget content;
   final IconData? titleIcon;
+
+  /// 标题文字右侧的操作组件（如帮助按钮）
+  final Widget? titleAction;
   final String? subtitle;
   final double width;
   final double height;
@@ -117,6 +123,7 @@ class _DraggableDialog extends StatefulWidget {
     required this.width,
     required this.height,
     this.titleIcon,
+    this.titleAction,
     this.subtitle,
     required this.showCloseButton,
     this.adaptiveHeight = false,
@@ -310,12 +317,23 @@ class _DraggableDialogState extends State<_DraggableDialog> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          widget.title,
-                          style: context.titleLarge?.copyWith(
-                            fontSize: widget.titleFontSize,
-                            fontWeight: FontWeight.w600,
-                          ),
+                        // 标题行：主标题占满剩余宽度，操作组件紧跟标题文字之后
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                widget.title,
+                                style: context.titleLarge?.copyWith(
+                                  fontSize: widget.titleFontSize,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            if (widget.titleAction != null) ...[
+                              const SizedBox(width: 2),
+                              widget.titleAction!,
+                            ],
+                          ],
                         ),
                         // 副标题：补充说明弹窗用途
                         if (widget.subtitle != null) ...[

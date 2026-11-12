@@ -247,7 +247,7 @@ class OutlineKeywordHoverCard extends StatelessWidget {
                 Row(
                   children: [
                     Icon(
-                      Icons.menu_book_outlined,
+                      Icons.account_tree_outlined,
                       size: 12,
                       color: colorScheme.onSurfaceVariant,
                     ),

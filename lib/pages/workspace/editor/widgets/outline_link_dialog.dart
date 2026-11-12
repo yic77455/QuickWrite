@@ -199,7 +199,7 @@ class _OutlineLinkDialogState extends State<OutlineLinkDialog> {
             _buildModeChip(
               type: OutlineLinkTargetType.setting,
               label: '设定文件',
-              icon: Icons.menu_book_outlined,
+              icon: Icons.account_tree_outlined,
               colorScheme: colorScheme,
             ),
           ],
@@ -361,7 +361,7 @@ class _OutlineLinkDialogState extends State<OutlineLinkDialog> {
             Icon(
               file.type == OutlineLinkTargetType.chapter
                   ? Icons.article_outlined
-                  : Icons.menu_book_outlined,
+                  : Icons.account_tree_outlined,
               size: 18,
               color: colorScheme.onSurfaceVariant,
             ),
