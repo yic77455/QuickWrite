@@ -7,6 +7,7 @@ import 'package:quick_write/core/models/setting_group.dart';
 import 'package:quick_write/core/models/setting_item.dart';
 import 'package:quick_write/core/models/volume.dart';
 import 'package:quick_write/core/services/app_paths.dart';
+import 'package:quick_write/core/services/workspace/outline_companion_store.dart';
 import 'package:quick_write/core/utils/docx_builder.dart';
 import 'package:quick_write/core/utils/relative_path_utils.dart';
 import 'package:path/path.dart' as p;
@@ -264,7 +265,8 @@ class BookExportService {
     if (settingItems.isNotEmpty) {
       // 未分组设定项放到最后
       final sortedSettings = [...settingItems.where((i) => i.groupUuid.isNotEmpty), ...settingItems.where((i) => i.groupUuid.isEmpty)];
-      final settingFileName = _sanitizeFileName('${book.title}（设定）') + extension;
+      final settingBaseName = _sanitizeFileName('${book.title}（设定）');
+      final settingFileName = settingBaseName + extension;
       final settingFilePath = p.join(exportDir, settingFileName);
 
       if (format == ExportFormat.txt) {
@@ -337,6 +339,13 @@ class BookExportService {
 
         await docx.save(settingFilePath);
       }
+
+      // 合并导出没有单个正文文件，伴生文件统一归档到附件目录
+      await _exportMergedSettingCompanions(
+        settingItems: settingItems,
+        bookFolderPath: bookFolderPath,
+        attachmentRoot: p.join(exportDir, '$settingBaseName附件'),
+      );
     }
 
     return ExportResult(
@@ -448,6 +457,15 @@ class BookExportService {
           }
           await docx.save(filePath);
         }
+
+        // 伴生文件与导出的设定文件同名同目录，保证关键词、关联、
+        // 备注、表格与图片在归档后仍能与正文配对
+        await _exportSettingCompanion(
+          bookFolderPath: bookFolderPath,
+          relativePath: item.filePath,
+          targetDir: settingDir,
+          targetBaseName: _sanitizeFileName(item.title),
+        );
 
         processedItems++;
         onProgress?.call(processedItems, totalItems, '正在导出: ${item.title}');
@@ -952,6 +970,15 @@ class BookExportService {
       await docx.save(filePath);
     }
 
+    // 伴生文件与导出的设定文件同名同目录，保证关键词、关联、
+    // 备注、表格与图片在归档后仍能与正文配对
+    await _exportSettingCompanion(
+      bookFolderPath: bookFolderPath,
+      relativePath: settingItem.filePath,
+      targetDir: exportDir,
+      targetBaseName: _sanitizeFileName(settingItem.title),
+    );
+
     onProgress?.call(1, 1, '导出完成');
 
     return ExportResult(
@@ -978,8 +1005,8 @@ class BookExportService {
     // 未分组设定项放到最后
     final sortedSettings = [...settingItems.where((i) => i.groupUuid.isNotEmpty), ...settingItems.where((i) => i.groupUuid.isEmpty)];
 
-    final fileName = _sanitizeFileName(groupName != null ? '$groupName（设定）' : '$bookTitle（设定）') + extension;
-    final filePath = p.join(exportDir, fileName);
+    final mergedBaseName = _sanitizeFileName(groupName != null ? '$groupName（设定）' : '$bookTitle（设定）');
+    final filePath = p.join(exportDir, mergedBaseName + extension);
 
     if (format == ExportFormat.txt) {
       final buffer = StringBuffer();
@@ -1064,6 +1091,13 @@ class BookExportService {
       await docx.save(filePath);
     }
 
+    // 合并导出没有单个正文文件，伴生文件统一归档到附件目录
+    await _exportMergedSettingCompanions(
+      settingItems: settingItems,
+      bookFolderPath: bookFolderPath,
+      attachmentRoot: p.join(exportDir, '$mergedBaseName附件'),
+    );
+
     return ExportResult(
       success: true,
       exportPath: filePath,
@@ -1125,6 +1159,15 @@ class BookExportService {
         await docx.save(filePath);
       }
 
+      // 伴生文件与导出的设定文件同名同目录，保证关键词、关联、
+      // 备注、表格与图片在归档后仍能与正文配对
+      await _exportSettingCompanion(
+        bookFolderPath: bookFolderPath,
+        relativePath: item.filePath,
+        targetDir: settingDir,
+        targetBaseName: _sanitizeFileName(item.title),
+      );
+
       onProgress?.call(i + 1, settingItems.length, '正在导出: ${item.title}');
     }
 
@@ -1133,5 +1176,60 @@ class BookExportService {
       exportPath: bookExportDir,
       bookCount: 1,
     );
+  }
+
+  // ================= 伴生文件导出 =================
+
+  /// 导出单个设定项的伴生文件
+  ///
+  /// 伴生文件与设定项正文同目录同名，包含合并 `.json`
+  /// （关键词、关联、备注与表格）以及 image 目录中被引用的图片。
+  /// 导出的伴生文件与导出的设定文件同名同目录，便于重新配对；
+  /// 没有伴生文件时直接跳过，不影响正文导出。
+  Future<void> _exportSettingCompanion({
+    required String bookFolderPath,
+    required String relativePath,
+    required String targetDir,
+    required String targetBaseName,
+  }) async {
+    if (relativePath.isEmpty) return;
+
+    // 设定项正文的完整路径，伴生文件路径由其派生
+    final String settingItemPath = p.join(
+      bookFolderPath,
+      'settings',
+      relativePathToPlatform(relativePath),
+    );
+    await OutlineCompanionStore.copyTo(
+      sourceSettingItemFilePath: settingItemPath,
+      targetDir: targetDir,
+      targetBaseName: targetBaseName,
+    );
+  }
+
+  /// 导出合并模式下所有设定项的伴生文件
+  ///
+  /// 合并导出没有对应的单个正文文件，伴生文件统一放入附件目录，
+  /// 并按设定项原有的分组目录结构归档，避免同名设定项互相覆盖。
+  Future<void> _exportMergedSettingCompanions({
+    required List<SettingItemModel> settingItems,
+    required String bookFolderPath,
+    required String attachmentRoot,
+  }) async {
+    for (final item in settingItems) {
+      if (item.filePath.isEmpty) continue;
+
+      final String platformRelativePath = relativePathToPlatform(item.filePath);
+      final String relativeDir = p.dirname(platformRelativePath);
+      final String targetDir =
+          relativeDir == '.' ? attachmentRoot : p.join(attachmentRoot, relativeDir);
+
+      await _exportSettingCompanion(
+        bookFolderPath: bookFolderPath,
+        relativePath: item.filePath,
+        targetDir: targetDir,
+        targetBaseName: p.basenameWithoutExtension(platformRelativePath),
+      );
+    }
   }
 }

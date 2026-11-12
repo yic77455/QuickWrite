@@ -3,10 +3,12 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/constants/material_icons.dart';
 import 'package:quick_write/core/constants/punctuation_symbols.dart';
+import 'package:quick_write/core/models/outline_table.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/utils/text_style_range.dart';
 import 'package:quick_write/pages/workspace/editor/outline_editor.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_color_palette.dart';
+import 'package:quick_write/pages/workspace/widgets/mobile_table_toolbar_binding.dart';
 import 'package:quick_write/pages/workspace/widgets/punctuation_key_button.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 
@@ -41,6 +43,12 @@ enum OutlineToolbarPanel {
 
   /// 插入：关键词、关联、备注、图片、表格
   insert,
+
+  /// 表格单元格：整表对齐方式
+  tableAlignment,
+
+  /// 表格单元格：批量选择、清空、删除行列与删除表格
+  tableActions,
 }
 
 /// 移动端大纲编辑器键盘工具栏
@@ -48,6 +56,7 @@ enum OutlineToolbarPanel {
 /// 软键盘弹出时贴在键盘上方：主工具栏左侧为二级面板入口（快捷输入、文字格式、
 /// 字体颜色、字底颜色、插入），数量较多时横向滚动；右侧为节点层级调整按钮；
 /// 点击面板入口时在其上方展开对应的二级面板，唤起键盘时默认展开快捷输入面板。
+/// 选中表格单元格时切换为表格模式，复用同一套栏体、面板容器与格式按钮。
 class MobileOutlineToolbar extends StatefulWidget {
   const MobileOutlineToolbar({super.key});
 
@@ -172,6 +181,25 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
     return _panel;
   }
 
+  /// 表格模式下应当展开的二级面板
+  ///
+  /// 节点模式遗留的快捷输入、插入面板在表格模式下改为文字格式面板；
+  /// 批量选择模式下不再提供单元格操作面板（删除行列、进入批量等）。
+  OutlineToolbarPanel? _effectiveTablePanel({required bool batchMode}) {
+    final OutlineToolbarPanel? panel = _panel;
+    if (panel == null) return null;
+    const Set<OutlineToolbarPanel> tablePanels = <OutlineToolbarPanel>{
+      OutlineToolbarPanel.format,
+      OutlineToolbarPanel.fontColor,
+      OutlineToolbarPanel.backgroundColor,
+      OutlineToolbarPanel.tableAlignment,
+      OutlineToolbarPanel.tableActions,
+    };
+    if (!tablePanels.contains(panel)) return OutlineToolbarPanel.format;
+    if (batchMode && panel == OutlineToolbarPanel.tableActions) return null;
+    return panel;
+  }
+
   /// 执行工具栏操作并刷新按钮的点亮状态
   void _runAction(VoidCallback action) {
     action();
@@ -188,7 +216,39 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
   Widget build(BuildContext context) {
     // 切换标签页时重新判断显隐
     context.watch<WorkspaceProvider>();
+    final String? currentTabId = context.read<WorkspaceProvider>().currentTab?.id;
+    final OutlineEditorState? state = _currentEditorState();
 
+    return ValueListenableBuilder<MobileTableToolbarController?>(
+      valueListenable: MobileTableToolbarBinding.active,
+      builder: (context, table, _) {
+        return ListenableBuilder(
+          listenable: Listenable.merge(<Listenable?>[table, state?.batchRevision]),
+          builder: (context, _) {
+            // 表格所在标签页已切走、节点正在输入或节点处于批量选择模式时，
+            // 表格快捷栏让位给节点工具栏，并顺带清除表格的选中态
+            final bool nodeEditing = state?.hasEditorFocus ?? false;
+            final bool nodeBatchMode = state?.isBatchSelectionMode ?? false;
+            final bool tabMatches = table == null ||
+                table.tabId == null ||
+                currentTabId == null ||
+                currentTabId == table.tabId;
+            final bool showTable =
+                table != null && state != null && tabMatches && !nodeEditing && !nodeBatchMode;
+
+            if (table != null && !showTable) {
+              WidgetsBinding.instance.addPostFrameCallback((_) => table.dismiss());
+            }
+            if (showTable) return _buildTableToolbar(context, table);
+            return _buildNodeToolbar(context);
+          },
+        );
+      },
+    );
+  }
+
+  /// 构建节点编辑工具栏
+  Widget _buildNodeToolbar(BuildContext context) {
     final state = _currentEditorState();
     if (state == null) return const SizedBox.shrink();
 
@@ -224,7 +284,10 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
                   // 两行工具栏均按可用高度自适应：空间充足时保持设计高度，
                   // 空间不足时等比压缩，保证整条工具栏不溢出且始终可用
                   if (panel != null)
-                    Flexible(fit: FlexFit.loose, child: _buildPanel(context, state, panel)),
+                    Flexible(
+                      fit: FlexFit.loose,
+                      child: _buildPanel(context, state: state, table: null, panel: panel),
+                    ),
                   Flexible(fit: FlexFit.loose, child: _buildMainBar(context, state, batchMode)),
                 ],
               ),
@@ -232,6 +295,57 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
           ),
         );
       },
+    );
+  }
+
+  /// 构建表格单元格快捷操作栏
+  ///
+  /// 与节点工具栏共用栏体、面板容器和样式按钮，保证移动端两处交互视觉一致。
+  Widget _buildTableToolbar(BuildContext context, MobileTableToolbarController table) {
+    final OutlineToolbarPanel? panel =
+        _effectiveTablePanel(batchMode: table.isBatchMode);
+
+    return TextFieldTapRegion(
+      child: ExcludeFocus(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (panel != null)
+              Flexible(
+                fit: FlexFit.loose,
+                child: _buildPanel(context, state: null, table: table, panel: panel),
+              ),
+            Flexible(
+              fit: FlexFit.loose,
+              child: _buildTableMainBar(context, table, panel),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 切换表格模式的二级面板
+  ///
+  /// 以实际展开的面板为准，避免节点模式遗留的面板值导致按钮点亮状态错位。
+  void _toggleTablePanel(OutlineToolbarPanel entry, OutlineToolbarPanel? effective) {
+    setState(() => _panel = effective == entry ? null : entry);
+  }
+
+  /// 构建表格模式的二级面板入口
+  Widget _buildTablePanelEntry(
+    OutlineToolbarPanel entry,
+    IconData icon,
+    String tooltip,
+    OutlineToolbarPanel? effective,
+  ) {
+    return ToggleToolButton(
+      icon: icon,
+      tooltip: tooltip,
+      isSelected: effective == entry,
+      size: _buttonSize,
+      iconSize: _iconSize,
+      onChanged: (_) => _toggleTablePanel(entry, effective),
     );
   }
 
@@ -310,6 +424,94 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
     );
   }
 
+  /// 构建表格单元格模式的主工具栏
+  ///
+  /// 左侧为样式面板入口，对应桌面端表格右键菜单；批量选择模式下只保留清空内容，
+  /// 右侧按钮用于取消选中或退出批量模式。
+  Widget _buildTableMainBar(
+    BuildContext context,
+    MobileTableToolbarController table,
+    OutlineToolbarPanel? effectivePanel,
+  ) {
+    final ColorScheme colorScheme = Theme.of(context).colorScheme;
+    final bool batchMode = table.isBatchMode;
+
+    return Container(
+      height: _barHeight,
+      margin: const EdgeInsets.fromLTRB(2, 0, 2, 2),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.only(left: _iconListLeftPadding, right: 4),
+              children: [
+                _buildTablePanelEntry(
+                  OutlineToolbarPanel.format,
+                  Icons.text_fields_rounded,
+                  '文字格式',
+                  effectivePanel,
+                ),
+                _buildTablePanelEntry(
+                  OutlineToolbarPanel.fontColor,
+                  Icons.format_color_text_rounded,
+                  '字体颜色',
+                  effectivePanel,
+                ),
+                _buildTablePanelEntry(
+                  OutlineToolbarPanel.backgroundColor,
+                  Icons.format_color_fill_rounded,
+                  '字底颜色',
+                  effectivePanel,
+                ),
+                _buildTablePanelEntry(
+                  OutlineToolbarPanel.tableAlignment,
+                  Icons.format_align_left,
+                  '对齐方式',
+                  effectivePanel,
+                ),
+                if (!batchMode)
+                  _buildTablePanelEntry(
+                    OutlineToolbarPanel.tableActions,
+                    MaterialIcons.table_edit,
+                    '单元格操作',
+                    effectivePanel,
+                  ),
+                if (batchMode)
+                  _buildActionButton(
+                    icon: Icons.backspace_outlined,
+                    tooltip: '清空选中单元格',
+                    onPressed: table.clearContents,
+                  ),
+              ],
+            ),
+          ),
+
+          if (batchMode)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Text(
+                '已选 ${table.selectedCellCount} 格',
+                style: TextStyle(fontSize: 11, color: colorScheme.onSurfaceVariant),
+              ),
+            ),
+
+          _buildDivider(colorScheme),
+
+          _buildActionButton(
+            icon: Icons.close_rounded,
+            tooltip: batchMode ? '退出批量选择' : '取消选中',
+            onPressed: batchMode ? table.exitBatchMode : table.dismiss,
+          ),
+        ],
+      ),
+    );
+  }
+
   /// 构建主工具栏中的单次操作按钮
   ///
   /// 不可执行时按钮置灰且不响应点击。
@@ -318,6 +520,7 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
     required String tooltip,
     required VoidCallback onPressed,
     bool enabled = true,
+    Color? iconColor,
   }) {
     return Opacity(
       opacity: enabled ? 1 : 0.35,
@@ -327,6 +530,7 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
         width: _buttonSize,
         height: _barHeight,
         iconSize: _iconSize,
+        iconColor: iconColor,
         onPressed: enabled ? () => _runAction(onPressed) : null,
       ),
     );
@@ -378,18 +582,38 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
   }
 
   /// 构建二级面板
-  Widget _buildPanel(BuildContext context, OutlineEditorState state, OutlineToolbarPanel panel) {
+  ///
+  /// 节点与表格共用文字格式、字体颜色、字底颜色三个面板，
+  /// 通过 [MobileToolbarStyleTarget] 适配不同的操作对象。
+  Widget _buildPanel(
+    BuildContext context, {
+    required OutlineEditorState? state,
+    required MobileTableToolbarController? table,
+    required OutlineToolbarPanel panel,
+  }) {
     switch (panel) {
       case OutlineToolbarPanel.quickInput:
-        return _buildQuickInputPanel(context, state);
-      case OutlineToolbarPanel.format:
-        return _buildFormatPanel(context, state);
-      case OutlineToolbarPanel.fontColor:
-        return _buildColorPanel(context, state, isForeground: true);
-      case OutlineToolbarPanel.backgroundColor:
-        return _buildColorPanel(context, state, isForeground: false);
+        return _buildQuickInputPanel(context, state!);
       case OutlineToolbarPanel.insert:
-        return _buildInsertPanel(context, state);
+        return _buildInsertPanel(context, state!);
+      case OutlineToolbarPanel.tableAlignment:
+        return _buildTableAlignmentPanel(context, table!);
+      case OutlineToolbarPanel.tableActions:
+        return _buildTableActionsPanel(context, table!);
+      case OutlineToolbarPanel.format:
+        return _buildFormatPanel(context, table ?? _EditorStyleTarget(state!));
+      case OutlineToolbarPanel.fontColor:
+        return _buildColorPanel(
+          context,
+          table ?? _EditorStyleTarget(state!),
+          isForeground: true,
+        );
+      case OutlineToolbarPanel.backgroundColor:
+        return _buildColorPanel(
+          context,
+          table ?? _EditorStyleTarget(state!),
+          isForeground: false,
+        );
     }
   }
 
@@ -432,9 +656,9 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
   /// 构建文字格式面板
   ///
   /// 提供标题级别（一级、二级、三级标题、正文）与字形样式（加粗、斜体、下划线、删除线）。
-  Widget _buildFormatPanel(BuildContext context, OutlineEditorState state) {
-    final int headingLevel = state.currentHeadingLevel;
-    final TextStyleFlags flags = state.currentTextStyleFlags;
+  Widget _buildFormatPanel(BuildContext context, MobileToolbarStyleTarget target) {
+    final int headingLevel = target.currentHeadingLevel;
+    final TextStyleFlags flags = target.currentTextStyleFlags;
 
     return _buildPanelContainer(
       context,
@@ -443,28 +667,28 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
         padding: const EdgeInsets.only(left: _iconListLeftPadding, right: 4),
         children: [
           _buildHeadingButton(
-            state,
+            target,
             level: 1,
             currentLevel: headingLevel,
             icon: MaterialIcons.format_h1,
             tooltip: '一级标题',
           ),
           _buildHeadingButton(
-            state,
+            target,
             level: 2,
             currentLevel: headingLevel,
             icon: MaterialIcons.format_h2,
             tooltip: '二级标题',
           ),
           _buildHeadingButton(
-            state,
+            target,
             level: 3,
             currentLevel: headingLevel,
             icon: MaterialIcons.format_h3,
             tooltip: '三级标题',
           ),
           _buildHeadingButton(
-            state,
+            target,
             level: 0,
             currentLevel: headingLevel,
             icon: MaterialIcons.format_title,
@@ -475,28 +699,28 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
           _buildDivider(Theme.of(context).colorScheme),
 
           _buildStyleButton(
-            state,
+            target,
             icon: MaterialIcons.format_bold,
             tooltip: '加粗',
             isSelected: flags.bold,
             toggleFn: TextStyleFlags.toggleBold,
           ),
           _buildStyleButton(
-            state,
+            target,
             icon: MaterialIcons.format_italic,
             tooltip: '斜体',
             isSelected: flags.italic,
             toggleFn: TextStyleFlags.toggleItalic,
           ),
           _buildStyleButton(
-            state,
+            target,
             icon: MaterialIcons.format_underlined,
             tooltip: '下划线',
             isSelected: flags.underline,
             toggleFn: TextStyleFlags.toggleUnderline,
           ),
           _buildStyleButton(
-            state,
+            target,
             icon: MaterialIcons.strikethrough_s,
             tooltip: '删除线',
             isSelected: flags.strikethrough,
@@ -511,7 +735,7 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
   ///
   /// 当前级别已选中时按钮点亮，点击其他级别则切换为该级别。
   Widget _buildHeadingButton(
-    OutlineEditorState state, {
+    MobileToolbarStyleTarget target, {
     required int level,
     required int currentLevel,
     required IconData icon,
@@ -524,7 +748,7 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
       size: _buttonSize,
       iconSize: _iconSize,
       onChanged: (selected) {
-        if (selected) _runAction(() => state.setHeadingLevel(level));
+        if (selected) _runAction(() => target.setHeadingLevel(level));
       },
     );
   }
@@ -533,7 +757,7 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
   ///
   /// 样式已开启时按钮点亮，点击后作用于选中文字或整个节点。
   Widget _buildStyleButton(
-    OutlineEditorState state, {
+    MobileToolbarStyleTarget target, {
     required IconData icon,
     required String tooltip,
     required bool isSelected,
@@ -545,7 +769,7 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
       isSelected: isSelected,
       size: _buttonSize,
       iconSize: _iconSize,
-      onChanged: (_) => _runAction(() => state.toggleTextStyle(toggleFn)),
+      onChanged: (_) => _runAction(() => target.toggleTextStyle(toggleFn)),
     );
   }
 
@@ -582,10 +806,128 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
             onPressed: state.pickImageForActiveNode,
           ),
           _buildActionButton(
-            icon: Icons.table_chart_outlined,
+            icon: MaterialIcons.table,
             tooltip: '表格',
             enabled: !state.activeNodeHasTable,
             onPressed: state.insertTableForActiveNode,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 构建表格对齐方式面板
+  ///
+  /// 对应桌面端右键菜单的「对齐方式」，作用于整张表格。
+  Widget _buildTableAlignmentPanel(
+    BuildContext context,
+    MobileTableToolbarController table,
+  ) {
+    return _buildPanelContainer(
+      context,
+      ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.only(left: _iconListLeftPadding, right: 4),
+        children: [
+          for (final (alignment, label, icon) in const [
+            (OutlineTableAlignment.left, '左对齐', Icons.format_align_left),
+            (OutlineTableAlignment.center, '居中', Icons.format_align_center),
+            (OutlineTableAlignment.right, '右对齐', Icons.format_align_right),
+          ])
+            ToggleToolButton(
+              icon: icon,
+              tooltip: label,
+              isSelected: table.alignment == alignment,
+              size: _buttonSize,
+              iconSize: _iconSize,
+              onChanged: (_) => _runAction(() => table.setAlignment(alignment)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 删除类操作的二次确认
+  ///
+  /// 图标本身不足以表达破坏性，删除行、列、表格前统一弹确认框。
+  Future<void> _confirmDestructiveAction(
+    BuildContext context, {
+    required String title,
+    required String description,
+    required VoidCallback onConfirmed,
+  }) async {
+    final bool confirmed = await showConfirmDialog(
+      context: context,
+      title: title,
+      description: description,
+      type: ConfirmType.delete,
+      confirmText: '删除',
+      cancelText: '取消',
+    );
+    if (!confirmed || !mounted) return;
+    _runAction(onConfirmed);
+  }
+
+  /// 构建表格单元格操作面板
+  ///
+  /// 除清空、删除行列与删除表格等桌面右键菜单操作外，
+  /// 额外提供进入批量选择模式的入口；破坏性操作图标标红。
+  Widget _buildTableActionsPanel(
+    BuildContext context,
+    MobileTableToolbarController table,
+  ) {
+    return _buildPanelContainer(
+      context,
+      ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.only(left: _iconListLeftPadding, right: 4),
+        children: [
+          _buildActionButton(
+            icon: MaterialIcons.select_check_box,
+            tooltip: '批量选择单元格',
+            onPressed: table.enterBatchMode,
+          ),
+          _buildDivider(Theme.of(context).colorScheme),
+          _buildActionButton(
+            icon: Icons.backspace_outlined,
+            tooltip: '清空单元格',
+            iconColor: Colors.redAccent,
+            onPressed: table.clearContents,
+          ),
+          _buildActionButton(
+            icon: Icons.table_rows_outlined,
+            tooltip: '删除行',
+            iconColor: Colors.redAccent,
+            enabled: table.canDeleteRow,
+            onPressed: () => _confirmDestructiveAction(
+              context,
+              title: '删除行',
+              description: '当前单元格所在的整行将被删除。',
+              onConfirmed: table.deleteRow,
+            ),
+          ),
+          _buildActionButton(
+            icon: MaterialIcons.view_column,
+            tooltip: '删除列',
+            iconColor: Colors.redAccent,
+            enabled: table.canDeleteColumn,
+            onPressed: () => _confirmDestructiveAction(
+              context,
+              title: '删除列',
+              description: '当前单元格所在的整列将被删除。',
+              onConfirmed: table.deleteColumn,
+            ),
+          ),
+          _buildActionButton(
+            icon: Icons.delete_sweep_outlined,
+            tooltip: '删除表格',
+            iconColor: Colors.redAccent,
+            onPressed: () => _confirmDestructiveAction(
+              context,
+              title: '删除表格',
+              description: '整张表格及所有单元格内容将被删除。',
+              onConfirmed: table.deleteTable,
+            ),
           ),
         ],
       ),
@@ -597,10 +939,10 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
   /// [isForeground] 为 true 时设置字体颜色，false 时设置字底颜色。
   Widget _buildColorPanel(
     BuildContext context,
-    OutlineEditorState state, {
+    MobileToolbarStyleTarget target, {
     required bool isForeground,
   }) {
-    final ({bool isUniform, Color? color}) current = state.currentColor(isForeground: isForeground);
+    final ({bool isUniform, Color? color}) current = target.currentColor(isForeground: isForeground);
 
     return _buildPanelContainer(
       context,
@@ -616,7 +958,9 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
             size: _buttonSize,
             iconSize: _iconSize,
             onChanged: (_) => _runAction(
-              () => isForeground ? state.applyColor(clearForeground: true) : state.applyColor(clearBackground: true),
+              () => isForeground
+                  ? target.applyColor(clearForeground: true)
+                  : target.applyColor(clearBackground: true),
             ),
           ),
 
@@ -629,7 +973,7 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
               isSelected:
                   current.isUniform && current.color == (isForeground ? item.foreground : item.background),
               onTap: () => _runAction(
-                () => state.applyColor(
+                () => target.applyColor(
                   foregroundColor: isForeground ? item.foreground : null,
                   backgroundColor: isForeground ? null : item.background,
                 ),
@@ -639,6 +983,46 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
       ),
     );
   }
+}
+
+/// 节点编辑器的样式操作适配器
+///
+/// 让大纲编辑器状态与表格单元格控制器共用同一套格式、颜色面板。
+class _EditorStyleTarget implements MobileToolbarStyleTarget {
+  const _EditorStyleTarget(this.state);
+
+  final OutlineEditorState state;
+
+  @override
+  int get currentHeadingLevel => state.currentHeadingLevel;
+
+  @override
+  TextStyleFlags get currentTextStyleFlags => state.currentTextStyleFlags;
+
+  @override
+  ({bool isUniform, Color? color}) currentColor({required bool isForeground}) =>
+      state.currentColor(isForeground: isForeground);
+
+  @override
+  void setHeadingLevel(int level) => state.setHeadingLevel(level);
+
+  @override
+  void toggleTextStyle(TextStyleFlags Function(TextStyleFlags) toggleFn) =>
+      state.toggleTextStyle(toggleFn);
+
+  @override
+  void applyColor({
+    Color? foregroundColor,
+    Color? backgroundColor,
+    bool clearForeground = false,
+    bool clearBackground = false,
+  }) =>
+      state.applyColor(
+        foregroundColor: foregroundColor,
+        backgroundColor: backgroundColor,
+        clearForeground: clearForeground,
+        clearBackground: clearBackground,
+      );
 }
 
 /// 颜色色块按钮

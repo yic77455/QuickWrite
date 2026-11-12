@@ -25,6 +25,11 @@ class SmallToolbarButton extends StatelessWidget {
   /// 图标大小，默认 18
   final double iconSize;
 
+  /// 图标颜色，默认使用主题的 [ColorScheme.onSurfaceVariant]
+  ///
+  /// 危险操作可传入红色，让图标本身传达操作性质。
+  final Color? iconColor;
+
   /// 按钮宽度，默认 32
   final double width;
 
@@ -40,6 +45,7 @@ class SmallToolbarButton extends StatelessWidget {
     required this.tooltip,
     this.onPressed,
     this.iconSize = 18,
+    this.iconColor,
     this.width = 32,
     this.height = 28,
     this.isMenuOpen = false,
@@ -68,7 +74,7 @@ class SmallToolbarButton extends StatelessWidget {
             width: width,
             height: height,
             decoration: BoxDecoration(borderRadius: BorderRadius.circular(6)),
-            child: Icon(icon, size: iconSize, color: colorScheme.onSurfaceVariant),
+            child: Icon(icon, size: iconSize, color: iconColor ?? colorScheme.onSurfaceVariant),
           ),
         ),
       ),

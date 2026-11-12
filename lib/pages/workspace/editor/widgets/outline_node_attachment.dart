@@ -528,7 +528,7 @@ class _OutlineNodeAttachmentState extends State<OutlineNodeAttachment> {
   /// 构建图片缩略图
   ///
   /// 只在最大宽高范围内等比缩放，不裁剪图片；
-  /// 图片文件可能尚未同步到本机或已被外部删除，读取失败时显示占位图标。
+  /// 图片文件可能尚未同步到本机或已被外部删除，读取失败时显示丢失占位。
   Widget _buildThumbnail(double maxWidth) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(6),
@@ -543,10 +543,23 @@ class _OutlineNodeAttachmentState extends State<OutlineNodeAttachment> {
               height: 90,
               child: ColoredBox(
                 color: widget.colorScheme.onSurfaceVariant.withValues(alpha: 0.08),
-                child: Icon(
-                  Icons.broken_image_outlined,
-                  size: 28,
-                  color: widget.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.broken_image_outlined,
+                      size: 28,
+                      color: widget.colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '图片丢失',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: widget.colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             );

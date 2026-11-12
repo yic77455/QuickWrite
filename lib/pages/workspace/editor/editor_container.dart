@@ -590,6 +590,8 @@ class _EditorContainerState extends State<EditorContainer> {
             colorScheme: colorScheme,
             filePath: tab.backupFilePath,
             readOnly: true,
+            // 备份不保存图片副本，图片按原设定项目录解析
+            imageBaseFilePath: tab.originalSettingItemFilePath,
             // 备份预览展示关键词标签，但不写盘（只读由编辑器内部拦截）
             keywordService: provider.outlineKeywordService,
             // 备份预览展示原始标题，只读不可编辑

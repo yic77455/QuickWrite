@@ -1,8 +1,12 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import 'package:quick_write/core/constants/material_icons.dart';
 import 'package:quick_write/core/models/outline_table.dart';
+import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/clean_scroll.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
@@ -13,10 +17,26 @@ import 'package:quick_write/pages/workspace/editor/utils/drag_cursor.dart';
 import 'package:quick_write/pages/workspace/editor/utils/outline_shortcut_keys.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_color_palette.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_editor_widgets.dart';
+import 'package:quick_write/pages/workspace/widgets/mobile_table_toolbar_binding.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 
 /// 单元格坐标（行、列）
 typedef _CellPosition = ({int row, int col});
+
+/// 移动端单元格的选中阶段
+///
+/// 移动端把「选中单元格」与「聚焦输入框」拆成两次点击：
+/// 第一次只选中并显示高亮边框与快捷栏，第二次才把光标交给输入框。
+enum _MobileCellStage {
+  /// 未选中
+  none,
+
+  /// 已选中，未聚焦输入框
+  selected,
+
+  /// 已聚焦输入框，正在编辑
+  editing,
+}
 
 /// 节点附加表格
 ///
@@ -33,6 +53,13 @@ typedef _CellPosition = ({int row, int col});
 ///   并通过「⋯」删除当前行、当前列或整个表格；
 /// - 未手动调整过列宽时按内容自动调整；内容显示不全时表格下方出现横向滚动条，
 ///   可拖动滚动条或按住 Shift 滚动滚轮左右移动视口，移动端直接左右滑动。
+///
+/// 移动端不安装桌面端的悬停、长按与拖拽选区检测，改由显式手势驱动：
+/// 第一次点击选中单元格并显示高亮边框与底部快捷栏，第二次点击才聚焦输入框；
+/// 选中首行单元格显示列拖拽手柄、选中第一列非表头单元格显示行拖拽手柄，
+/// 两者与桌面端共用外观与拖动逻辑，只是移动端改为长按触发；
+/// 选中首行单元格还显示列宽指示器；快捷栏提供与桌面右键菜单一致的样式操作；
+/// 编辑态长按选中单元格内文字时，选区上方弹出剪切、复制、粘贴、全选工具栏。
 class OutlineTableBlock extends StatefulWidget {
   /// 表格数据
   ///
@@ -81,7 +108,8 @@ class OutlineTableBlock extends StatefulWidget {
   State<OutlineTableBlock> createState() => _OutlineTableBlockState();
 }
 
-class _OutlineTableBlockState extends State<OutlineTableBlock> {
+class _OutlineTableBlockState extends State<OutlineTableBlock>
+    implements MobileTableToolbarSource {
   /// 列宽下限
   static const double _minColumnWidth = 96.0;
 
@@ -149,6 +177,19 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
   /// 等于手柄高度的一半加上半个外框线宽，保证手柄中心正好落在边框线上。
   static const double _columnHandleOverflowY =
       _columnHandleBarHeight / 2 + _gridBorderWidth / 2;
+
+  /// 移动端列宽指示器的命中区域宽度
+  static const double _mobileResizeHitWidth = 24.0;
+
+  /// 移动端列宽指示器的命中区域高度
+  static const double _mobileResizeHitHeight = 30.0;
+
+  /// 移动端列宽指示器的可见尺寸
+  static const double _mobileResizeBarWidth = 8.0;
+  static const double _mobileResizeBarHeight = 28.0;
+
+  /// 移动端选中单元格的高亮边框宽度
+  static const double _mobileSelectionBorderWidth = 2.0;
 
   /// 单元格输入控制器（键为「行:列」）
   final Map<String, TextEditingController> _controllers = {};
@@ -238,11 +279,44 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
   /// 创建完成前与创建失败时退回系统光标。
   MouseCursor _dragCursor = DragCursor.current;
 
+  /// 是否使用移动端交互
+  bool get _isMobile => PlatformCapabilities.isMobile;
+
+  /// 移动端单元格选中阶段
+  _MobileCellStage _mobileStage = _MobileCellStage.none;
+
+  /// 移动端是否处于单元格批量选择模式
+  bool _mobileBatchMode = false;
+
+  /// 批量选择模式下勾选的单元格（允许不连续）
+  final Set<_CellPosition> _mobileBatchSelection = <_CellPosition>{};
+
+  /// 批量选择模式下最近一次操作的单元格，退出模式时沿用为单选对象
+  _CellPosition? _mobileBatchAnchor;
+
+  /// 移动端正在拖动调整宽度的列（用于绘制贯穿表格的参考线）
+  int? _mobileResizingColumn;
+
+  /// 移动端单元格最近一次按下的全局坐标
+  ///
+  /// 第二次点击时据此把输入光标放到手指点击的位置。
+  Offset _mobileLastTapPosition = Offset.zero;
+
+  /// 移动端表格工具栏控制器
+  MobileTableToolbarController? _mobileToolbarController;
+
+  /// 是否已排定表格工具栏状态同步
+  bool _mobileToolbarSyncScheduled = false;
+
+  /// 表格网格层键，用于把单元格的全局矩形换算成网格局部坐标
+  final GlobalKey _gridLayerKey = GlobalKey();
+
   @override
   void initState() {
     super.initState();
     _columnWidths = _resolveColumnWidths();
-    _loadDragCursor();
+    // 移动端不使用鼠标光标，避免加载桌面的自定义 grab 光标
+    if (!_isMobile) _loadDragCursor();
   }
 
   /// 加载拖动行或列时使用的抓取光标
@@ -263,6 +337,7 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
       _selection = null;
       _selectionAnchor = null;
       _activeCell = null;
+      _resetMobileInteraction();
       _columnWidths = _resolveColumnWidths();
     } else if (oldWidget.fontSize != widget.fontSize) {
       _columnWidths = _resolveColumnWidths();
@@ -280,10 +355,152 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
     }
     _tableFocusNode.dispose();
     _horizontalScrollController.dispose();
+    // 表格销毁时解绑移动端快捷栏，避免工具栏停留在已消失的表格上
+    MobileTableToolbarBinding.detach(_mobileToolbarController);
+    _mobileToolbarController?.dispose();
     // 表格在拖拽中被移除时清除拖拽状态，避免编辑区的抓取光标覆盖层残留
     DragCursor.isDragging.value = false;
     super.dispose();
   }
+
+  // ================= 移动端工具栏绑定 =================
+
+  /// 排定一次表格工具栏状态同步
+  ///
+  /// 表格状态变化都会触发重建，重建后在帧末统一刷新工具栏，
+  /// 避免在各个手势回调里逐个补通知，也避免在构建过程中触发监听器。
+  void _scheduleMobileToolbarSync() {
+    if (!_isMobile || !mounted || _mobileToolbarSyncScheduled) return;
+    _mobileToolbarSyncScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _mobileToolbarSyncScheduled = false;
+      if (mounted) _syncMobileToolbar();
+    });
+  }
+
+  /// 同步移动端表格工具栏的绑定与状态
+  void _syncMobileToolbar() {
+    if (!_isMobile || !mounted) return;
+
+    final bool active = !widget.readOnly &&
+        (_mobileBatchMode || _mobileStage != _MobileCellStage.none);
+    if (!active) {
+      MobileTableToolbarBinding.detach(_mobileToolbarController);
+      return;
+    }
+
+    final MobileTableToolbarController controller =
+        _mobileToolbarController ??= MobileTableToolbarController(source: this);
+    controller.tabId = context.read<WorkspaceProvider>().currentTab?.id;
+    MobileTableToolbarBinding.attach(controller);
+    controller.refresh();
+  }
+
+  /// 重置移动端交互状态（不改变已有选区等桌面端状态）
+  void _resetMobileInteraction() {
+    _mobileStage = _MobileCellStage.none;
+    _mobileBatchMode = false;
+    _mobileBatchSelection.clear();
+    _mobileBatchAnchor = null;
+    _mobileResizingColumn = null;
+  }
+
+  /// 移动端是否有一个非批量模式下的选中单元格
+  bool get _hasMobileSelection =>
+      _isMobile && !_mobileBatchMode && _mobileStage != _MobileCellStage.none;
+
+  /// 移动端选中单元格所在行是否符合行排序条件（第一列且非表头）
+  int? get _mobileRowDragRow {
+    final _CellPosition? cell = _hasMobileSelection ? _activeCell : null;
+    if (cell == null || cell.col != 0 || cell.row == 0) return null;
+    return cell.row;
+  }
+
+  /// 移动端选中单元格所在列是否符合列排序条件（首行）
+  int? get _mobileColumnDragCol {
+    final _CellPosition? cell = _hasMobileSelection ? _activeCell : null;
+    if (cell == null || cell.row != 0) return null;
+    return cell.col;
+  }
+
+  // ================= 移动端工具栏数据源 =================
+
+  @override
+  bool get isBatchMode => _mobileBatchMode;
+
+  @override
+  int get selectedCellCount => _mobileBatchMode
+      ? _mobileBatchSelection.length
+      : (_mobileStage == _MobileCellStage.none ? 0 : 1);
+
+  @override
+  OutlineTableAlignment get alignment => widget.table.alignment;
+
+  @override
+  bool get canDeleteRow => widget.table.rowCount > 1;
+
+  @override
+  bool get canDeleteColumn => widget.table.columnCount > 1;
+
+  @override
+  int get currentHeadingLevel => _commonHeadingLevel;
+
+  @override
+  TextStyleFlags get currentTextStyleFlags => _mergedTextStyleFlags;
+
+  @override
+  ({bool isUniform, Color? color}) currentColor({required bool isForeground}) =>
+      _targetColor(foreground: isForeground);
+
+  @override
+  void setHeadingLevel(int level) => _applyCellStyles((cell) => cell.headingLevel = level);
+
+  @override
+  void toggleTextStyle(TextStyleFlags Function(TextStyleFlags) toggleFn) =>
+      _toggleCellTextStyle(toggleFn);
+
+  @override
+  void applyColor({
+    Color? foregroundColor,
+    Color? backgroundColor,
+    bool clearForeground = false,
+    bool clearBackground = false,
+  }) {
+    if (clearForeground) _applyCellForegroundColor(null);
+    if (clearBackground) _applyCellBackgroundColor(null);
+    if (foregroundColor != null) _applyCellForegroundColor(foregroundColor);
+    if (backgroundColor != null) _applyCellBackgroundColor(backgroundColor);
+  }
+
+  @override
+  void setAlignment(OutlineTableAlignment value) => _setTableAlignment(value);
+
+  @override
+  void clearContents() => _clearSelectedCellContents();
+
+  @override
+  void enterBatchMode() => _enterMobileBatchMode();
+
+  @override
+  void exitBatchMode() => _exitMobileBatchMode();
+
+  @override
+  void dismiss() => _dismissMobileSelection();
+
+  @override
+  void deleteRow() {
+    final _CellPosition? cell = _activeCell;
+    if (cell != null) _deleteRow(cell.row);
+  }
+
+  @override
+  void deleteColumn() {
+    final _CellPosition? cell = _activeCell;
+    if (cell != null) _deleteColumn(cell.col);
+  }
+
+  @override
+  void deleteTable() => widget.onDeleteTable?.call();
 
   // ================= 单元格资源 =================
 
@@ -479,12 +696,29 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
     widget.onChanged();
   }
 
+  /// 设置整表水平对齐方式
+  void _setTableAlignment(OutlineTableAlignment value) {
+    if (widget.readOnly || widget.table.alignment == value) return;
+    widget.onBeforeChange?.call();
+    setState(() => widget.table.alignment = value);
+    widget.onChanged();
+  }
+
   // ================= 单元格选区 =================
 
   /// 样式操作的目标单元格
   ///
-  /// 存在多单元格选区时取整个选区，否则取当前活动单元格。
+  /// 桌面端存在多单元格选区时取整个选区，否则取当前活动单元格；
+  /// 移动端批量模式取所有勾选的单元格，否则取当前选中的单个单元格。
   List<OutlineTableCell> get _styleTargetCells {
+    if (_isMobile) {
+      return [
+        for (final _CellPosition cell in _mobileTargetCells)
+          if (cell.row < widget.table.rowCount && cell.col < widget.table.columnCount)
+            widget.table.rows[cell.row][cell.col],
+      ];
+    }
+
     final _CellRange? selection = _selection;
     if (selection != null && !selection.isSingleCell) {
       return [
@@ -499,6 +733,14 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
     if (cell == null) return const [];
     if (cell.row >= widget.table.rowCount || cell.col >= widget.table.columnCount) return const [];
     return [widget.table.rows[cell.row][cell.col]];
+  }
+
+  /// 移动端样式与清空操作覆盖的单元格坐标
+  List<_CellPosition> get _mobileTargetCells {
+    if (_mobileBatchMode) return _mobileBatchSelection.toList();
+    final _CellPosition? cell = _activeCell;
+    if (cell == null || _mobileStage == _MobileCellStage.none) return const <_CellPosition>[];
+    return <_CellPosition>[cell];
   }
 
   /// 当前持有焦点的单元格
@@ -611,29 +853,38 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
 
   /// 清空选区内所有单元格的文本
   void _clearSelectedCellContents() {
-    final _CellRange? selection = _selection;
-    if (selection == null) return;
+    if (widget.readOnly) return;
+
+    final List<_CellPosition> targets = <_CellPosition>[];
+    if (_isMobile) {
+      targets.addAll(_mobileTargetCells);
+    } else {
+      final _CellRange? selection = _selection;
+      if (selection == null) return;
+      for (int row = selection.startRow; row <= selection.endRow; row++) {
+        for (int col = selection.startColumn; col <= selection.endColumn; col++) {
+          targets.add((row: row, col: col));
+        }
+      }
+    }
+    if (targets.isEmpty) return;
 
     // 选区内容全为空时不做修改，避免产生空的撤销记录
     bool hasContent = false;
-    for (int row = selection.startRow; row <= selection.endRow && !hasContent; row++) {
-      for (int col = selection.startColumn; col <= selection.endColumn; col++) {
-        if (row >= widget.table.rowCount || col >= widget.table.columnCount) continue;
-        if (widget.table.rows[row][col].text.isNotEmpty) {
-          hasContent = true;
-          break;
-        }
+    for (final _CellPosition cell in targets) {
+      if (cell.row >= widget.table.rowCount || cell.col >= widget.table.columnCount) continue;
+      if (widget.table.rows[cell.row][cell.col].text.isNotEmpty) {
+        hasContent = true;
+        break;
       }
     }
     if (!hasContent) return;
 
     widget.onBeforeChange?.call();
-    for (int row = selection.startRow; row <= selection.endRow; row++) {
-      for (int col = selection.startColumn; col <= selection.endColumn; col++) {
-        if (row >= widget.table.rowCount || col >= widget.table.columnCount) continue;
-        widget.table.rows[row][col].text = '';
-        _controllers[_cellKeyOf(row, col)]?.text = '';
-      }
+    for (final _CellPosition cell in targets) {
+      if (cell.row >= widget.table.rowCount || cell.col >= widget.table.columnCount) continue;
+      widget.table.rows[cell.row][cell.col].text = '';
+      _controllers[_cellKeyOf(cell.row, cell.col)]?.text = '';
     }
 
     _refreshColumnWidths();
@@ -784,6 +1035,262 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
     }
   }
 
+  // ================= 移动端单元格交互 =================
+
+  /// 处理移动端单元格点击
+  ///
+  /// 批量模式下只切换勾选状态；普通模式下第一次点击选中单元格（显示高亮边框、
+  /// 拖拽手柄与底部快捷栏），第二次点击同一单元格才聚焦输入框。
+  void _handleMobileCellTap(int row, int col, Offset globalPosition) {
+    if (!_isMobile || widget.readOnly) return;
+    final _CellPosition cell = (row: row, col: col);
+
+    if (_mobileBatchMode) {
+      setState(() {
+        if (!_mobileBatchSelection.add(cell)) _mobileBatchSelection.remove(cell);
+        _mobileBatchAnchor = cell;
+      });
+      return;
+    }
+
+    final bool sameSelectedCell =
+        _activeCell == cell && _mobileStage != _MobileCellStage.none;
+    if (sameSelectedCell && _mobileStage == _MobileCellStage.selected) {
+      _focusMobileCell(cell, globalPosition);
+      return;
+    }
+    if (sameSelectedCell) return;
+
+    // 首次点击：收起可能已弹出的软键盘，只保留单元格选中态
+    _releaseInputFocus();
+    setState(() {
+      _activeCell = cell;
+      _selectionAnchor = cell;
+      _selection = null;
+      _isSelectingCells = false;
+      _mobileStage = _MobileCellStage.selected;
+    });
+  }
+
+  /// 第二次点击后把输入光标交给单元格输入框
+  ///
+  /// 借助 [RenderEditable] 把点击位置换算为文本偏移，光标落在手指点击处；
+  /// 无法定位时退回到文本末尾。
+  void _focusMobileCell(_CellPosition cell, Offset globalPosition) {
+    final String key = _cellKeyOf(cell.row, cell.col);
+    final TextEditingController? controller = _controllers[key];
+    final FocusNode? node = _focusNodes[key];
+    if (controller == null || node == null) return;
+
+    int offset = controller.text.length;
+    final RenderEditable? editable = _renderEditableOf(cell);
+    if (editable != null && editable.attached) {
+      final int candidate = editable.getPositionForPoint(globalPosition).offset;
+      offset = candidate.clamp(0, controller.text.length).toInt();
+    }
+    controller.selection = TextSelection.collapsed(offset: offset);
+
+    if (!mounted) return;
+    setState(() => _mobileStage = _MobileCellStage.editing);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && node.canRequestFocus) node.requestFocus();
+    });
+  }
+
+  /// 查找单元格输入框对应的 [RenderEditable]
+  RenderEditable? _renderEditableOf(_CellPosition cell) {
+    final RenderObject? root =
+        _cellKeys[_cellKeyOf(cell.row, cell.col)]?.currentContext?.findRenderObject();
+    if (root == null) return null;
+    return _findRenderEditable(root);
+  }
+
+  /// 在渲染树中递归查找 [RenderEditable]
+  RenderEditable? _findRenderEditable(RenderObject object) {
+    if (object is RenderEditable) return object;
+    RenderEditable? found;
+    object.visitChildren((RenderObject child) {
+      found ??= _findRenderEditable(child);
+    });
+    return found;
+  }
+
+  /// 释放当前输入焦点，隐藏软键盘
+  void _releaseInputFocus() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    if (_tableFocusNode.hasFocus) _tableFocusNode.unfocus();
+  }
+
+  /// 只释放表格自身持有的焦点
+  ///
+  /// 取消选中时焦点可能已交给节点输入框，此时不应把节点的键盘一并收起。
+  void _unfocusTableCells() {
+    for (final FocusNode node in _focusNodes.values) {
+      if (node.hasFocus) node.unfocus();
+    }
+    if (_tableFocusNode.hasFocus) _tableFocusNode.unfocus();
+  }
+
+  /// 进入单元格批量选择模式
+  ///
+  /// 进入后所有单元格都不再响应聚焦，只切换勾选状态；
+  /// 当前选中的单元格作为初始勾选项，方便直接对它套用样式。
+  void _enterMobileBatchMode() {
+    if (!_isMobile || widget.readOnly) return;
+    final _CellPosition? seed = _activeCell;
+    _releaseInputFocus();
+    setState(() {
+      _mobileBatchMode = true;
+      _mobileBatchSelection.clear();
+      if (seed != null) _mobileBatchSelection.add(seed);
+      _mobileBatchAnchor = seed;
+      _mobileStage = _MobileCellStage.none;
+      _selection = null;
+      _selectionAnchor = null;
+      _mobileResizingColumn = null;
+    });
+  }
+
+  /// 退出单元格批量选择模式
+  ///
+  /// 回到单选态，沿用最近一次操作的已勾选单元格，底部快捷栏恢复常规样式操作。
+  void _exitMobileBatchMode() {
+    if (!_isMobile || !_mobileBatchMode) return;
+    final _CellPosition? anchor = _mobileBatchAnchor;
+    final _CellPosition? last = anchor != null && _mobileBatchSelection.contains(anchor)
+        ? anchor
+        : (_mobileBatchSelection.isEmpty ? null : _mobileBatchSelection.last);
+    _resetMobileInteraction();
+    setState(() {
+      _activeCell = last;
+      _mobileStage = last == null ? _MobileCellStage.none : _MobileCellStage.selected;
+    });
+  }
+
+  /// 取消移动端选中态并收起快捷栏
+  void _dismissMobileSelection() {
+    if (!_isMobile || !mounted) return;
+    final bool hadState = _mobileBatchMode || _mobileStage != _MobileCellStage.none;
+    _resetMobileInteraction();
+    _activeCell = null;
+    _selection = null;
+    _selectionAnchor = null;
+    _unfocusTableCells();
+    MobileTableToolbarBinding.detach(_mobileToolbarController);
+    if (hadState) setState(() {});
+  }
+
+  /// 构建移动端单元格文字选择工具栏
+  ///
+  /// 编辑态长按选中单元格内文字后，在选区上方弹出剪切、复制、粘贴、全选；
+  /// 未选中文字时只保留粘贴与全选，只读表格只保留复制与全选。
+  Widget _buildMobileCellSelectionToolbar(
+    BuildContext context,
+    EditableTextState editableTextState,
+  ) {
+    final bool hasSelection =
+        editableTextState.textEditingValue.selection.isValid &&
+        !editableTextState.textEditingValue.selection.isCollapsed;
+
+    return AdaptiveTextSelectionToolbar.buttonItems(
+      anchors: editableTextState.contextMenuAnchors,
+      buttonItems: [
+        if (!widget.readOnly && hasSelection)
+          ContextMenuButtonItem(
+            type: ContextMenuButtonType.cut,
+            onPressed: () => editableTextState.cutSelection(SelectionChangedCause.toolbar),
+          ),
+        if (hasSelection)
+          ContextMenuButtonItem(
+            type: ContextMenuButtonType.copy,
+            onPressed: () => editableTextState.copySelection(SelectionChangedCause.toolbar),
+          ),
+        if (!widget.readOnly)
+          ContextMenuButtonItem(
+            type: ContextMenuButtonType.paste,
+            onPressed: () => editableTextState.pasteText(SelectionChangedCause.toolbar),
+          ),
+        ContextMenuButtonItem(
+          type: ContextMenuButtonType.selectAll,
+          onPressed: () => editableTextState.selectAll(SelectionChangedCause.toolbar),
+        ),
+      ],
+    );
+  }
+
+  // ================= 行列拖拽（桌面与移动端共用） =================
+
+  /// 开始拖动某一行
+  void _startRowDrag(int? row) {
+    if (row == null || !mounted) return;
+    // 移动端由 LongPressDraggable 触发，其自带的 hapticFeedbackOnStart 已给出触觉反馈
+    DragCursor.isDragging.value = true;
+    setState(() {
+      _draggingRow = row;
+      _hoveredRowHandle = null;
+      _hoveredColumnHandle = null;
+      _rowDropGap = null;
+      _columnDropGap = null;
+    });
+  }
+
+  /// 拖动过程中按指针位置更新行落点
+  void _updateRowDrag(Offset globalPosition) {
+    _rowHandlePointer = globalPosition;
+    _updateRowDropGap(globalPosition);
+  }
+
+  /// 结束拖动行并按落点移动
+  void _endRowDrag() {
+    final int? from = _draggingRow;
+    final int? gap = _rowDropGap;
+    DragCursor.isDragging.value = false;
+    if (!mounted) return;
+    setState(() {
+      _draggingRow = null;
+      _rowDropGap = null;
+    });
+    if (from != null && gap != null) {
+      _moveRow(from, gap > from ? gap - 1 : gap);
+    }
+    if (!_isMobile) _restoreRowHandleHover();
+  }
+
+  /// 开始拖动某一列
+  void _startColumnDrag(int? col) {
+    if (col == null || !mounted) return;
+    DragCursor.isDragging.value = true;
+    setState(() {
+      _draggingColumn = col;
+      _hoveredRowHandle = null;
+      _hoveredColumnHandle = null;
+      _rowDropGap = null;
+      _columnDropGap = null;
+    });
+  }
+
+  /// 拖动过程中按指针位置更新列落点
+  void _updateColumnDrag(Offset globalPosition) {
+    _columnHandlePointer = globalPosition;
+    _updateColumnDropGap(globalPosition);
+  }
+
+  /// 结束拖动列并按落点移动
+  void _endColumnDrag() {
+    final int? from = _draggingColumn;
+    final int? gap = _columnDropGap;
+    DragCursor.isDragging.value = false;
+    if (!mounted) return;
+    setState(() {
+      _draggingColumn = null;
+      _columnDropGap = null;
+    });
+    if (from != null && gap != null) {
+      _moveColumn(from, gap > from ? gap - 1 : gap);
+    }
+    if (!_isMobile) _restoreColumnHandleHover();
+  }
+
   // ================= 单元格交互 =================
 
   /// 单元格焦点变化时刷新「+」入口与列宽
@@ -797,6 +1304,10 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
     }
 
     final bool hasFocus = _focusNodes.values.any((node) => node.hasFocus);
+    // 输入框失焦（如收起软键盘）后退回单选态，重新显示选中边框与拖拽手柄
+    if (_isMobile && !hasFocus && _mobileStage == _MobileCellStage.editing) {
+      _mobileStage = _MobileCellStage.selected;
+    }
     if (hasFocus == _hasFocusedCell) {
       if (!hasFocus) _scheduleColumnShrink();
       return;
@@ -1058,6 +1569,7 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
 
   /// 删除指定行
   void _deleteRow(int row) {
+    if (_isMobile) _resetMobileInteraction();
     _selection = null;
     _selectionAnchor = null;
     _activeCell = null;
@@ -1076,6 +1588,7 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
 
   /// 删除指定列
   void _deleteColumn(int col) {
+    if (_isMobile) _resetMobileInteraction();
     _selection = null;
     _selectionAnchor = null;
     _activeCell = null;
@@ -1229,6 +1742,7 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
   /// 移动行到指定位置
   void _moveRow(int from, int to) {
     if (from == to) return;
+    if (_isMobile) _resetMobileInteraction();
 
     _selection = null;
     _selectionAnchor = null;
@@ -1250,6 +1764,7 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
   /// 移动列到指定位置
   void _moveColumn(int from, int to) {
     if (from == to) return;
+    if (_isMobile) _resetMobileInteraction();
 
     _selection = null;
     _selectionAnchor = null;
@@ -1372,12 +1887,7 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
               labelText: widget.table.alignment == alignment ? '· $label' : label,
               icon: icon,
               labelBold: widget.table.alignment == alignment,
-              onTap: () {
-                if (widget.table.alignment == alignment) return;
-                widget.onBeforeChange?.call();
-                setState(() => widget.table.alignment = alignment);
-                widget.onChanged();
-              },
+              onTap: () => _setTableAlignment(alignment),
             ),
         ],
       ),
@@ -1400,7 +1910,7 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
       ),
       ContextMenuItem(
         labelText: '删除列',
-        icon: Icons.view_column_outlined,
+        icon: MaterialIcons.view_column,
         enabled: widget.table.columnCount > 1,
         onTap: () => _deleteColumn(col),
       ),
@@ -1409,7 +1919,7 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
 
       ContextMenuItem(
         labelText: '删除表格',
-        icon: Icons.delete_outline,
+        icon: Icons.delete_sweep_outlined,
         labelColor: Colors.redAccent,
         onTap: () => widget.onDeleteTable?.call(),
       ),
@@ -1428,6 +1938,8 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
   @override
   Widget build(BuildContext context) {
     _ensureCellResources();
+    // 移动端底部快捷栏是表格的兄弟子树，状态放到帧末统一同步
+    if (_isMobile) _scheduleMobileToolbarSync();
 
     final List<double> widths = _columnWidths.length == widget.table.columnCount
         ? _columnWidths
@@ -1451,33 +1963,40 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
         // 表格内容超出可用宽度时需要横向滚动并显示滚动条
         final bool hasOverflow = tableOuterWidth > tableAreaWidth + 0.5;
 
-        return Focus(
-          focusNode: _tableFocusNode,
-          onKeyEvent: _handleTableKey,
-          child: MouseRegion(
+        // 移动端没有鼠标悬停，不安装 MouseRegion，避免悬停状态干扰触摸检测
+        Widget stack = Stack(
+          children: [
+            // 右侧与下方各留出「+」按钮的位置
+            Padding(
+              padding: const EdgeInsets.only(
+                right: _addControlGutter,
+                bottom: _addControlGutter,
+              ),
+              child: _buildScrollArea(
+                grid: grid,
+                viewportWidth: tableAreaWidth,
+                contentWidth: tableOuterWidth,
+                hasOverflow: hasOverflow,
+              ),
+            ),
+            if (!widget.readOnly) _buildAddControls(),
+          ],
+        );
+
+        if (!_isMobile) {
+          stack = MouseRegion(
             // 拖动行或列期间整表统一使用抓取光标
             cursor: _isDraggingStructure ? _dragCursor : MouseCursor.defer,
             onEnter: (_) => setState(() => _isHovered = true),
             onExit: (_) => setState(() => _isHovered = false),
-            child: Stack(
-              children: [
-                // 右侧与下方各留出「+」按钮的位置
-                Padding(
-                  padding: const EdgeInsets.only(
-                    right: _addControlGutter,
-                    bottom: _addControlGutter,
-                  ),
-                  child: _buildScrollArea(
-                    grid: grid,
-                    viewportWidth: tableAreaWidth,
-                    contentWidth: tableOuterWidth,
-                    hasOverflow: hasOverflow,
-                  ),
-                ),
-                if (!widget.readOnly) _buildAddControls(),
-              ],
-            ),
-          ),
+            child: stack,
+          );
+        }
+
+        return Focus(
+          focusNode: _tableFocusNode,
+          onKeyEvent: _handleTableKey,
+          child: stack,
         );
       },
     );
@@ -1532,12 +2051,13 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
 
   /// 构建表格网格
   ///
-  /// 左侧与上方预留手柄向表格外溢出的空白，并把行、列手柄的悬停与拖动区域
-  /// 覆盖到边框外侧，使指针离开单元格后手柄依然可见、可拖动。
+  /// 行、列手柄层桌面端覆盖整条边框并按悬停定位，移动端只在选中首行或
+  /// 第一列单元格时覆盖对应的一段并改为长按拖动，外观与拖动逻辑共用。
   Widget _buildGrid(List<double> widths) {
     final Color gridColor = widget.colorScheme.outlineVariant.withValues(alpha: 0.5);
 
     return Stack(
+      key: _gridLayerKey,
       clipBehavior: Clip.none,
       children: [
         Padding(
@@ -1546,11 +2066,12 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
             top: OutlineTableBlock.handleGutter,
           ),
           child: Listener(
-            // 指针事件在表格层级统一处理，支撑单元格拖拽选择
-            onPointerDown: _handleTablePointerDown,
-            onPointerMove: _handleTablePointerMove,
-            onPointerUp: _handleTablePointerUp,
-            onPointerCancel: (_) => _isSelectingCells = false,
+            // 桌面端指针事件在表格层级统一处理，支撑单元格拖拽选择；
+            // 移动端全部关闭，避免与单元格点击、长按排序手势互相干扰
+            onPointerDown: _isMobile ? null : _handleTablePointerDown,
+            onPointerMove: _isMobile ? null : _handleTablePointerMove,
+            onPointerUp: _isMobile ? null : _handleTablePointerUp,
+            onPointerCancel: _isMobile ? null : (_) => _isSelectingCells = false,
             child: Container(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(_tableRadius),
@@ -1572,6 +2093,7 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
           _buildRowHandleLayer(),
           _buildColumnHandleLayer(),
         ],
+        if (_isMobile && !widget.readOnly) ..._buildMobileSelectionOverlay(widths),
       ],
     );
   }
@@ -1634,6 +2156,9 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
         ),
         // 列拖拽的插入线跨越整张表格，每一行各画一段
         if (columnDropGap != null) _buildColumnInsertLine(columnDropGap, widths),
+        // 移动端拖动列宽时绘制贯穿表格的参考线
+        if (_isMobile && _mobileResizingColumn != null)
+          _buildMobileColumnResizeGuide(_mobileResizingColumn!, widths),
         // 行拖拽的插入线绘制在目标行的上边界或下边界
         if (_activeRowDropGap == row) _buildRowInsertLine(top: true),
         if (_activeRowDropGap == row + 1) _buildRowInsertLine(top: false),
@@ -1679,6 +2204,29 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
     );
   }
 
+  /// 构建移动端调宽时的竖向参考线
+  ///
+  /// 位于正在调整列的右边缘，逐行绘制后形成贯穿整表的细线，
+  /// 与表格类应用常见的列边界拖拽反馈一致。
+  Widget _buildMobileColumnResizeGuide(int col, List<double> widths) {
+    double x = 0;
+    for (int i = 0; i <= col && i < widths.length; i++) {
+      x += widths[i];
+    }
+    final double tableWidth = widths.fold(0.0, (sum, width) => sum + width);
+    final double left = (x - 1).clamp(0.0, tableWidth - 1);
+
+    return Positioned(
+      left: left,
+      top: 0,
+      bottom: 0,
+      width: 2,
+      child: IgnorePointer(
+        child: ColoredBox(color: widget.colorScheme.primary),
+      ),
+    );
+  }
+
   /// 单元格文字水平对齐方式（与整表设置一致）
   TextAlign get _cellTextAlign {
     switch (widget.table.alignment) {
@@ -1692,12 +2240,95 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
   }
 
   /// 构建单元格
+  ///
+  /// 移动端在未聚焦阶段用 [AbsorbPointer] 挡住输入框，改由覆盖层接收点击：
+  /// 这样第一次点击不会弹出软键盘，也不会触发输入框自带的长按选词。
   Widget _buildCell(int row, int col, double width) {
     final String key = _cellKeyOf(row, col);
     final OutlineTableCell cell = widget.table.rows[row][col];
     final TextEditingController controller = _controllers[key]!;
     final FocusNode focusNode = _focusNodes[key]!;
     final bool selected = _selection?.contains(row, col) ?? false;
+    final _CellPosition position = (row: row, col: col);
+
+    final bool mobileActive = _hasMobileSelection && _activeCell == position;
+    final bool batchSelected =
+        _isMobile && _mobileBatchMode && _mobileBatchSelection.contains(position);
+    final bool allowCellFocus = !_isMobile ||
+        widget.readOnly ||
+        (!_mobileBatchMode &&
+            _mobileStage == _MobileCellStage.editing &&
+            _activeCell == position);
+
+    Widget input = Listener(
+      // 单元格内边距同样响应右键，整个单元格都能唤起格式栏
+      behavior: HitTestBehavior.opaque,
+      // 移动端没有右键，长按由选中态控件显式处理，不安装任何长按检测
+      onPointerDown: _isMobile
+          ? null
+          : (event) {
+              if (event.buttons == kSecondaryButton) {
+                _handleCellSecondaryTap(row, col, event.position);
+              }
+            },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: _cellHorizontalPadding,
+          vertical: _cellVerticalPadding,
+        ),
+        child: Focus(
+          onKeyEvent: (node, event) => _handleCellKey(row, col, event),
+          // 包裹输入法修复，使中文候选框跟随光标所在单元格
+          child: ImeCursorFixerWrapper(
+            controller: controller,
+            focusNode: focusNode,
+            child: TextField(
+              controller: controller,
+              focusNode: focusNode,
+              readOnly: widget.readOnly,
+              maxLines: null,
+              minLines: 1,
+              keyboardType: TextInputType.multiline,
+              textAlign: _cellTextAlign,
+              style: _cellTextStyle(cell),
+              cursorColor: widget.colorScheme.primary,
+              // 拖动行或列时整表使用抓取光标，避免经过其他单元格时出现文字光标
+              mouseCursor: _isDraggingStructure ? _dragCursor : null,
+              decoration: InputDecoration(
+                isCollapsed: true,
+                isDense: true,
+                filled: false,
+                // 关闭主题继承的圆角描边与底色，单元格边框由表格网格统一绘制
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                disabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                errorBorder: InputBorder.none,
+                focusedErrorBorder: InputBorder.none,
+                contentPadding: EdgeInsets.zero,
+              ),
+              // 桌面端屏蔽输入框默认右键菜单，改用表格自身的右键菜单；
+              // 移动端长按选中文字后弹出文字选择工具栏
+              contextMenuBuilder: _isMobile
+                  ? _buildMobileCellSelectionToolbar
+                  : (context, editableTextState) => const SizedBox.shrink(),
+              onChanged: (value) {
+                if (cell.text == value) return;
+                widget.onBeforeChange?.call();
+                cell.text = value;
+                // 输入时只扩展列宽，收缩留给失焦时处理
+                _growColumnWidths();
+                widget.onChanged();
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (!allowCellFocus) {
+      input = AbsorbPointer(absorbing: true, child: input);
+    }
 
     final Widget cellContent = Stack(
       clipBehavior: Clip.none,
@@ -1710,217 +2341,309 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
             ),
           ),
         // 选中单元格的底色，绘制在文字下方
-        if (selected)
+        if (selected || mobileActive || batchSelected)
           Positioned.fill(
             child: IgnorePointer(
-              child: ColoredBox(color: widget.colorScheme.primary.withValues(alpha: 0.1)),
-            ),
-          ),
-        Listener(
-          // 单元格内边距同样响应右键，整个单元格都能唤起格式栏
-          behavior: HitTestBehavior.opaque,
-          // 右键弹出与节点一致的样式菜单
-          onPointerDown: (event) {
-            if (event.buttons == kSecondaryButton) {
-              _handleCellSecondaryTap(row, col, event.position);
-            }
-          },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: _cellHorizontalPadding,
-              vertical: _cellVerticalPadding,
-            ),
-            child: Focus(
-              onKeyEvent: (node, event) => _handleCellKey(row, col, event),
-              // 包裹输入法修复，使中文候选框跟随光标所在单元格
-              child: ImeCursorFixerWrapper(
-                controller: controller,
-                focusNode: focusNode,
-                child: TextField(
-                  controller: controller,
-                  focusNode: focusNode,
-                  readOnly: widget.readOnly,
-                  maxLines: null,
-                  minLines: 1,
-                  keyboardType: TextInputType.multiline,
-                  textAlign: _cellTextAlign,
-                  style: _cellTextStyle(cell),
-                  cursorColor: widget.colorScheme.primary,
-                  // 拖动行或列时整表使用抓取光标，避免经过其他单元格时出现文字光标
-                  mouseCursor: _isDraggingStructure ? _dragCursor : null,
-                  decoration: InputDecoration(
-                    isCollapsed: true,
-                    isDense: true,
-                    filled: false,
-                    // 关闭主题继承的圆角描边与底色，单元格边框由表格网格统一绘制
-                    border: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    disabledBorder: InputBorder.none,
-                    focusedBorder: InputBorder.none,
-                    errorBorder: InputBorder.none,
-                    focusedErrorBorder: InputBorder.none,
-                    contentPadding: EdgeInsets.zero,
-                  ),
-                  // 单元格使用表格自身的右键菜单，屏蔽输入框默认菜单
-                  contextMenuBuilder: (context, editableTextState) => const SizedBox.shrink(),
-                  onChanged: (value) {
-                    if (cell.text == value) return;
-                    widget.onBeforeChange?.call();
-                    cell.text = value;
-                    // 输入时只扩展列宽，收缩留给失焦时处理
-                    _growColumnWidths();
-                    widget.onChanged();
-                  },
+              child: ColoredBox(
+                color: widget.colorScheme.primary.withValues(
+                  alpha: batchSelected ? 0.12 : (mobileActive ? 0.08 : 0.1),
                 ),
               ),
             ),
           ),
-        ),
+        input,
+        // 移动端单选单元格的四边高亮边框
+        if (mobileActive)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border.all(
+                    color: widget.colorScheme.primary,
+                    width: _mobileSelectionBorderWidth,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        // 批量勾选：相邻已勾选单元格之间共享的边只画一次，避免边缘重叠变粗
+        if (batchSelected)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(border: _batchSelectionBorder(row, col)),
+              ),
+            ),
+          ),
+        // 未聚焦阶段统一由覆盖层处理点击：第一次选中、第二次聚焦
+        if (_isMobile && !widget.readOnly && !allowCellFocus)
+          Positioned.fill(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTapDown: (details) => _mobileLastTapPosition = details.globalPosition,
+              onTap: () => _handleMobileCellTap(row, col, _mobileLastTapPosition),
+              child: const SizedBox.expand(),
+            ),
+          ),
+        // 行列拖拽手柄外观：桌面端悬停显示，移动端选中首行/首列时显示
         if (!widget.readOnly && row == 0) _buildColumnHandleIndicator(col),
-        // 列宽拖拽条放在最后，优先响应表头右上角区域
-        if (!widget.readOnly && row == 0) _buildColumnResizeHandle(col),
         if (!widget.readOnly && col == 0 && row > 0) _buildRowHandleIndicator(row),
+        // 桌面端的列宽拖拽条（移动端改用选中态指示器）
+        if (!_isMobile && !widget.readOnly && row == 0) _buildColumnResizeHandle(col),
       ],
     );
 
     return SizedBox(key: _cellKeys[key]!, width: width, child: cellContent);
   }
 
-  /// 构建行手柄的悬停与拖动区域
+  /// 批量勾选单元格的边框
   ///
-  /// 覆盖表格左边框以及边框外侧的预留空白，指针移到单元格之外也不会丢失手柄；
-  /// 指针所在行与插入位置均由指针坐标反推，拖动开始后不再显示手柄。
-  Widget _buildRowHandleLayer() {
+  /// 上方或左侧已勾选时省略本格的 top / left 边，共享边统一由靠上、靠左
+  /// 那个单元格的 bottom / right 边绘制一次，避免相邻两个 2px 边框
+  /// 叠成一条 4px 的粗线；不相邻的单元格仍是完整的四边框。
+  Border _batchSelectionBorder(int row, int col) {
+    final BorderSide side = BorderSide(
+      color: widget.colorScheme.primary,
+      width: _mobileSelectionBorderWidth,
+    );
+    // 用等宽透明边而不是 width=0，保证四角拼接形状与其它边一致
+    final BorderSide hidden = BorderSide(
+      color: Colors.transparent,
+      width: _mobileSelectionBorderWidth,
+    );
+    return Border(
+      top: _mobileBatchSelection.contains((row: row - 1, col: col)) ? hidden : side,
+      bottom: side,
+      left: _mobileBatchSelection.contains((row: row, col: col - 1)) ? hidden : side,
+      right: side,
+    );
+  }
+
+  // ================= 移动端选中态控件 =================
+
+  /// 构建移动端选中态的附加控件
+  ///
+  /// 行列拖拽手柄的可见样式与拖动区域已完全复用桌面端实现；
+  /// 批量勾选模式的边框由各单元格自己绘制，这里只负责首行列宽指示器。
+  List<Widget> _buildMobileSelectionOverlay(List<double> widths) {
+    if (!_hasMobileSelection) return const <Widget>[];
+    final _CellPosition? cell = _activeCell;
+    if (cell == null || cell.row != 0) return const <Widget>[];
+    final Rect? rect = _localCellRect(cell);
+    if (rect == null) return const <Widget>[];
+
+    final double gridWidth = widths.fold(0.0, (sum, width) => sum + width) +
+        _gridBorderWidth * 2 +
+        OutlineTableBlock.handleGutter;
+    return <Widget>[_buildMobileColumnResizeControl(cell.col, rect, gridWidth)];
+  }
+
+  /// 把单元格的全局矩形换算成网格层局部坐标
+  Rect? _localCellRect(_CellPosition cell) {
+    final Rect? global = _cellRect(cell);
+    final RenderBox? box =
+        _gridLayerKey.currentContext?.findRenderObject() as RenderBox?;
+    if (global == null || box == null || !box.attached) return null;
+    return Rect.fromPoints(
+      box.globalToLocal(global.topLeft),
+      box.globalToLocal(global.bottomRight),
+    );
+  }
+
+  /// 把左侧坐标收敛到网格层可命中的范围内
+  double _clampControlLeft(double value, double width, double gridWidth) {
+    final double maxLeft = gridWidth > width ? gridWidth - width : 0.0;
+    return value < 0 ? 0.0 : (value > maxLeft ? maxLeft : value);
+  }
+
+  /// 移动端行拖拽手柄层的命中矩形（选中第一列非表头单元格时）
+  Rect? _mobileRowDragRect() {
+    if (_mobileRowDragRow == null) return null;
+    final _CellPosition? cell = _activeCell;
+    return cell == null ? null : _localCellRect(cell);
+  }
+
+  /// 移动端列拖拽手柄层的命中矩形（选中首行单元格时）
+  Rect? _mobileColumnDragRect() {
+    if (_mobileColumnDragCol == null) return null;
+    final _CellPosition? cell = _activeCell;
+    return cell == null ? null : _localCellRect(cell);
+  }
+
+  /// 构建首行选中时的列宽指示器
+  ///
+  /// 采用表格类应用常见的窄竖条：主色圆角竖条内嵌一条浅色握线，
+  /// 拖动时沿列右边缘绘制贯穿整表的参考线。
+  Widget _buildMobileColumnResizeControl(int col, Rect rect, double gridWidth) {
+    final double height =
+        rect.height < _mobileResizeHitHeight ? _mobileResizeHitHeight : rect.height;
+    final double centeredTop = rect.center.dy - height / 2;
+    final double top = centeredTop < 0 ? 0.0 : centeredTop;
+
     return Positioned(
-      key: _rowHandleLayerKey,
-      left: 0,
-      top: OutlineTableBlock.handleGutter,
-      bottom: 0,
-      width: OutlineTableBlock.handleGutter + _rowHandleHitWidth,
-      // 拖动过程中让出指针，避免表格内的悬停反馈干扰拖拽
-      child: IgnorePointer(
-        ignoring: _isDraggingStructure,
-        child: MouseRegion(
-          cursor: SystemMouseCursors.click,
-          onEnter: (event) => _updateHoveredRowHandle(event.position),
-          onHover: (event) => _updateHoveredRowHandle(event.position),
-          onExit: (_) => _setHoveredRowHandle(null),
-          child: Draggable<Object>(
-            // 拖动过程由行着色与插入线反馈，不再显示跟随指针的提示
-            feedback: const SizedBox(width: 1, height: 1),
-            // 锚点归零，使更新回调中的位置就是指针的全局坐标
-            dragAnchorStrategy: (draggable, context, position) => Offset.zero,
-            onDragStarted: () {
-              final int? row = _hoveredRowHandle;
-              if (row == null) return;
-              // 拖拽期间整块编辑区保持抓取光标，指针移出表格也不会变回普通光标
-              DragCursor.isDragging.value = true;
-              setState(() {
-                _draggingRow = row;
-                // 拖动开始后原位不再显示手柄
-                _hoveredRowHandle = null;
-                _hoveredColumnHandle = null;
-                _rowDropGap = null;
-                _columnDropGap = null;
-              });
-            },
-            onDragUpdate: (details) {
-              // 记录指针位置，松开后按它恢复手柄悬停
-              _rowHandlePointer = details.globalPosition;
-              // 按指针位置更新插入位置，指针在表格外同样有效
-              _updateRowDropGap(details.globalPosition);
-            },
-            onDragEnd: (_) {
-              final int? from = _draggingRow;
-              final int? gap = _rowDropGap;
-              DragCursor.isDragging.value = false;
-              setState(() {
-                _draggingRow = null;
-                _rowDropGap = null;
-              });
-              if (from != null && gap != null) {
-                // 间隙索引转为移除拖动行之后的目标位置
-                _moveRow(from, gap > from ? gap - 1 : gap);
-              }
-              _restoreRowHandleHover();
-            },
-            child: Container(color: Colors.transparent),
+      left: _clampControlLeft(
+        rect.right - _mobileResizeHitWidth / 2,
+        _mobileResizeHitWidth,
+        gridWidth,
+      ),
+      top: top,
+      width: _mobileResizeHitWidth,
+      height: height,
+      child: Center(
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragStart: (_) {
+            setState(() => _mobileResizingColumn = col);
+            _startColumnResize(col);
+          },
+          onHorizontalDragUpdate: (details) =>
+              _updateColumnResize(col, details.delta.dx),
+          onHorizontalDragEnd: (_) => _finishMobileColumnResize(),
+          onHorizontalDragCancel: _finishMobileColumnResize,
+          child: SizedBox(
+            width: _mobileResizeHitWidth,
+            height: _mobileResizeHitHeight,
+            child: Center(child: _buildMobileResizeBar()),
           ),
         ),
       ),
     );
   }
 
-  /// 构建列手柄的悬停与拖动区域
+  /// 结束移动端列宽拖拽
+  void _finishMobileColumnResize() {
+    _endColumnResize();
+    if (mounted) setState(() => _mobileResizingColumn = null);
+  }
+
+  /// 构建列宽拖拽指示器的外观
+  Widget _buildMobileResizeBar() {
+    return Container(
+      width: _mobileResizeBarWidth,
+      height: _mobileResizeBarHeight,
+      decoration: BoxDecoration(
+        color: widget.colorScheme.primary,
+        borderRadius: BorderRadius.circular(4),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.18),
+            blurRadius: 3,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: Center(
+        child: Container(
+          width: 2,
+          height: 12,
+          decoration: BoxDecoration(
+            color: widget.colorScheme.onPrimary,
+            borderRadius: BorderRadius.circular(1),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 构建行手柄的拖动区域
   ///
-  /// 覆盖表格上边框以及边框外侧的预留空白，指针移到单元格之外也不会丢失手柄；
-  /// 指针所在列与插入位置均由指针坐标反推，拖动开始后不再显示手柄。
+  /// 桌面端覆盖整条左边框并按悬停位置反推行、立即拖动；移动端只在选中
+  /// 第一列非表头单元格时覆盖该行对应的一段，改由长按拖动。
+  /// 可见手柄、落点计算、插入线与移动逻辑两端完全共用。
+  Widget _buildRowHandleLayer() {
+    final Rect? mobileRect = _isMobile ? _mobileRowDragRect() : null;
+    if (_isMobile && mobileRect == null) return const SizedBox.shrink();
+
+    return Positioned(
+      key: _rowHandleLayerKey,
+      left: 0,
+      top: _isMobile ? mobileRect!.top : OutlineTableBlock.handleGutter,
+      bottom: _isMobile ? null : 0,
+      height: _isMobile ? mobileRect!.height : null,
+      width: OutlineTableBlock.handleGutter + _rowHandleHitWidth,
+      // 拖动过程中让出指针，避免表格内的悬停反馈干扰拖拽
+      child: IgnorePointer(
+        ignoring: _isDraggingStructure,
+        child: _isMobile
+            ? LongPressDraggable<Object>(
+                feedback: const SizedBox(width: 1, height: 1),
+                dragAnchorStrategy: (draggable, context, position) => Offset.zero,
+                onDragStarted: () => _startRowDrag(_mobileRowDragRow),
+                onDragUpdate: (details) => _updateRowDrag(details.globalPosition),
+                onDragEnd: (_) => _endRowDrag(),
+                child: Container(color: Colors.transparent),
+              )
+            : MouseRegion(
+                cursor: SystemMouseCursors.click,
+                onEnter: (event) => _updateHoveredRowHandle(event.position),
+                onHover: (event) => _updateHoveredRowHandle(event.position),
+                onExit: (_) => _setHoveredRowHandle(null),
+                child: Draggable<Object>(
+                  feedback: const SizedBox(width: 1, height: 1),
+                  dragAnchorStrategy: (draggable, context, position) => Offset.zero,
+                  onDragStarted: () => _startRowDrag(_hoveredRowHandle),
+                  onDragUpdate: (details) => _updateRowDrag(details.globalPosition),
+                  onDragEnd: (_) => _endRowDrag(),
+                  child: Container(color: Colors.transparent),
+                ),
+              ),
+      ),
+    );
+  }
+
+  /// 构建列手柄的拖动区域
+  ///
+  /// 桌面端覆盖整条上边框并按悬停位置反推列、立即拖动；移动端只在选中
+  /// 首行单元格时覆盖该列对应的一段，改由长按拖动。
   Widget _buildColumnHandleLayer() {
+    final Rect? mobileRect = _isMobile ? _mobileColumnDragRect() : null;
+    if (_isMobile && mobileRect == null) return const SizedBox.shrink();
+
     return Positioned(
       key: _columnHandleLayerKey,
-      left: OutlineTableBlock.handleGutter,
-      right: 0,
+      left: _isMobile ? mobileRect!.left : OutlineTableBlock.handleGutter,
+      right: _isMobile ? null : 0,
+      width: _isMobile ? mobileRect!.width : null,
       top: 0,
       height: OutlineTableBlock.handleGutter + _columnHandleHitHeight,
       // 拖动过程中让出指针，避免表格内的悬停反馈干扰拖拽
       child: IgnorePointer(
         ignoring: _isDraggingStructure,
-        child: MouseRegion(
-          cursor: SystemMouseCursors.click,
-          onEnter: (event) => _updateHoveredColumnHandle(event.position),
-          onHover: (event) => _updateHoveredColumnHandle(event.position),
-          onExit: (_) => _setHoveredColumnHandle(null),
-          child: Draggable<Object>(
-            // 拖动过程由列着色与插入线反馈，不再显示跟随指针的提示
-            feedback: const SizedBox(width: 1, height: 1),
-            // 锚点归零，使更新回调中的位置就是指针的全局坐标
-            dragAnchorStrategy: (draggable, context, position) => Offset.zero,
-            onDragStarted: () {
-              final int? col = _hoveredColumnHandle;
-              if (col == null) return;
-              // 拖拽期间整块编辑区保持抓取光标，指针移出表格也不会变回普通光标
-              DragCursor.isDragging.value = true;
-              setState(() {
-                _draggingColumn = col;
-                // 拖动开始后原位不再显示手柄
-                _hoveredRowHandle = null;
-                _hoveredColumnHandle = null;
-                _rowDropGap = null;
-                _columnDropGap = null;
-              });
-            },
-            onDragUpdate: (details) {
-              // 记录指针位置，松开后按它恢复手柄悬停
-              _columnHandlePointer = details.globalPosition;
-              // 按指针位置更新插入位置，指针在表格外同样有效
-              _updateColumnDropGap(details.globalPosition);
-            },
-            onDragEnd: (_) {
-              final int? from = _draggingColumn;
-              final int? gap = _columnDropGap;
-              DragCursor.isDragging.value = false;
-              setState(() {
-                _draggingColumn = null;
-                _columnDropGap = null;
-              });
-              if (from != null && gap != null) {
-                // 间隙索引转为移除拖动列之后的目标位置
-                _moveColumn(from, gap > from ? gap - 1 : gap);
-              }
-              _restoreColumnHandleHover();
-            },
-            child: Container(color: Colors.transparent),
-          ),
-        ),
+        child: _isMobile
+            ? LongPressDraggable<Object>(
+                feedback: const SizedBox(width: 1, height: 1),
+                dragAnchorStrategy: (draggable, context, position) => Offset.zero,
+                onDragStarted: () => _startColumnDrag(_mobileColumnDragCol),
+                onDragUpdate: (details) => _updateColumnDrag(details.globalPosition),
+                onDragEnd: (_) => _endColumnDrag(),
+                child: Container(color: Colors.transparent),
+              )
+            : MouseRegion(
+                cursor: SystemMouseCursors.click,
+                onEnter: (event) => _updateHoveredColumnHandle(event.position),
+                onHover: (event) => _updateHoveredColumnHandle(event.position),
+                onExit: (_) => _setHoveredColumnHandle(null),
+                child: Draggable<Object>(
+                  feedback: const SizedBox(width: 1, height: 1),
+                  dragAnchorStrategy: (draggable, context, position) => Offset.zero,
+                  onDragStarted: () => _startColumnDrag(_hoveredColumnHandle),
+                  onDragUpdate: (details) => _updateColumnDrag(details.globalPosition),
+                  onDragEnd: (_) => _endColumnDrag(),
+                  child: Container(color: Colors.transparent),
+                ),
+              ),
       ),
     );
   }
 
   /// 构建行拖拽手柄的外观
   ///
-  /// 居中压在表格左边框线上，一半位于表格外侧，只在悬停时显示。
+  /// 居中压在表格左边框线上，一半位于表格外侧；
+  /// 桌面端悬停时出现，移动端选中第一列非表头单元格时出现。
   Widget _buildRowHandleIndicator(int row) {
-    final bool visible = _hoveredRowHandle == row;
+    final bool visible = _isMobile
+        ? _mobileRowDragRow == row
+        : _hoveredRowHandle == row;
 
     return Positioned(
       left: 0,
@@ -1945,9 +2668,12 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
 
   /// 构建列拖拽手柄的外观
   ///
-  /// 居中压在表格上边框线上，一半位于表格外侧，只在悬停时显示。
+  /// 居中压在表格上边框线上，一半位于表格外侧；
+  /// 桌面端悬停时出现，移动端选中首行单元格时出现。
   Widget _buildColumnHandleIndicator(int col) {
-    final bool visible = _hoveredColumnHandle == col;
+    final bool visible = _isMobile
+        ? _mobileColumnDragCol == col
+        : _hoveredColumnHandle == col;
 
     return Positioned(
       left: 0,
@@ -2028,8 +2754,13 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
   }
 
   /// 构建表格右侧与下方的「+」入口
+  ///
+  /// 桌面端随悬停、编辑或选区出现；移动端没有悬停状态，
+  /// 改为选中单元格时显示，批量选择模式下隐藏。
   Widget _buildAddControls() {
-    final bool visible = _isHovered || _hasFocusedCell || _selection != null;
+    final bool visible = _isMobile
+        ? (!_mobileBatchMode && _mobileStage != _MobileCellStage.none)
+        : (_isHovered || _hasFocusedCell || _selection != null);
 
     return Positioned.fill(
       child: IgnorePointer(
@@ -2075,6 +2806,8 @@ class _OutlineTableBlockState extends State<OutlineTableBlock> {
     required VoidCallback onTap,
   }) {
     return CursorTooltipTarget(
+      // 移动端的长按提示会与选中态的长按排序手势争抢指针，此处关闭
+      showTooltip: !_isMobile,
       tooltipContent: Text(tooltip),
       child: Material(
         color: widget.colorScheme.surface,

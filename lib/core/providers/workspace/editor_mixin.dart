@@ -1322,6 +1322,7 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
     required String volumeName,
     bool isPreview = true,
     bool originalIsSetting = false,
+    String? originalSettingItemFilePath,
   }) {
     // 如果全局设置关闭了预览模式，则始终以固定模式打开
     if (isPreview && !SettingsService.instance.previewModeEnabled) {
@@ -1347,6 +1348,7 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
         originalBookUuid: bookUuid,
         originalVolumeName: volumeName,
         originalIsSetting: originalIsSetting,
+        originalSettingItemFilePath: originalSettingItemFilePath,
       );
 
       if (isPreview) {
@@ -1691,6 +1693,14 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
           return '';
         },
         isSetting: true,
+        // 直接读取内存中的伴生数据，未保存的改动也能进入备份
+        companionGetter: () {
+          final state = tab.editorKey.currentState;
+          if (state is OutlineEditorState) {
+            return state.serializeCompanionData();
+          }
+          return '';
+        },
       );
     }
   }
@@ -2111,9 +2121,10 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
   /// 从备份内容恢复当前标签页
   ///
   /// 章节类型：将内容写入文本控制器
-  /// 大纲类型：将纯文本内容解析为大纲树结构
+  /// 大纲类型：恢复正文，并还原备份中的关键词、关联、备注、图片与表格
+  /// [backupFilePath] 备份文件路径，用于定位伴生数据
   /// 标记为已修改
-  void restoreFromBackup(String content) {
+  Future<void> restoreFromBackup(String content, {String? backupFilePath}) async {
     final tab = currentTab;
     if (tab == null) return;
 
@@ -2133,11 +2144,18 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
       return;
     }
 
-    // 大纲类型：通过编辑器状态解析纯文本恢复
+    // 大纲类型：恢复伴生文件后解析正文，并重新加载伴生数据
     if (tab.type == EditorTabType.settings) {
       final state = tab.editorKey.currentState;
       if (state is OutlineEditorState) {
+        if (backupFilePath != null) {
+          await BackupService.instance.restoreBackupCompanion(
+            backupFilePath: backupFilePath,
+            settingItemFilePath: getTabFilePath(tab),
+          );
+        }
         state.parseFromText(content);
+        await state.reloadCompanionData();
         tab.isModified = true;
         // 恢复后内容已变化，触发自动保存
         triggerAutoSave();
@@ -2148,8 +2166,13 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
 
   /// 从备份恢复到指定章节/大纲（用于备份预览标签页的恢复操作）
   ///
-  /// 查找原始章节或大纲标签页并替换其内容，如果标签页未打开则不执行操作
-  void restoreBackupToChapter(String content, String chapterTitle) {
+  /// 查找原始章节或大纲标签页并替换其内容，如果标签页未打开则不执行操作；
+  /// 大纲类型会连同备份中的伴生数据一起还原。
+  Future<void> restoreBackupToChapter(
+    String content,
+    String chapterTitle, {
+    String? backupFilePath,
+  }) async {
     // 优先查找匹配标题的章节标签页
     final chapterIndex = _openedTabs.indexWhere(
       (t) => t.type == EditorTabType.chapter && t.title == chapterTitle,
@@ -2190,7 +2213,14 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
     final outlineTab = _openedTabs[outlineIndex];
     final state = outlineTab.editorKey.currentState;
     if (state is OutlineEditorState) {
+      if (backupFilePath != null) {
+        await BackupService.instance.restoreBackupCompanion(
+          backupFilePath: backupFilePath,
+          settingItemFilePath: getTabFilePath(outlineTab),
+        );
+      }
       state.parseFromText(content);
+      await state.reloadCompanionData();
       outlineTab.isModified = true;
     }
 

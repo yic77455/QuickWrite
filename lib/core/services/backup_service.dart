@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:quick_write/core/constants/constants.dart';
 import 'package:quick_write/core/services/app_paths.dart';
 import 'package:quick_write/core/services/settings_service.dart';
+import 'package:quick_write/core/services/workspace/book_folder_service.dart';
+import 'package:quick_write/core/services/workspace/outline_companion_store.dart';
 
 /// 标签页备份信息
 class _TabBackupInfo {
@@ -22,12 +24,18 @@ class _TabBackupInfo {
   /// 获取当前内容的回调
   final String Function() contentGetter;
 
+  /// 获取当前伴生数据 JSON 的回调（章节备份为空）
+  ///
+  /// 直接读取编辑器内存中的最新伴生内容，保证尚未保存时也能进入备份。
+  final String Function()? companionGetter;
+
   _TabBackupInfo({
     required this.bookUuid,
     required this.chapterTitle,
     required this.volumeName,
     required this.contentGetter,
     this.isSetting = false,
+    this.companionGetter,
   });
 }
 
@@ -85,8 +93,11 @@ class BackupRecord {
 ///       └── settings/
 ///           └── {设定名称}/
 ///               ├── 20260517_143025.md
+///               ├── 20260517_143025.json
 ///               └── ...
 /// ```
+/// 设定项备份会同时保存与备份文件同名的合并伴生文件 `.json`
+/// （关键词、关联、备注与表格）；图片不复制，历史版本预览仍从设定项目录读取。
 class BackupService {
   // ================= 单例模式 =================
   static final BackupService instance = BackupService._internal();
@@ -100,8 +111,8 @@ class BackupService {
   /// 每个标签页的备份信息
   final Map<String, _TabBackupInfo> _tabInfos = {};
 
-  /// 每个标签页上次备份的内容（用于比对是否需要新建备份）
-  final Map<String, String> _lastBackupContent = {};
+  /// 每个标签页上次备份的内容签名（正文与伴生文件拼接后比对）
+  final Map<String, String> _lastBackupSignature = {};
 
   /// 正在执行备份的标签页集合（防止并发备份）
   final Set<String> _backingUpTabs = {};
@@ -113,6 +124,7 @@ class BackupService {
   /// 如果该标签页已有计时器在运行，则跳过
   /// 如果自动备份未开启，也跳过
   /// [isSetting] 为 true 时使用 settings/ 目录，否则使用 chapters/ 目录
+  /// [companionGetter] 设定项备份时提供内存中的伴生数据
   void startTabBackupTimer({
     required String tabId,
     required String bookUuid,
@@ -120,6 +132,7 @@ class BackupService {
     required String volumeName,
     required String Function() contentGetter,
     bool isSetting = false,
+    String Function()? companionGetter,
   }) {
     if (_backupTimers.containsKey(tabId)) return;
     if (!SettingsService.instance.autoBackupEnabled) return;
@@ -132,6 +145,7 @@ class BackupService {
       volumeName: volumeName,
       contentGetter: contentGetter,
       isSetting: isSetting,
+      companionGetter: companionGetter,
     );
 
     _backupTimers[tabId] = Timer.periodic(interval, (_) async {
@@ -150,7 +164,7 @@ class BackupService {
     _backupTimers[tabId]?.cancel();
     _backupTimers.remove(tabId);
     _tabInfos.remove(tabId);
-    _lastBackupContent.remove(tabId);
+    _lastBackupSignature.remove(tabId);
     _backingUpTabs.remove(tabId);
   }
 
@@ -165,10 +179,11 @@ class BackupService {
       volumeName: volumeName ?? info.volumeName,
       contentGetter: info.contentGetter,
       isSetting: info.isSetting,
+      companionGetter: info.companionGetter,
     );
 
     // 清除上次备份缓存，以便下次备份时使用新路径比对
-    _lastBackupContent.remove(tabId);
+    _lastBackupSignature.remove(tabId);
   }
 
   /// 停止所有备份计时器
@@ -178,7 +193,7 @@ class BackupService {
     }
     _backupTimers.clear();
     _tabInfos.clear();
-    _lastBackupContent.clear();
+    _lastBackupSignature.clear();
     _backingUpTabs.clear();
   }
 
@@ -190,7 +205,7 @@ class BackupService {
     }
     _backupTimers.clear();
 
-    // 保留 _tabInfos、_lastBackupContent 和 _backingUpTabs，用已有的信息重新启动
+    // 保留 _tabInfos、_lastBackupSignature 和 _backingUpTabs，用已有的信息重新启动
     for (final entry in _tabInfos.entries) {
       final tabId = entry.key;
 
@@ -275,6 +290,8 @@ class BackupService {
         await file.delete();
         debugPrint('已删除备份: $filePath');
 
+        // 同名伴生文件随备份一起删除
+        await _deleteBackupCompanionFile(filePath);
         // 删除后清理可能产生的空目录
         await _cleanupEmptyAncestors(file.parent);
 
@@ -299,6 +316,43 @@ class BackupService {
       debugPrint('读取备份内容失败: $e');
       return null;
     }
+  }
+
+  /// 读取备份文件对应的伴生文件内容
+  ///
+  /// 伴生文件与设定项备份文件同名，扩展名替换为 `.json`；
+  /// 文件不存在时返回 null。
+  Future<String?> readBackupCompanion(String backupFilePath) async {
+    if (!backupFilePath.endsWith(GlobalConstants.settingFileExtension)) return null;
+
+    final String basePath = backupFilePath.substring(
+      0,
+      backupFilePath.length - GlobalConstants.settingFileExtension.length,
+    );
+    try {
+      final File metaFile = File('$basePath${BookFolderService.outlineMetaFileSuffix}');
+      if (!await metaFile.exists()) return null;
+      return await metaFile.readAsString();
+    } catch (e) {
+      debugPrint('读取备份伴生文件失败: $e');
+      return null;
+    }
+  }
+
+  /// 将备份中的伴生数据恢复到设定项
+  ///
+  /// 备份中没有伴生文件时清空当前伴生数据，保证恢复结果与备份一致；
+  /// 非设定项备份直接跳过。返回是否执行了恢复。
+  Future<bool> restoreBackupCompanion({
+    required String backupFilePath,
+    required String? settingItemFilePath,
+  }) async {
+    if (settingItemFilePath == null || settingItemFilePath.isEmpty) return false;
+    if (!backupFilePath.endsWith(GlobalConstants.settingFileExtension)) return false;
+
+    final String companion = await readBackupCompanion(backupFilePath) ?? '';
+    await OutlineCompanionStore.instance.replaceContent(settingItemFilePath, companion);
+    return true;
   }
 
   /// 删除指定书籍的全部备份目录
@@ -459,6 +513,24 @@ class BackupService {
     return fileName;
   }
 
+  /// 删除备份文件对应的同名伴生文件
+  ///
+  /// 只有设定项备份存在伴生文件，章节备份直接跳过。
+  Future<void> _deleteBackupCompanionFile(String backupFilePath) async {
+    if (!backupFilePath.endsWith(GlobalConstants.settingFileExtension)) return;
+
+    final String basePath = backupFilePath.substring(
+      0,
+      backupFilePath.length - GlobalConstants.settingFileExtension.length,
+    );
+    try {
+      final File metaFile = File('$basePath${BookFolderService.outlineMetaFileSuffix}');
+      if (await metaFile.exists()) await metaFile.delete();
+    } catch (e) {
+      debugPrint('删除备份伴生文件失败: $e');
+    }
+  }
+
   /// 执行单次备份
   Future<void> _performBackup(String tabId, _TabBackupInfo info) async {
     if (_backingUpTabs.contains(tabId)) return;
@@ -466,24 +538,26 @@ class BackupService {
 
     try {
       final content = info.contentGetter();
+      final companion = info.companionGetter?.call() ?? '';
+      final signature = companion.isEmpty ? content : '$content\u0000$companion';
 
-      // 检查内容是否与上次备份相同
-      if (_lastBackupContent[tabId] == content) return;
+      // 检查正文与伴生数据是否都与上次备份相同
+      if (_lastBackupSignature[tabId] == signature) return;
 
       // 首次备份时，从磁盘读取最近一次备份内容进行比对
-      if (!_lastBackupContent.containsKey(tabId)) {
-        final lastBackup = await _readLastBackupContent(info);
-        if (lastBackup == content) {
-          _lastBackupContent[tabId] = content;
+      if (!_lastBackupSignature.containsKey(tabId)) {
+        final lastBackup = await _readLatestBackupSignature(info);
+        if (lastBackup == signature) {
+          _lastBackupSignature[tabId] = signature;
           return;
         }
       }
 
       // 创建备份文件
-      await _createBackupFile(info, content);
+      await _createBackupFile(info, content, companion);
 
       // 更新缓存
-      _lastBackupContent[tabId] = content;
+      _lastBackupSignature[tabId] = signature;
 
       debugPrint('备份已创建: ${info.bookUuid}/${info.chapterTitle}');
     } catch (e) {
@@ -494,7 +568,7 @@ class BackupService {
   }
 
   /// 创建备份文件
-  Future<void> _createBackupFile(_TabBackupInfo info, String content) async {
+  Future<void> _createBackupFile(_TabBackupInfo info, String content, String companion) async {
     final backupPath = await AppPaths.instance.getBackupPath();
     final dirPath = _buildBackupItemPath(backupPath, info);
     final dir = Directory(dirPath);
@@ -515,12 +589,20 @@ class BackupService {
     final extension = _backupExtensionFor(info.isSetting);
     final file = File('$dirPath${Platform.pathSeparator}$timestamp$extension');
     await file.writeAsString(content);
+
+    // 设定项备份同时保存同名伴生文件，图片仍从设定项目录读取以节省空间
+    if (info.isSetting && companion.isNotEmpty) {
+      final File metaFile = File(
+        '$dirPath${Platform.pathSeparator}$timestamp${BookFolderService.outlineMetaFileSuffix}',
+      );
+      await metaFile.writeAsString(companion);
+    }
   }
 
-  /// 读取指定标签页最近一次备份的内容
+  /// 读取指定标签页最近一次备份的签名
   ///
-  /// 返回 null 表示没有任何备份
-  Future<String?> _readLastBackupContent(_TabBackupInfo info) async {
+  /// 返回 null 表示没有任何备份；设定项备份会连同同名伴生文件一起比对。
+  Future<String?> _readLatestBackupSignature(_TabBackupInfo info) async {
     try {
       final backupPath = await AppPaths.instance.getBackupPath();
       final dirPath = _buildBackupItemPath(backupPath, info);
@@ -539,8 +621,17 @@ class BackupService {
 
       // 文件名即时间戳，降序排列取最新
       files.sort((a, b) => b.path.compareTo(a.path));
+      final File latest = files.first;
+      final String content = await latest.readAsString();
 
-      return await files.first.readAsString();
+      if (!info.isSetting) return content;
+
+      // 设定项备份的伴生文件与备份文件同名，扩展名替换为 .json
+      final String metaPath =
+          '${latest.path.substring(0, latest.path.length - extension.length)}.json';
+      final File metaFile = File(metaPath);
+      if (!await metaFile.exists()) return content;
+      return '$content\u0000${await metaFile.readAsString()}';
     } catch (e) {
       debugPrint('读取最近备份失败: $e');
       return null;
@@ -579,6 +670,8 @@ class BackupService {
           if (dateTime.isBefore(cutoffDate)) {
             try {
               await entity.delete();
+              // 同名伴生文件随过期备份一起删除
+              await _deleteBackupCompanionFile(entity.path);
               deletedCount++;
             } catch (e) {
               debugPrint('删除过期备份失败: $e');

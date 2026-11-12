@@ -21,4 +21,8 @@ class MaterialIcons {
   static const IconData format_ink_highlighter = IconData(0xf82b, fontFamily: 'MaterialIconsRounded');
   static const IconData laps = IconData(0xf6b9, fontFamily: 'MaterialIconsRoundedSemiBold');
   static const IconData cloud_alert = IconData(0xf3cc, fontFamily: 'MaterialIconsRoundedSemiBold');
+  static const IconData table = IconData(0xf191, fontFamily: 'MaterialIconsRounded');
+  static const IconData table_edit = IconData(0xf3c6, fontFamily: 'MaterialIconsRounded');
+  static const IconData select_check_box = IconData(0xf1fe, fontFamily: 'MaterialIconsRounded');
+  static const IconData view_column = IconData(0xe8ec, fontFamily: 'MaterialIconsRounded');
 }

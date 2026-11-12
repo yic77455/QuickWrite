@@ -8,6 +8,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/constants/constants.dart';
+import 'package:quick_write/core/constants/material_icons.dart';
 import 'package:quick_write/core/constants/punctuation_symbols.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/services/cache_services/outline_last_edit_cache_service.dart';
@@ -61,6 +62,12 @@ class OutlineEditor extends StatefulWidget {
 
   /// 关联的本地文件路径（为空时不进行文件读写）
   final String? filePath;
+
+  /// 解析节点图片时使用的基准文件路径
+  ///
+  /// 为空时与 [filePath] 相同；历史版本预览使用备份文件作为 [filePath]，
+  /// 此处传入原设定项路径，使图片仍从设定项目录的 image 文件夹读取。
+  final String? imageBaseFilePath;
 
   /// 所属书籍 UUID（与 [settingItemUuid] 一起用于读写上次编辑节点缓存）
   final String? bookUuid;
@@ -127,6 +134,7 @@ class OutlineEditor extends StatefulWidget {
     super.key,
     required this.colorScheme,
     this.filePath,
+    this.imageBaseFilePath,
     this.bookUuid,
     this.settingItemUuid,
     this.title = '',
@@ -1248,6 +1256,20 @@ class OutlineEditorState extends State<OutlineEditor>
     return buffer.toString();
   }
 
+  /// 把当前树中的伴生数据编码为 JSON
+  ///
+  /// 关键词、关联、备注、图片与表格均取自内存中的最新状态，
+  /// 供备份在尚未保存时也能记录当前伴生内容；没有内容时返回空字符串。
+  String serializeCompanionData() {
+    final OutlineCompanionData data = OutlineCompanionData(
+      keywords: _collectKeywordNodes(),
+      links: Map<String, OutlineLinkTarget>.of(_links),
+      linkNodes: _collectLinkRanges(),
+      notes: _collectNoteNodes(),
+    );
+    return OutlineCompanionStore.encode(data);
+  }
+
   /// 从纯文本解析大纲树
   ///
   /// 支持制表符和 4 空格缩进表示层级。
@@ -1340,6 +1362,17 @@ class OutlineEditorState extends State<OutlineEditor>
     await _saveNotes();
     // 伴生数据落盘后清理不再被引用的图片文件
     await _cleanupImages();
+  }
+
+  /// 从磁盘重新加载关键词、关联、备注、图片与表格数据
+  ///
+  /// 恢复历史版本时在解析正文后调用，使节点上的伴生数据与备份保持一致；
+  /// 正文解析会重建全部节点，因此无需先清空节点上的旧伴生数据。
+  Future<void> reloadCompanionData() async {
+    await _loadNotes();
+    await _loadKeywords();
+    await _loadLinks();
+    if (mounted) setState(() {});
   }
 
   /// 折叠状态文件路径
@@ -1489,7 +1522,6 @@ class OutlineEditorState extends State<OutlineEditor>
     final OutlineKeywordService? service = widget.keywordService;
     if (service == null) return;
     final Map<String, OutlineKeywordFileNode> nodes = await service.readSettingKeywords(widget.filePath);
-    if (nodes.isEmpty) return;
     for (final entry in nodes.entries) {
       final OutlineNode? node = _nodeAtPath(entry.key);
       if (node == null) continue;
@@ -2295,6 +2327,9 @@ class OutlineEditorState extends State<OutlineEditor>
     final OutlineNode? node = _findNode(nodeId);
     if (node == null || node.table == null) return;
     _notifyContentChanged();
+    // 删除行或列会连同聚焦单元格的焦点节点一起移除，焦点丢失时交还编辑器，
+    // 保证保存、撤销等快捷键仍然可用
+    _restoreEditorFocusIfIdle();
   }
 
   /// 删除指定节点的表格
@@ -6253,7 +6288,7 @@ class OutlineEditorState extends State<OutlineEditor>
         ),
         ContextMenuItem(
           labelText: '表格',
-          icon: Icons.table_chart_outlined,
+          icon: MaterialIcons.table,
           enabled: canAddNote && !hasTable,
           onTap: () {
             if (nodeId != null) _insertTableForNode(nodeId);
@@ -8369,8 +8404,9 @@ class OutlineEditorState extends State<OutlineEditor>
       // 点击关联文本跳转到关联目标
       onLinkTap: widget.readOnly || _isBatchSelectionMode ? null : _handleLinkTap,
       // 节点附加备注区：图片路径按设定文件所在目录解析
+      // 备份预览按原设定项目录解析，避免从备份目录中查找图片副本
       imagePath: BookFolderService.settingImageFilePath(
-            widget.filePath,
+            widget.imageBaseFilePath ?? widget.filePath,
             flatNode.node.imageFileName,
           ) ??
           '',

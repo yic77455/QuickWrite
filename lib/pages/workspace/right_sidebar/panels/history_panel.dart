@@ -436,15 +436,20 @@ class _HistoryPanelState extends State<HistoryPanel> {
     String chapterTitle;
     String volumeName;
     bool isSetting;
+    // 设定项文件路径，供预览时从原目录读取图片
+    String? settingItemFilePath;
 
     if (tab.type == EditorTabType.backupPreview) {
       chapterTitle = tab.originalChapterTitle ?? tab.title;
       volumeName = tab.originalVolumeName ?? '';
       isSetting = tab.originalIsSetting;
+      settingItemFilePath = tab.originalSettingItemFilePath;
     } else if (tab.type == EditorTabType.settings) {
       chapterTitle = tab.title;
       volumeName = '';
       isSetting = true;
+      final item = provider.settingItems.where((i) => i.uuid == tab.id).firstOrNull;
+      if (item != null) settingItemFilePath = provider.getSettingItemFilePath(item);
     } else {
       chapterTitle = tab.title;
       final chapter = provider.chapters.where((c) => c.uuid == tab.id).firstOrNull;
@@ -460,6 +465,7 @@ class _HistoryPanelState extends State<HistoryPanel> {
       volumeName: volumeName,
       isPreview: !isDoubleTap,
       originalIsSetting: isSetting,
+      originalSettingItemFilePath: settingItemFilePath,
     );
 
     // 双击时固定已打开的预览标签页
@@ -505,11 +511,15 @@ class _HistoryPanelState extends State<HistoryPanel> {
           final tab = provider.currentTab;
 
           if (tab != null && tab.type == EditorTabType.backupPreview) {
-            // 备份预览标签页：找到原始标签页并恢复内容
-            provider.restoreBackupToChapter(content, tab.originalChapterTitle ?? tab.title);
+            // 备份预览标签页：找到原始标签页并恢复内容与伴生数据
+            await provider.restoreBackupToChapter(
+              content,
+              tab.originalChapterTitle ?? tab.title,
+              backupFilePath: record.filePath,
+            );
           } else {
             // 章节或大纲标签页：直接恢复到当前标签页
-            provider.restoreFromBackup(content);
+            await provider.restoreFromBackup(content, backupFilePath: record.filePath);
           }
         }
       },

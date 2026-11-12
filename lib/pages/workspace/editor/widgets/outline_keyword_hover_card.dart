@@ -446,42 +446,64 @@ class OutlineKeywordHoverCard extends StatelessWidget {
       OutlineTableAlignment.right => TextAlign.right,
     };
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(6),
-      child: Table(
-        border: TableBorder.all(color: gridColor, width: 0.8),
-        defaultColumnWidth: const FlexColumnWidth(),
-        defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-        children: [
-          for (int row = 0; row < table.rowCount; row++)
-            TableRow(
-              // 首行作为表头，用浅色底与正文行区分
-              decoration: row == 0
-                  ? BoxDecoration(
-                      color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-                    )
-                  : null,
-              children: [
-                for (final OutlineTableCell cell in table.rows[row])
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                    child: Text(
-                      cell.text,
-                      textAlign: textAlign,
-                      style: defaultStyleResolver(
-                        TextStyle(
-                          fontSize: _tableCellFontSize(cell.headingLevel),
-                          height: 1.35,
-                          color: colorScheme.onSurface.withValues(alpha: 0.9),
-                        ),
-                        cell.flags,
-                      ),
-                    ),
-                  ),
-              ],
+    // 表格圆角半径：外层裁剪与描边共用，保证圆角弧线与网格边界对齐
+    const double tableRadius = 4;
+
+    return Stack(
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(tableRadius),
+          // 仅绘制内部网格线；外框改由上层圆角描边绘制，
+          // 避免方角外框被裁剪后圆角处出现断线
+          child: Table(
+            border: TableBorder.symmetric(
+              inside: BorderSide(color: gridColor, width: 0.8),
             ),
-        ],
-      ),
+            defaultColumnWidth: const FlexColumnWidth(),
+            defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+            children: [
+              for (int row = 0; row < table.rowCount; row++)
+                TableRow(
+                  // 首行作为表头，用浅色底与正文行区分
+                  decoration: row == 0
+                      ? BoxDecoration(
+                          color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                        )
+                      : null,
+                  children: [
+                    for (final OutlineTableCell cell in table.rows[row])
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                        child: Text(
+                          cell.text,
+                          textAlign: textAlign,
+                          style: defaultStyleResolver(
+                            TextStyle(
+                              fontSize: _tableCellFontSize(cell.headingLevel),
+                              height: 1.35,
+                              color: colorScheme.onSurface.withValues(alpha: 0.9),
+                            ),
+                            cell.flags,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+            ],
+          ),
+        ),
+        // 外框绘制在表格之上，圆角四边完整可见，且压住表头底色与外层网格线
+        Positioned.fill(
+          child: IgnorePointer(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(tableRadius),
+                border: Border.all(color: gridColor, width: 0.8),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 

@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:quick_write/core/models/outline_keyword.dart';
 import 'package:quick_write/core/models/outline_link.dart';
@@ -68,6 +67,106 @@ class OutlineCompanionStore {
 
   // ================= 对外接口 =================
 
+  /// 把设定项的伴生文件复制到指定目录
+  ///
+  /// 复制合并 `.json` 以及其中记录的图片，图片写入目标目录的 image 文件夹。
+  /// [targetBaseName] 为目标文件名（不含扩展名），便于调用方让伴生文件与
+  /// 导出的设定文件、备份文件保持同名；[includeImages] 为 false 时只复制
+  /// 合并 `.json`，用于不需要图片副本的场景。返回是否复制了合并伴生文件。
+  static Future<bool> copyTo({
+    required String? sourceSettingItemFilePath,
+    required String targetDir,
+    required String targetBaseName,
+    bool includeImages = true,
+  }) async {
+    if (sourceSettingItemFilePath == null || sourceSettingItemFilePath.isEmpty) return false;
+
+    final String? sourceMetaPath = BookFolderService.outlineMetaFilePath(sourceSettingItemFilePath);
+    if (sourceMetaPath == null) return false;
+
+    try {
+      final File sourceFile = File(sourceMetaPath);
+      if (!await sourceFile.exists()) return false;
+
+      final String content = await sourceFile.readAsString();
+      final Directory targetDirectory = Directory(targetDir);
+      if (!await targetDirectory.exists()) {
+        await targetDirectory.create(recursive: true);
+      }
+
+      final String targetMetaPath =
+          '$targetDir${Platform.pathSeparator}$targetBaseName${BookFolderService.outlineMetaFileSuffix}';
+      await File(targetMetaPath).writeAsString(content);
+
+      if (includeImages) {
+        await _copyCompanionImages(
+          metaContent: content,
+          sourceSettingItemFilePath: sourceSettingItemFilePath,
+          targetDir: targetDir,
+        );
+      }
+      return true;
+    } catch (e) {
+      debugPrint('复制大纲伴生文件失败: $e');
+      return false;
+    }
+  }
+
+  /// 复制伴生文件中记录的图片到目标目录的 image 文件夹
+  ///
+  /// 图片文件名由伴生文件中的 `image` 字段给出，仅复制实际存在的文件。
+  static Future<void> _copyCompanionImages({
+    required String metaContent,
+    required String sourceSettingItemFilePath,
+    required String targetDir,
+  }) async {
+    final Set<String> imageFileNames = {};
+    try {
+      _collectImageFileNames(jsonDecode(metaContent), imageFileNames);
+    } catch (e) {
+      debugPrint('解析大纲伴生文件失败: $e');
+      return;
+    }
+    if (imageFileNames.isEmpty) return;
+
+    final String? sourceImageDir = BookFolderService.settingImageDirectory(sourceSettingItemFilePath);
+    if (sourceImageDir == null) return;
+
+    final String targetImageDir =
+        '$targetDir${Platform.pathSeparator}${BookFolderService.settingImageDirName}';
+    for (final String fileName in imageFileNames) {
+      // 只取文件名，避免异常字段导致路径跳出目标目录
+      final String safeName = fileName.split(RegExp(r'[\\/]')).last;
+      if (safeName.isEmpty) continue;
+
+      final File source = File('$sourceImageDir${Platform.pathSeparator}$safeName');
+      if (!await source.exists()) continue;
+
+      final Directory targetImageDirectory = Directory(targetImageDir);
+      if (!await targetImageDirectory.exists()) {
+        await targetImageDirectory.create(recursive: true);
+      }
+      await source.copy('$targetImageDir${Platform.pathSeparator}$safeName');
+    }
+  }
+
+  /// 递归收集伴生 JSON 中记录的全部图片文件名
+  ///
+  /// 图片可能出现在备注数据与关键词节点快照中，因此遍历整个结构。
+  static void _collectImageFileNames(dynamic node, Set<String> result) {
+    if (node is Map) {
+      final dynamic image = node['image'];
+      if (image is String && image.isNotEmpty) result.add(image);
+      for (final value in node.values) {
+        _collectImageFileNames(value, result);
+      }
+    } else if (node is List) {
+      for (final value in node) {
+        _collectImageFileNames(value, result);
+      }
+    }
+  }
+
   /// 读取设定项的伴生数据
   Future<OutlineCompanionData> read(String? settingItemFilePath) {
     return _enqueue(() => _loadData(settingItemFilePath));
@@ -102,9 +201,9 @@ class OutlineCompanionStore {
     return _enqueue(() async {
       try {
         final OutlineCompanionData data = await _loadData(settingItemFilePath);
-        final String before = _encode(data);
+        final String before = encode(data);
         mutate(data);
-        final String after = _encode(data);
+        final String after = encode(data);
         if (before == after) return false;
 
         await _writeOrDelete(metaPath, data);
@@ -148,6 +247,37 @@ class OutlineCompanionStore {
   ) {
     return update(settingItemFilePath, (data) {
       data.notes = Map<String, OutlineNoteData>.of(nodes);
+    });
+  }
+
+  /// 用指定内容覆盖伴生文件
+  ///
+  /// 用于历史版本恢复；内容为空（空字符串或空对象）时删除伴生文件。
+  /// 写入与其它读写在任务链中串行执行，避免与自动保存互相覆盖。
+  Future<void> replaceContent(String? settingItemFilePath, String content) {
+    final String? metaPath = BookFolderService.outlineMetaFilePath(settingItemFilePath);
+    if (metaPath == null) return Future.value();
+
+    return _enqueue(() async {
+      try {
+        final File file = File(metaPath);
+        final String compact = content.replaceAll(RegExp(r'\s'), '');
+
+        if (compact.isEmpty || compact == '{}') {
+          if (await file.exists()) await file.delete();
+        } else {
+          final Directory parentDir = file.parent;
+          if (!await parentDir.exists()) {
+            await parentDir.create(recursive: true);
+          }
+          if (!await file.exists() || await file.readAsString() != content) {
+            await file.writeAsString(content);
+          }
+        }
+        CloudSyncService.instance.notifyLocalChange();
+      } catch (e) {
+        debugPrint('恢复大纲伴生文件失败: $e');
+      }
     });
   }
 
@@ -258,12 +388,14 @@ class OutlineCompanionStore {
     await file.writeAsString(content);
   }
 
-  /// 把数据编码为稳定顺序的 JSON 字符串，用于判断内容是否变化
-  String _encode(OutlineCompanionData data) =>
+  /// 把伴生数据编码为稳定顺序的 JSON 字符串
+  ///
+  /// 没有任何内容时返回空字符串；备份等需要读取内存伴生数据的场景可直接复用。
+  static String encode(OutlineCompanionData data) =>
       data.isEmpty ? '' : jsonEncode(_toJson(data));
 
   /// 转换为便于阅读和比对的 JSON 结构
-  Map<String, dynamic> _toJson(OutlineCompanionData data) {
+  static Map<String, dynamic> _toJson(OutlineCompanionData data) {
     final Map<String, dynamic> json = {'version': 2};
 
     final List<String> keywordPaths = data.keywords.keys
@@ -391,7 +523,7 @@ class OutlineCompanionStore {
   /// 比较两个节点层级路径的先后顺序
   ///
   /// 路径形如 `0.2.1`，按每级索引数值比较，保证同级顺序与大纲树一致。
-  int _compareNodePaths(String a, String b) {
+  static int _compareNodePaths(String a, String b) {
     final List<int> segmentsA = a.split('.').map((e) => int.tryParse(e) ?? 0).toList();
     final List<int> segmentsB = b.split('.').map((e) => int.tryParse(e) ?? 0).toList();
     final int length = segmentsA.length < segmentsB.length ? segmentsA.length : segmentsB.length;

@@ -558,6 +558,12 @@ class EditorTab {
   /// true 表示原始标签页是设定，false 表示章节
   final bool originalIsSetting;
 
+  /// 备份预览标签页对应的原始设定项文件路径
+  ///
+  /// 备份不保存图片副本，预览时据此从设定项目录的 image 文件夹读取图片；
+  /// 章节备份或路径未知时为空。
+  final String? originalSettingItemFilePath;
+
   EditorTab({
     required this.id,
     required this.title,
@@ -579,6 +585,7 @@ class EditorTab {
     this.originalBookUuid,
     this.originalVolumeName,
     this.originalIsSetting = false,
+    this.originalSettingItemFilePath,
   });
 
   /// 是否为只读标签页
