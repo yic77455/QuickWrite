@@ -146,12 +146,6 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
     context.read<WorkspaceProvider>().openRightSidebar(RightSidebarType.other);
   }
 
-  /// 切换正文关键词高亮
-  void _handleKeywordToggle(NovelEditorState state) {
-    state.toggleKeywordHighlight();
-    if (mounted) setState(() {});
-  }
-
   @override
   Widget build(BuildContext context) {
     // 切换标签页时重新判断显隐
@@ -193,18 +187,7 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
                 ),
               ),
 
-              // 关键词高亮开关：开启后正文常驻关键词高亮，点按关键词可预览
-              if (editorState.hasOutlineKeywords)
-                ToggleToolButton(
-                  icon: Icons.sell_outlined,
-                  tooltip: '关键词高亮',
-                  isSelected: editorState.keywordHighlightEnabled,
-                  size: 44,
-                  iconSize: 20,
-                  onChanged: (_) => _handleKeywordToggle(editorState),
-                ),
-
-              // 与设置入口之间的分隔线，上下留白避免顶满整栏
+              // 与右侧操作区之间的分隔线，上下留白避免顶满整栏
               Container(
                 width: 1,
                 height: _barHeight - 16,
@@ -212,7 +195,21 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
                 color: colorScheme.outlineVariant,
               ),
 
-              // 其他设置入口
+              // 关键词高亮开关：开启后正文常驻关键词高亮，点按关键词可预览
+              if (editorState.hasOutlineKeywords)
+                ValueListenableBuilder<bool>(
+                  valueListenable: editorState.keywordHighlightNotifier,
+                  builder: (context, enabled, _) => ToggleToolButton(
+                    icon: Icons.sell_outlined,
+                    tooltip: '关键词高亮',
+                    isSelected: enabled,
+                    size: 44,
+                    iconSize: 20,
+                    onChanged: (_) => editorState.toggleKeywordHighlight(),
+                  ),
+                ),
+
+              // 其他设置入口，与关键词开关同属右侧操作区
               SmallToolbarButton(
                 icon: Icons.settings_rounded,
                 tooltip: '其他设置',

@@ -7,6 +7,7 @@ import 'package:quick_write/core/utils/persistent_selection.dart';
 import 'package:quick_write/core/utils/rich_text_controller.dart';
 import 'package:quick_write/core/models/outline_models.dart';
 import 'package:quick_write/core/models/outline_keyword.dart';
+import 'package:quick_write/core/models/outline_table.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_color_palette.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_connection_painter.dart';
@@ -162,10 +163,29 @@ class OutlineNodeTile extends StatefulWidget {
   /// 删除节点图片回调
   final VoidCallback onDeleteNodeImage;
 
+  /// 节点附加表格（null 表示没有表格）
+  final OutlineTableData? table;
+
+  /// 表格内容或结构变化回调
+  final VoidCallback onTableChanged;
+
+  /// 表格数据即将变化回调
+  ///
+  /// 在表格被修改之前调用，供编辑器记录撤销所需的前置状态。
+  final VoidCallback? onTableWillChange;
+
+  /// 删除表格回调
+  final VoidCallback onDeleteNodeTable;
+
   /// 附加备注区的全局键
   ///
   /// 供编辑器判断指针是否落在备注区，从而把手势让给备注输入框。
   final Key? attachmentKey;
+
+  /// 表格区域的全局键
+  ///
+  /// 供编辑器判断指针是否落在表格上，从而把手势与右键菜单让给表格。
+  final Key? tableKey;
 
   const OutlineNodeTile({
     super.key,
@@ -208,7 +228,12 @@ class OutlineNodeTile extends StatefulWidget {
     required this.onStartNoteEdit,
     required this.onStopNoteEdit,
     required this.onDeleteNodeImage,
+    this.table,
+    required this.onTableChanged,
+    this.onTableWillChange,
+    required this.onDeleteNodeTable,
     this.attachmentKey,
+    this.tableKey,
   });
 
   /// 计算指定深度节点行首连接线区域的总宽度
@@ -633,9 +658,10 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
             mainAxisSize: MainAxisSize.min,
             children: [
               _buildNodeTextArea(node, colorScheme),
-              // 图片与备注位于节点文字下方，与文字左对齐
+              // 图片、备注与表格位于节点文字下方，与文字左对齐
               if (node.note.isNotEmpty ||
                   widget.imagePath.isNotEmpty ||
+                  widget.table != null ||
                   widget.isEditingNote)
                 OutlineNodeAttachment(
                   key: widget.attachmentKey,
@@ -654,6 +680,11 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
                   onStartNoteEdit: widget.onStartNoteEdit,
                   onStopNoteEdit: widget.onStopNoteEdit,
                   onDeleteImage: widget.onDeleteNodeImage,
+                  table: widget.table,
+                  onTableChanged: widget.onTableChanged,
+                  onTableWillChange: widget.onTableWillChange,
+                  onDeleteTable: widget.onDeleteNodeTable,
+                  tableKey: widget.tableKey,
                 ),
             ],
           ),

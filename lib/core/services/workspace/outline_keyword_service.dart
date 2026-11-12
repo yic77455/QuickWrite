@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:quick_write/core/models/outline_keyword.dart';
+import 'package:quick_write/core/models/outline_note.dart';
 import 'package:quick_write/core/models/setting_item.dart';
 import 'package:quick_write/core/services/workspace/book_folder_service.dart';
 import 'package:quick_write/core/services/workspace/outline_companion_store.dart';
@@ -56,14 +57,15 @@ class OutlineKeywordService extends ChangeNotifier {
     for (final item in settingItems) {
       final String? settingItemPath = _settingItemPathOf(bookFolderPath, item);
       if (settingItemPath == null) continue;
-      final Map<String, OutlineKeywordFileNode> nodes =
-          await OutlineCompanionStore.instance.readKeywords(settingItemPath);
-      if (nodes.isEmpty) continue;
+      final OutlineCompanionData data = await OutlineCompanionStore.instance.read(settingItemPath);
+      if (data.keywords.isEmpty) continue;
       _appendEntries(
         settingItemUuid: item.uuid,
         settingItemTitle: item.title,
         settingItemFilePath: settingItemPath,
-        nodes: nodes,
+        nodes: data.keywords,
+        // 备注区保存的表格用于补齐旧版关键词快照中缺失的表格
+        notes: data.notes,
       );
     }
 
@@ -148,11 +150,13 @@ class OutlineKeywordService extends ChangeNotifier {
   /// 同一节点内的重复关键词会被忽略，无关键词的节点不产生条目；
   /// 节点与子孙节点的图片文件名在此按设定项目录解析为绝对路径，
   /// 供正文悬浮卡片直接展示缩略图。
+  /// [notes] 提供按节点路径保存的备注数据，用于补齐关键词快照中缺失的表格。
   void _appendEntries({
     required String settingItemUuid,
     required String settingItemTitle,
     required String? settingItemFilePath,
     required Map<String, OutlineKeywordFileNode> nodes,
+    Map<String, OutlineNoteData> notes = const {},
   }) {
     final List<String> paths = nodes.keys.toList()..sort(_compareNodePaths);
     for (final path in paths) {
@@ -165,13 +169,52 @@ class OutlineKeywordService extends ChangeNotifier {
         nodePath: path,
         nodeText: node.text,
         imagePath: _resolveImagePath(settingItemFilePath, node.imageFileName),
-        children: [
-          for (final child in node.children)
-            child.withImagePath(_resolveImagePath(settingItemFilePath, child.imageFileName)),
-        ],
+        children: _resolveChildren(
+          parentPath: path,
+          children: node.children,
+          settingItemFilePath: settingItemFilePath,
+          notes: notes,
+        ),
         keywords: keywords,
       ));
     }
+  }
+
+  /// 构建子孙节点快照，解析图片路径并补齐表格
+  ///
+  /// 快照按前序排列并记录相对层级，遍历时还原每个节点在设定项大纲中的路径，
+  /// 据此从 [notes] 中取出该节点的表格，供正文悬浮卡片展示。
+  List<OutlineKeywordSubNode> _resolveChildren({
+    required String parentPath,
+    required List<OutlineKeywordSubNode> children,
+    required String? settingItemFilePath,
+    required Map<String, OutlineNoteData> notes,
+  }) {
+    // 当前节点的各级索引，长度随遍历层级伸缩
+    final List<int> indices = [];
+    final List<OutlineKeywordSubNode> resolved = [];
+
+    for (final child in children) {
+      final int depth = child.depth < 1 ? 1 : child.depth;
+      // 回到当前层级的父级，再把当前层级的索引加一
+      if (indices.length > depth) {
+        indices.removeRange(depth, indices.length);
+      }
+      if (indices.length == depth) {
+        indices[depth - 1]++;
+      } else {
+        while (indices.length < depth) {
+          indices.add(0);
+        }
+      }
+
+      final String childPath = '$parentPath.${indices.join('.')}';
+      resolved.add(child.withImagePath(
+        _resolveImagePath(settingItemFilePath, child.imageFileName),
+        table: notes[childPath]?.table,
+      ));
+    }
+    return resolved;
   }
 
   /// 把节点图片文件名解析为绝对路径

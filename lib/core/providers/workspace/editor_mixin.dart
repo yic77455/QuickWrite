@@ -1893,6 +1893,8 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
       final success = await saveSettingItemContent(item, content);
 
       if (success) {
+        // 关键词、关联、备注与图片等伴生数据随设定文件一同落盘
+        await outlineState.saveCompanionData();
         tab.isModified = false;
         notifyListeners();
       }
@@ -1959,6 +1961,8 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
 
           final success = await saveSettingItemContent(item, content);
           if (success) {
+            // 关键词、关联、备注与图片等伴生数据随设定文件一同落盘
+            await outlineState.saveCompanionData();
             tab.isModified = false;
             savedCount++;
           }
@@ -2043,6 +2047,8 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
 
           final success = await saveSettingItemContent(item, content);
           if (success) {
+            // 关键词、关联、备注与图片等伴生数据随设定文件一同落盘
+            await outlineState.saveCompanionData();
             tab.isModified = false;
           }
         } catch (e) {

@@ -7,6 +7,7 @@ import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/models/outline_models.dart';
+import 'package:quick_write/core/utils/text_style_range.dart';
 import 'package:quick_write/pages/workspace/editor/utils/shortcut_catalog.dart';
 import 'package:quick_write/shared/widgets/toolbar_button.dart';
 
@@ -721,50 +722,44 @@ class _RenderMeasureSize extends RenderProxyBox {
 
 /// 标题级别单选组件
 ///
-/// 在右键菜单中以单选方式切换标题级别（H1/H2/H3/T），
-/// 选中后立即将对应级别写入所有目标节点并触发编辑器重建。
+/// 在右键菜单中以单选方式切换标题级别（H1/H2/H3/正文），
+/// 选中后立即通过回调写入目标内容并触发重建。
 class HeadingLevelSelector extends StatefulWidget {
-  /// 目标节点列表（支持节点选区批量操作）
-  final List<OutlineNode> nodes;
+  /// 初始选中的标题级别（0=正文, 1=H1, 2=H2, 3=H3）
+  ///
+  /// 为 -1 表示多个目标的级别不一致，此时不点亮任何按钮。
+  final int initialLevel;
 
   /// 级别变化回调
   final ValueChanged<int> onLevelChanged;
 
-  const HeadingLevelSelector({super.key, required this.nodes, required this.onLevelChanged});
+  const HeadingLevelSelector({
+    super.key,
+    required this.initialLevel,
+    required this.onLevelChanged,
+  });
 
   @override
   State<HeadingLevelSelector> createState() => _HeadingLevelSelectorState();
 }
 
 class _HeadingLevelSelectorState extends State<HeadingLevelSelector> {
-  /// 当前选中的标题级别（0=正文, 1=H1, 2=H2, 3=H3）
-  ///
-  /// 多节点时取所有节点的公共级别，不一致则为 -1（无选中）。
+  /// 当前选中的标题级别
   late int _selectedLevel;
 
   @override
   void initState() {
     super.initState();
-    _selectedLevel = _computeCommonLevel();
+    _selectedLevel = widget.initialLevel;
   }
 
   @override
   void didUpdateWidget(covariant HeadingLevelSelector oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // 目标节点列表变化时重新计算公共级别
-    if (oldWidget.nodes != widget.nodes) {
-      _selectedLevel = _computeCommonLevel();
+    // 外部目标变化时同步选中级别
+    if (oldWidget.initialLevel != widget.initialLevel) {
+      _selectedLevel = widget.initialLevel;
     }
-  }
-
-  /// 计算所有目标节点的公共标题级别
-  ///
-  /// 所有节点级别一致时返回该级别，否则返回 -1 表示不一致。
-  int _computeCommonLevel() {
-    if (widget.nodes.isEmpty) return -1;
-    final first = widget.nodes.first.headingLevel;
-    final allSame = widget.nodes.every((n) => n.headingLevel == first);
-    return allSame ? first : -1;
   }
 
   /// 选择指定级别
@@ -815,6 +810,59 @@ class _HeadingLevelSelectorState extends State<HeadingLevelSelector> {
           onChanged: (selected) {
             if (selected) _select(0);
           },
+        ),
+      ],
+    );
+  }
+}
+
+/// 文字样式开关行
+///
+/// 以开关按钮切换加粗、斜体、下划线与删除线，供节点右键菜单与表格单元格
+/// 右键菜单共同使用。[initialFlags] 决定按钮初始点亮状态；
+/// [onToggle] 接收一个针对当前样式状态的切换函数，由调用方在点击时
+/// 基于最新样式执行，避免连续点击多个按钮时互相覆盖。
+class TextStyleToggleRow extends StatelessWidget {
+  /// 初始文字样式
+  final TextStyleFlags initialFlags;
+
+  /// 样式切换回调
+  final ValueChanged<TextStyleFlags Function(TextStyleFlags)> onToggle;
+
+  const TextStyleToggleRow({
+    super.key,
+    required this.initialFlags,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        ToggleToolButton(
+          icon: MaterialIcons.format_bold,
+          tooltip: '加粗',
+          initialValue: initialFlags.bold,
+          onChanged: (_) => onToggle(TextStyleFlags.toggleBold),
+        ),
+        ToggleToolButton(
+          icon: MaterialIcons.format_italic,
+          tooltip: '斜体',
+          initialValue: initialFlags.italic,
+          onChanged: (_) => onToggle(TextStyleFlags.toggleItalic),
+        ),
+        ToggleToolButton(
+          icon: MaterialIcons.format_underlined,
+          tooltip: '下划线',
+          initialValue: initialFlags.underline,
+          onChanged: (_) => onToggle(TextStyleFlags.toggleUnderline),
+        ),
+        ToggleToolButton(
+          icon: MaterialIcons.strikethrough_s,
+          tooltip: '删除线',
+          initialValue: initialFlags.strikethrough,
+          onChanged: (_) => onToggle(TextStyleFlags.toggleStrikethrough),
         ),
       ],
     );

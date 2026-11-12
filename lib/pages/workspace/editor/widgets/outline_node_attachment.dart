@@ -2,16 +2,19 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:quick_write/core/models/outline_table.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/persistent_selection.dart';
+import 'package:quick_write/pages/workspace/editor/widgets/outline_table_block.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 
 /// 大纲节点的附加备注区
 ///
-/// 图片在备注上方显示缩略图，备注未编辑时只显示首行并以省略号收尾；
-/// 图片点击后进入选中态，选中蒙版中央提供放大按钮，右下角按钮或删除键
-/// 可移除图片。备注与图片均不存在且未处于编辑状态时不显示本区域。
+/// 图片在备注上方显示缩略图，表格位于备注下方，三者共同构成节点的附加内容。
+/// 备注未编辑时只显示首行并以省略号收尾；图片点击后进入选中态，选中蒙版中央
+/// 提供放大按钮，右下角按钮或删除键可移除图片。图片、备注与表格均不存在
+/// 且未处于备注编辑状态时不显示本区域。
 class OutlineNodeAttachment extends StatefulWidget {
   /// 备注文本
   final String note;
@@ -50,6 +53,25 @@ class OutlineNodeAttachment extends StatefulWidget {
   /// 删除图片回调
   final VoidCallback onDeleteImage;
 
+  /// 节点附加表格（null 表示没有表格）
+  final OutlineTableData? table;
+
+  /// 表格内容或结构变化回调
+  final VoidCallback onTableChanged;
+
+  /// 表格数据即将变化回调
+  ///
+  /// 在表格被修改之前调用，供编辑器记录撤销所需的前置状态。
+  final VoidCallback? onTableWillChange;
+
+  /// 删除表格回调
+  final VoidCallback onDeleteTable;
+
+  /// 表格区域的全局键
+  ///
+  /// 供编辑器判断指针是否落在表格上，从而把右键菜单让给单元格格式栏。
+  final Key? tableKey;
+
   const OutlineNodeAttachment({
     super.key,
     required this.note,
@@ -63,6 +85,11 @@ class OutlineNodeAttachment extends StatefulWidget {
     required this.onStartNoteEdit,
     required this.onStopNoteEdit,
     required this.onDeleteImage,
+    this.table,
+    required this.onTableChanged,
+    this.onTableWillChange,
+    required this.onDeleteTable,
+    this.tableKey,
   });
 
   @override
@@ -304,20 +331,50 @@ class _OutlineNodeAttachmentState extends State<OutlineNodeAttachment> {
   Widget build(BuildContext context) {
     final bool hasImage = widget.imagePath.isNotEmpty;
     final bool hasNote = widget.note.isNotEmpty;
-    // 备注与图片都不存在且未在编辑备注时不占用任何空间
-    if (!hasImage && !hasNote && !widget.isEditingNote) {
+    final bool hasTable = widget.table != null;
+    // 图片、备注与表格都不存在且未在编辑备注时不占用任何空间
+    if (!hasImage && !hasNote && !hasTable && !widget.isEditingNote) {
       return const SizedBox.shrink();
     }
 
+    // 表格左侧为拖拽手柄预留了空白，整体左移该宽度，使表格边框与备注文字对齐；
+    // 图片与备注补回同样的缩进，保持原有对齐
+    final double tableGutter = hasTable ? OutlineTableBlock.handleGutter : 0.0;
+
     return Padding(
-      padding: EdgeInsets.only(top: 6, left: widget.textLeftInset),
+      padding: EdgeInsets.only(
+        top: 6,
+        left: (widget.textLeftInset - tableGutter).clamp(0.0, widget.textLeftInset),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (hasImage) _buildImageArea(),
+          if (hasImage)
+            Padding(
+              padding: EdgeInsets.only(left: tableGutter),
+              child: _buildImageArea(),
+            ),
           if (hasImage && (hasNote || widget.isEditingNote)) const SizedBox(height: 6),
-          if (hasNote || widget.isEditingNote) _buildNoteArea(),
+          if (hasNote || widget.isEditingNote)
+            Padding(
+              padding: EdgeInsets.only(left: tableGutter),
+              child: _buildNoteArea(),
+            ),
+          // 表格位于备注下方，与图片、备注同属附加内容
+          if (hasTable) ...[
+            if (hasImage || hasNote || widget.isEditingNote) const SizedBox(height: 8),
+            OutlineTableBlock(
+              key: widget.tableKey,
+              table: widget.table!,
+              colorScheme: widget.colorScheme,
+              fontSize: (widget.noteFontSize + 1).clamp(10.0, 40.0).toDouble(),
+              readOnly: widget.readOnly,
+              onChanged: widget.onTableChanged,
+              onBeforeChange: widget.onTableWillChange,
+              onDeleteTable: widget.onDeleteTable,
+            ),
+          ],
         ],
       ),
     );

@@ -5,6 +5,7 @@ library;
 
 import 'dart:ui' show Color;
 import 'package:quick_write/core/models/outline_keyword.dart';
+import 'package:quick_write/core/models/outline_table.dart';
 import 'package:quick_write/core/utils/text_style_range.dart';
 
 /// 大纲节点数据模型
@@ -57,6 +58,12 @@ class OutlineNode {
   /// 完整路径由设定项文件路径与文件名拼接得到；空字符串表示没有图片。
   String imageFileName;
 
+  /// 节点附加表格（null 表示没有表格）
+  ///
+  /// 表格显示在备注下方，与图片、备注同属节点的附加备注区；
+  /// 持久化到设定项文件旁的合并伴生 `.json`，不写入大纲 Markdown。
+  OutlineTableData? table;
+
   OutlineNode({
     required this.id,
     this.text = '',
@@ -68,6 +75,7 @@ class OutlineNode {
     List<OutlineKeyword>? keywords,
     this.note = '',
     this.imageFileName = '',
+    this.table,
   })  : children = children ?? [],
         styleRanges = styleRanges ?? [],
         keywords = keywords ?? [];
@@ -88,9 +96,10 @@ class OutlineNode {
       foregroundColor: foregroundColor,
       // 关键词为不可变对象，复制列表即可使快照与原节点互不影响
       keywords: List<OutlineKeyword>.of(keywords),
-      // 备注与图片文件名均为不可变字符串，直接复制即可
+      // 备注、图片文件名与表格均为可变内容，快照需要独立的副本
       note: note,
       imageFileName: imageFileName,
+      table: table?.clone(),
       children: children.map((c) => c.clone()).toList(),
     );
   }

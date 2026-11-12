@@ -19,6 +19,7 @@ import 'left_sidebar/left_sidebar.dart';
 import 'right_sidebar/right_sidebar.dart';
 import 'toolbar/workspace_toolbar.dart';
 import 'editor/editor_container.dart';
+import 'editor/novel_editor.dart';
 import 'widgets/cloud_sync_status_icon.dart';
 import 'widgets/mobile_workspace_app_bar.dart';
 import 'widgets/mobile_quick_input_bar.dart';
@@ -646,7 +647,8 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
 
   /// 构建底部状态栏（移动端）
   ///
-  /// 精简信息以防窄屏溢出：左侧显示当前文件信息，右侧保留主题数与字数统计
+  /// 精简信息以防窄屏溢出：左侧显示当前文件信息（最多占状态栏一半宽度），
+  /// 右侧保留主题数与字数统计
   Widget _buildMobileBottomStatusBar(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final workspaceProvider = context.watch<WorkspaceProvider>();
@@ -657,51 +659,71 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
       margin: const EdgeInsets.fromLTRB(2, 0, 2, 2),
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(color: colorScheme.surface, borderRadius: BorderRadius.circular(6)),
-      child: Row(
-        children: [
-          // 左侧：当前文件信息（实时同步开启时图标反映云同步状态，过长时省略号截断，整块信息悬停显示状态说明）
-          Expanded(
-            child: CloudSyncStatusTooltip(
-              hasPendingLocalEdits: currentTab?.isModified ?? false,
-              child: Row(
-                children: [
-                  CloudSyncStatusIcon(size: 14, hasPendingLocalEdits: currentTab?.isModified ?? false),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      currentTab?.title ?? '未打开文件',
-                      style: context.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // 左侧文件信息最多占用状态栏一半宽度，剩余空间留给右侧统计
+          final double halfWidth = constraints.maxWidth / 2;
+
+          return Row(
+            children: [
+              // 左侧：当前文件信息（实时同步开启时图标反映云同步状态，过长时省略号截断，整块信息悬停显示状态说明）
+              Expanded(
+                child: CloudSyncStatusTooltip(
+                  hasPendingLocalEdits: currentTab?.isModified ?? false,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: halfWidth),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CloudSyncStatusIcon(
+                            size: 14,
+                            hasPendingLocalEdits: currentTab?.isModified ?? false,
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              currentTab?.title ?? '未打开文件',
+                              style: context.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ],
+                ),
               ),
-            ),
-          ),
 
-          const SizedBox(width: 12),
+              const SizedBox(width: 12),
 
-          // 大纲标签页额外显示主题数，正文标签页仅显示字数
-          if (currentTab?.usesOutlineEditor ?? false) ...[
-            // 监听专用的字数通知器，主题数变化时仅重建此区域
-            ListenableBuilder(
-              listenable: workspaceProvider.wordCountNotifier,
-              builder: (context, _) => Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.account_tree_outlined, size: 14),
-                  const SizedBox(width: 4),
-                  Text('主题：${currentTab?.topicCount ?? 0}', style: context.bodySmall),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-          ],
+              // 大纲标签页额外显示主题数，正文标签页仅显示字数
+              if (currentTab?.usesOutlineEditor ?? false) ...[
+                // 监听专用的字数通知器，主题数变化时仅重建此区域
+                ListenableBuilder(
+                  listenable: workspaceProvider.wordCountNotifier,
+                  builder: (context, _) => Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.account_tree_outlined, size: 14),
+                      const SizedBox(width: 4),
+                      Text('主题：${currentTab?.topicCount ?? 0}', style: context.bodySmall),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+              ],
 
-          // 右侧：字数统计
-          _buildWordCountIndicator(context, workspaceProvider, currentTab),
-        ],
+              // 正文标签页在字数左侧提供关键词预览开关，大纲标签页无此功能
+              _buildMobileKeywordToggle(context, workspaceProvider, currentTab),
+
+              // 右侧：字数统计
+              _buildWordCountIndicator(context, workspaceProvider, currentTab),
+            ],
+          );
+        },
       ),
     );
   }
@@ -748,6 +770,62 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
         const SizedBox(width: 4),
         Text(isModified ? '未保存' : '已保存', style: context.bodySmall?.copyWith(color: color)),
       ],
+    );
+  }
+
+  /// 构建移动端关键词预览开关
+  ///
+  /// 仅在正文标签页且当前书籍已绑定关键词时显示；
+  /// 监听关键词索引与开关状态，使开关在索引加载完成或切换后同步刷新。
+  Widget _buildMobileKeywordToggle(
+    BuildContext context,
+    WorkspaceProvider provider,
+    EditorTab? currentTab,
+  ) {
+    if (currentTab == null || currentTab.usesOutlineEditor || currentTab.isReadOnly) {
+      return const SizedBox.shrink();
+    }
+
+    return ListenableBuilder(
+      listenable: provider.outlineKeywordService,
+      builder: (context, _) {
+        final state = currentTab.editorKey.currentState;
+        if (state is! NovelEditorState || !state.hasOutlineKeywords) {
+          return const SizedBox.shrink();
+        }
+        return ValueListenableBuilder<bool>(
+          valueListenable: state.keywordHighlightNotifier,
+          builder: (context, enabled, _) => _buildMobileKeywordToggleButton(context, state, enabled),
+        );
+      },
+    );
+  }
+
+  /// 构建关键词预览开关按钮
+  ///
+  /// 开启时图标以主色高亮；点击切换正文关键词高亮与点按预览。
+  Widget _buildMobileKeywordToggleButton(
+    BuildContext context,
+    NovelEditorState state,
+    bool enabled,
+  ) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Tooltip(
+      message: enabled ? '关闭关键词预览' : '开启关键词预览',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: state.toggleKeywordHighlight,
+        child: Padding(
+          // 图标尺寸较小，四周留出点击余量，纵向撑满状态栏高度
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 7),
+          child: Icon(
+            Icons.sell_outlined,
+            size: 14,
+            color: enabled ? colorScheme.primary : colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ),
     );
   }
 

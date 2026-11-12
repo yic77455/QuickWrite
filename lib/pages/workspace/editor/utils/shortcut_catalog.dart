@@ -108,6 +108,7 @@ final List<ShortcutGroup> outlineEditorShortcutGroups = [
     ShortcutEntry(description: '为选中内容添加关联', keys: 'Ctrl+L'),
     ShortcutEntry(description: '添加 / 编辑备注', keys: 'Shift+Enter'),
     ShortcutEntry(description: '插入图片', keys: 'Alt+Enter'),
+    ShortcutEntry(description: '插入表格', keys: 'Ctrl+Alt+T'),
   ]),
   ShortcutGroup(title: '文字样式', entries: [
     ShortcutEntry(description: '加粗', keys: 'Ctrl+B'),

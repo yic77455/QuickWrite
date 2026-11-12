@@ -173,6 +173,11 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 移动端没有悬停与修饰键，改由工具栏开关控制，开启后点按关键词弹出预览卡片。
   bool _keywordHighlightPinned = false;
 
+  /// 移动端关键词预览开关状态通知器
+  ///
+  /// 供快捷输入栏与底部状态栏的开关入口保持同步，避免切换后各入口显示不一致。
+  final ValueNotifier<bool> keywordHighlightNotifier = ValueNotifier<bool>(false);
+
   /// 大纲关键词高亮当前是否生效
   bool get _keywordHighlightActive =>
       _keywordModifierPressed || _keywordHighlightPinned;
@@ -375,6 +380,7 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     _scrollController.dispose();
     _codeScrollController.dispose();
     _focusNode.dispose();
+    keywordHighlightNotifier.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -525,9 +531,6 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 供外部（如移动端快捷输入栏）判断输入法是否由本编辑器唤起。
   bool get hasEditorFocus => _focusNode.hasFocus;
 
-  /// 移动端关键词高亮开关是否开启
-  bool get keywordHighlightEnabled => _keywordHighlightPinned;
-
   /// 当前书籍是否已绑定关键词
   bool get hasOutlineKeywords =>
       _outlineKeywordService != null && _outlineKeywordService!.keywords.isNotEmpty;
@@ -537,6 +540,7 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 开启后正文常驻关键词高亮，点按关键词弹出预览卡片。
   void toggleKeywordHighlight() {
     _keywordHighlightPinned = !_keywordHighlightPinned;
+    keywordHighlightNotifier.value = _keywordHighlightPinned;
     _applyKeywordHighlightState();
     if (!_keywordHighlightActive) _hideKeywordCard();
   }
@@ -722,16 +726,20 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
             top: _keywordCardAbove ? null : anchorRect.bottom + 6,
             bottom: _keywordCardAbove ? math.max(margin, screen.height - anchorRect.top + 6) : null,
             width: cardWidth,
-            child: OutlineKeywordHoverCard(
-              entry: entry,
-              accentColor: accentColor,
-              maxHeight: maxHeight,
-              onTap: () => _jumpToOutlineKeyword(entry),
-              onMouseEnter: _onKeywordCardEnter,
-              onMouseExit: _onKeywordCardExit,
-              // 实测高度超出下方空间时改为显示在上方（只翻转一次，避免位置来回跳动）
-              onMeasuredHeight: (height) =>
-                  _ensureKeywordCardVisible(anchorRect, height, visibleBottom, margin),
+            // 卡片归属编辑器的点击区域组：点击卡片时编辑器不失焦，
+            // 移动端输入法与卡片都不会因点按卡片而收起
+            child: CodeEditorTapRegion(
+              child: OutlineKeywordHoverCard(
+                entry: entry,
+                accentColor: accentColor,
+                maxHeight: maxHeight,
+                onTap: () => _jumpToOutlineKeyword(entry),
+                onMouseEnter: _onKeywordCardEnter,
+                onMouseExit: _onKeywordCardExit,
+                // 实测高度超出下方空间时改为显示在上方（只翻转一次，避免位置来回跳动）
+                onMeasuredHeight: (height) =>
+                    _ensureKeywordCardVisible(anchorRect, height, visibleBottom, margin),
+              ),
             ),
           ),
         ],

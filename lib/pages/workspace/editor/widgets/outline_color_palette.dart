@@ -40,4 +40,43 @@ class OutlineColorPalette {
     }
     return hsl.withLightness(hsl.lightness.clamp(0.28, 0.46).toDouble()).toColor();
   }
+
+  /// 构建带颜色指示条的菜单图标
+  ///
+  /// 在图标底部叠加一条固定颜色的指示条，用于字体颜色、字底颜色等菜单项；
+  /// [iconColor] 为当前图标颜色（含悬停/禁用状态），与普通菜单项保持一致。
+  static Widget buildColorBarIcon(IconData icon, Color iconColor, Color indicatorColor) {
+    return SizedBox(
+      width: 18,
+      height: 18,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Icon(icon, size: 18, color: iconColor),
+          // 颜色指示条，叠加在图标底部
+          Positioned(
+            bottom: -1,
+            child: Container(width: 16, height: 4, decoration: BoxDecoration(color: indicatorColor)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 构建颜色色块菜单图标
+  ///
+  /// 以 18×18 的圆角填充色块直观表示该选项对应的颜色。
+  static Widget buildColorSwatchIcon(Color swatchColor) {
+    return SizedBox(
+      width: 18,
+      height: 18,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: swatchColor,
+          borderRadius: BorderRadius.circular(3),
+          border: Border.all(color: Colors.black12, width: 0.5),
+        ),
+      ),
+    );
+  }
 }

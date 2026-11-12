@@ -35,6 +35,9 @@ class OutlineShortcutKeys {
   /// 判断按键是否为添加关联快捷键（Ctrl/Cmd+L）
   static bool isLinkKey(LogicalKeyboardKey key) => key == LogicalKeyboardKey.keyL;
 
+  /// 判断按键是否为插入表格快捷键（Ctrl/Cmd+Alt+T）
+  static bool isTableKey(LogicalKeyboardKey key) => key == LogicalKeyboardKey.keyT;
+
   // ================= 颜色 =================
 
   /// 字母按键到调色板索引的映射（红橙黄绿青蓝紫，不含灰色）

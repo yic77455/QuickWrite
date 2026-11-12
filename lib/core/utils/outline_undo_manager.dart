@@ -113,10 +113,15 @@ class OutlineUndoManager {
   /// 由于控制器变化监听器触发时，节点的 text 字段尚未通过 onChanged 同步，
   /// 直接深拷贝会捕获到旧文本。传入 {nodeId: text} 覆盖可确保 before/after 快照
   /// 分别记录编辑前和编辑后的正确文本。
+  ///
+  /// 可选参数 [nodeCaretOffsets] 与 [nodeTextOverrides] 配合使用：
+  /// 传入 {nodeId: caretOffset} 表示文本覆盖后光标所在的偏移量，
+  /// 供快照同步调整样式区间时精确定位被删除的区间。
   final OutlineTreeSnapshot Function({
     String? focusNodeId,
     TextSelection? focusSelection,
     Map<String, String>? nodeTextOverrides,
+    Map<String, int>? nodeCaretOffsets,
   }) _captureSnapshot;
 
   /// 应用快照的回调（由编辑器状态提供）
@@ -127,6 +132,7 @@ class OutlineUndoManager {
       String? focusNodeId,
       TextSelection? focusSelection,
       Map<String, String>? nodeTextOverrides,
+      Map<String, int>? nodeCaretOffsets,
     }) captureSnapshot,
     required void Function(OutlineTreeSnapshot) applySnapshot,
     this.maxLevels = 100,
@@ -400,6 +406,7 @@ class OutlineUndoManager {
                   focusNodeId: nodeId,
                   focusSelection: currentValue.selection,
                   nodeTextOverrides: {nodeId: currentValue.text},
+                  nodeCaretOffsets: _caretOffsetsFor(nodeId, currentValue),
                 );
                 lastAction.timestamp = now;
                 merged = true;
@@ -423,6 +430,7 @@ class OutlineUndoManager {
             focusNodeId: nodeId,
             focusSelection: currentValue.selection,
             nodeTextOverrides: {nodeId: currentValue.text},
+            nodeCaretOffsets: _caretOffsetsFor(nodeId, currentValue),
           ),
           description: '编辑文本',
           timestamp: now,
@@ -440,6 +448,16 @@ class OutlineUndoManager {
     // 始终更新 _lastValue（包含了光标的移动），这样当下一次输入时，
     // before 状态就能准确记录输入前光标真正所在的位置
     _lastValues[nodeId] = currentValue;
+  }
+
+  /// 构造节点编辑后光标位置的覆盖表
+  ///
+  /// 仅折叠选区能确定光标的具体偏移，供快照按光标定位被删除的样式区间；
+  /// 选区非折叠或无效时返回空表，由文本差异推断变化区间。
+  Map<String, int> _caretOffsetsFor(String nodeId, TextEditingValue value) {
+    final selection = value.selection;
+    if (!selection.isValid || !selection.isCollapsed) return const <String, int>{};
+    return {nodeId: selection.start};
   }
 
   /// 从快照中获取指定节点的文本

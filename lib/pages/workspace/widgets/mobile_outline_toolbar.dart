@@ -38,12 +38,15 @@ enum OutlineToolbarPanel {
 
   /// 字底颜色
   backgroundColor,
+
+  /// 插入：关键词、关联、备注、图片、表格
+  insert,
 }
 
 /// 移动端大纲编辑器键盘工具栏
 ///
 /// 软键盘弹出时贴在键盘上方：主工具栏左侧为二级面板入口（快捷输入、文字格式、
-/// 字体颜色、字底颜色）与关键词绑定入口，数量较多时横向滚动；右侧为节点层级调整按钮；
+/// 字体颜色、字底颜色、插入），数量较多时横向滚动；右侧为节点层级调整按钮；
 /// 点击面板入口时在其上方展开对应的二级面板，唤起键盘时默认展开快捷输入面板。
 class MobileOutlineToolbar extends StatefulWidget {
   const MobileOutlineToolbar({super.key});
@@ -161,9 +164,11 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
 
   /// 当前应当展开的二级面板
   ///
-  /// 批量选择模式下不提供快捷输入面板。
+  /// 批量选择模式下不提供快捷输入与插入面板。
   OutlineToolbarPanel? _effectivePanel(OutlineEditorState state) {
-    if (state.isBatchSelectionMode && _panel == OutlineToolbarPanel.quickInput) return null;
+    final bool nodeScopedPanel =
+        _panel == OutlineToolbarPanel.quickInput || _panel == OutlineToolbarPanel.insert;
+    if (state.isBatchSelectionMode && nodeScopedPanel) return null;
     return _panel;
   }
 
@@ -262,13 +267,9 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
                   Icons.format_color_fill_rounded,
                   '字底颜色',
                 ),
-                // 关键词绑定仅作用于当前节点，批量选择模式下不提供
+                // 插入仅作用于当前节点，批量选择模式下不提供
                 if (!batchMode)
-                  _buildActionButton(
-                    icon: Icons.sell_outlined,
-                    tooltip: '绑定关键词',
-                    onPressed: state.showKeywordCardForActiveNode,
-                  ),
+                  _buildPanelEntry(OutlineToolbarPanel.insert, Icons.library_add_outlined, '插入'),
                 // 批量选择模式下的复制与删除
                 if (batchMode) ...[
                   _buildActionButton(
@@ -310,18 +311,24 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
   }
 
   /// 构建主工具栏中的单次操作按钮
+  ///
+  /// 不可执行时按钮置灰且不响应点击。
   Widget _buildActionButton({
     required IconData icon,
     required String tooltip,
     required VoidCallback onPressed,
+    bool enabled = true,
   }) {
-    return SmallToolbarButton(
-      icon: icon,
-      tooltip: tooltip,
-      width: _buttonSize,
-      height: _barHeight,
-      iconSize: _iconSize,
-      onPressed: () => _runAction(onPressed),
+    return Opacity(
+      opacity: enabled ? 1 : 0.35,
+      child: SmallToolbarButton(
+        icon: icon,
+        tooltip: tooltip,
+        width: _buttonSize,
+        height: _barHeight,
+        iconSize: _iconSize,
+        onPressed: enabled ? () => _runAction(onPressed) : null,
+      ),
     );
   }
 
@@ -348,16 +355,11 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
     required bool enabled,
     required VoidCallback onPressed,
   }) {
-    return Opacity(
-      opacity: enabled ? 1 : 0.35,
-      child: SmallToolbarButton(
-        icon: icon,
-        tooltip: tooltip,
-        width: _buttonSize,
-        height: _barHeight,
-        iconSize: _iconSize,
-        onPressed: enabled ? onPressed : null,
-      ),
+    return _buildActionButton(
+      icon: icon,
+      tooltip: tooltip,
+      enabled: enabled,
+      onPressed: onPressed,
     );
   }
 
@@ -386,6 +388,8 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
         return _buildColorPanel(context, state, isForeground: true);
       case OutlineToolbarPanel.backgroundColor:
         return _buildColorPanel(context, state, isForeground: false);
+      case OutlineToolbarPanel.insert:
+        return _buildInsertPanel(context, state);
     }
   }
 
@@ -542,6 +546,49 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
       size: _buttonSize,
       iconSize: _iconSize,
       onChanged: (_) => _runAction(() => state.toggleTextStyle(toggleFn)),
+    );
+  }
+
+  /// 构建插入面板
+  ///
+  /// 集中节点内容绑定与附加内容的入口：关键词、关联、备注、图片、表格；
+  /// 关联需要节点内存在文字选区，表格每个节点只保留一个，均不可用时按钮置灰。
+  Widget _buildInsertPanel(BuildContext context, OutlineEditorState state) {
+    return _buildPanelContainer(
+      context,
+      ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.only(left: _iconListLeftPadding, right: 4),
+        children: [
+          _buildActionButton(
+            icon: Icons.sell_outlined,
+            tooltip: '添加关键词',
+            onPressed: state.showKeywordCardForActiveNode,
+          ),
+          _buildActionButton(
+            icon: Icons.link,
+            tooltip: '关联',
+            enabled: state.canAddLinkForActiveNode,
+            onPressed: state.showLinkDialogForActiveNode,
+          ),
+          _buildActionButton(
+            icon: Icons.post_add_rounded,
+            tooltip: '备注',
+            onPressed: state.startNoteEditingForActiveNode,
+          ),
+          _buildActionButton(
+            icon: Icons.image_outlined,
+            tooltip: '图片',
+            onPressed: state.pickImageForActiveNode,
+          ),
+          _buildActionButton(
+            icon: Icons.table_chart_outlined,
+            tooltip: '表格',
+            enabled: !state.activeNodeHasTable,
+            onPressed: state.insertTableForActiveNode,
+          ),
+        ],
+      ),
     );
   }
 

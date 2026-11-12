@@ -1,7 +1,7 @@
 import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/models/outline_keyword.dart';
+import 'package:quick_write/core/models/outline_table.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/rich_text_controller.dart';
 import 'package:quick_write/core/utils/text_style_range.dart';
@@ -11,7 +11,7 @@ import 'package:quick_write/pages/workspace/editor/widgets/outline_editor_widget
 ///
 /// 参照人物卡 / 物品卡 / 设定卡的形态：以绑定节点文本为标题、设定项名称为副标题，
 /// 标题栏右侧展示绑定节点的图片缩略图，内容区展示该节点的全部子孙节点
-/// （按层级缩进）及其备注与图片，并还原各节点自身的文字样式；
+/// （按层级缩进）及其备注、图片与表格，并还原各节点自身的文字样式；
 /// 内容超出最大高度时在卡片内滚动。
 /// 卡片自身响应鼠标进入/离开，便于指针从关键词移入卡片时保持显示。
 class OutlineKeywordHoverCard extends StatelessWidget {
@@ -46,6 +46,12 @@ class OutlineKeywordHoverCard extends StatelessWidget {
 
   /// 子节点备注行高估算
   static const double _childNoteLineHeight = 17;
+
+  /// 表格单元格基础字号
+  static const double _childTableFontSize = 12;
+
+  /// 表格单行高度估算
+  static const double _childTableRowHeight = 26;
 
   /// 底部提示高度估算
   static const double _hintHeight = 38;
@@ -103,6 +109,10 @@ class OutlineKeywordHoverCard extends StatelessWidget {
             (child.note.length / 26).ceil().clamp(1, _childNoteMaxLines).toInt();
         rowsHeight += 4 + noteLines * _childNoteLineHeight;
       }
+      // 表格按行数估算高度，单元格换行带来的额外高度由实测回调修正
+      if (child.table != null) {
+        rowsHeight += 8 + child.table!.rowCount * _childTableRowHeight;
+      }
     }
     final double estimated = _headerHeight + rowsHeight + _hintHeight;
     return estimated.clamp(_headerHeight + _hintHeight, maxHeight).toDouble();
@@ -110,9 +120,12 @@ class OutlineKeywordHoverCard extends StatelessWidget {
 
   /// 子节点是否需要渲染
   ///
-  /// 文字为空但带有备注或图片的节点同样展示，避免附加内容被丢弃。
+  /// 文字为空但带有备注、图片或表格的节点同样展示，避免附加内容被丢弃。
   static bool _shouldRenderChild(OutlineKeywordSubNode child) =>
-      child.text.isNotEmpty || child.note.isNotEmpty || child.imagePath.isNotEmpty;
+      child.text.isNotEmpty ||
+      child.note.isNotEmpty ||
+      child.imagePath.isNotEmpty ||
+      child.table != null;
 
   /// 子节点字号：基础字号叠加标题级别偏移（H1 最大，正文无偏移）
   static double _childFontSizeFor(int headingLevel) {
@@ -126,6 +139,14 @@ class OutlineKeywordHoverCard extends StatelessWidget {
   static double _headingHeightExtra(int headingLevel) =>
       (_childFontSizeFor(headingLevel) - _childFontSize) * 1.5;
 
+  /// 表格单元格字号：与子节点一致，标题级别越高字号越大
+  static double _tableCellFontSize(int headingLevel) {
+    if (headingLevel <= 0 || headingLevel > _maxHeadingLevel) {
+      return _childTableFontSize;
+    }
+    return _childTableFontSize + (_maxHeadingLevel - headingLevel + 1) * 2;
+  }
+
   @override
   Widget build(BuildContext context) {
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
@@ -137,26 +158,32 @@ class OutlineKeywordHoverCard extends StatelessWidget {
       child: MeasureSize(
         // 上报实际高度，供外部按真实尺寸修正弹出位置
         onSizeChanged: (size) => onMeasuredHeight?.call(size.height),
-        child: Material(
-          color: colorScheme.surfaceContainerLowest,
-          elevation: 12,
-          clipBehavior: Clip.antiAlias,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: BorderSide(
-              color: colorScheme.outlineVariant.withValues(alpha: 0.6),
+        // 卡片整体吸收点击：点击落在卡片空白处时不会穿透到下方编辑器而收起卡片，
+        // 同时保留内容区的拖动滚动与底部跳转栏的点击
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: () {},
+          child: Material(
+            color: colorScheme.surfaceContainerLowest,
+            elevation: 12,
+            clipBehavior: Clip.antiAlias,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(
+                color: colorScheme.outlineVariant.withValues(alpha: 0.6),
+              ),
             ),
-          ),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: maxHeight),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _buildHeader(colorScheme),
-                Flexible(child: _buildChildren(colorScheme)),
-                _buildHint(colorScheme),
-              ],
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: maxHeight),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildHeader(colorScheme),
+                  Flexible(child: _buildChildren(colorScheme)),
+                  _buildHint(colorScheme),
+                ],
+              ),
             ),
           ),
         ),
@@ -338,7 +365,8 @@ class OutlineKeywordHoverCard extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (child.text.isNotEmpty) _buildChildText(child, colorScheme),
-                    // 子节点的图片与备注顺序与大纲编辑器一致：图片在上、备注在下
+                    // 子节点的图片、备注与表格顺序与大纲编辑器一致：图片在上、
+                    // 备注居中、表格在下
                     if (child.imagePath.isNotEmpty) ...[
                       const SizedBox(height: 6),
                       _buildChildImage(child, colorScheme),
@@ -346,6 +374,10 @@ class OutlineKeywordHoverCard extends StatelessWidget {
                     if (child.note.isNotEmpty) ...[
                       const SizedBox(height: 4),
                       _buildChildNote(child, colorScheme),
+                    ],
+                    if (child.table != null) ...[
+                      const SizedBox(height: 6),
+                      _buildChildTable(child, colorScheme),
                     ],
                   ],
                 ),
@@ -393,6 +425,62 @@ class OutlineKeywordHoverCard extends StatelessWidget {
         fontSize: 11.5,
         height: 1.45,
         color: colorScheme.onSurfaceVariant.withValues(alpha: 0.75),
+      ),
+    );
+  }
+
+  /// 构建子节点表格
+  ///
+  /// 按卡片可用宽度等分列宽，长文本自动换行；
+  /// 首行作为表头带浅色底色，单元格还原自身的标题级别、对齐方式与文字样式。
+  Widget _buildChildTable(OutlineKeywordSubNode child, ColorScheme colorScheme) {
+    final OutlineTableData table = child.table!;
+    if (table.rowCount == 0 || table.columnCount == 0) {
+      return const SizedBox.shrink();
+    }
+
+    final Color gridColor = colorScheme.outlineVariant.withValues(alpha: 0.55);
+    final TextAlign textAlign = switch (table.alignment) {
+      OutlineTableAlignment.left => TextAlign.left,
+      OutlineTableAlignment.center => TextAlign.center,
+      OutlineTableAlignment.right => TextAlign.right,
+    };
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: Table(
+        border: TableBorder.all(color: gridColor, width: 0.8),
+        defaultColumnWidth: const FlexColumnWidth(),
+        defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+        children: [
+          for (int row = 0; row < table.rowCount; row++)
+            TableRow(
+              // 首行作为表头，用浅色底与正文行区分
+              decoration: row == 0
+                  ? BoxDecoration(
+                      color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                    )
+                  : null,
+              children: [
+                for (final OutlineTableCell cell in table.rows[row])
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                    child: Text(
+                      cell.text,
+                      textAlign: textAlign,
+                      style: defaultStyleResolver(
+                        TextStyle(
+                          fontSize: _tableCellFontSize(cell.headingLevel),
+                          height: 1.35,
+                          color: colorScheme.onSurface.withValues(alpha: 0.9),
+                        ),
+                        cell.flags,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+        ],
       ),
     );
   }

@@ -1,5 +1,5 @@
 import 'dart:ui' show Color;
-
+import 'package:quick_write/core/models/outline_table.dart';
 import 'package:quick_write/core/utils/color_utils.dart';
 import 'package:quick_write/core/utils/text_style_range.dart';
 
@@ -53,7 +53,7 @@ class OutlineKeyword {
 ///
 /// [depth] 为相对绑定节点的层级（子节点为 1，孙节点为 2），
 /// 供正文悬浮卡片按层级缩进展示，无需在悬停时重新读取大纲文件。
-/// 同时记录节点的标题级别、文字样式区间、备注与图片，
+/// 同时记录节点的标题级别、文字样式区间、备注、图片与表格，
 /// 使卡片内容区还原节点自身的排版样式并展示节点的附加内容。
 class OutlineKeywordSubNode {
   /// 相对绑定节点的层级
@@ -79,6 +79,9 @@ class OutlineKeywordSubNode {
   /// 标题级别（0=正文, 1=H1, 2=H2, 3=H3）
   final int headingLevel;
 
+  /// 节点附加表格（null 表示没有表格）
+  final OutlineTableData? table;
+
   const OutlineKeywordSubNode({
     required this.depth,
     required this.text,
@@ -87,6 +90,7 @@ class OutlineKeywordSubNode {
     this.imagePath = '',
     this.styleRanges = const [],
     this.headingLevel = 0,
+    this.table,
   });
 
   /// 从 JSON 反序列化
@@ -98,6 +102,7 @@ class OutlineKeywordSubNode {
       note: (json['note'] as String?) ?? '',
       imageFileName: (json['image'] as String?) ?? '',
       headingLevel: (json['headingLevel'] as num?)?.toInt() ?? 0,
+      table: OutlineTableData.fromJson(json['table']),
       styleRanges: [
         if (rawRanges is List)
           for (final range in rawRanges)
@@ -114,14 +119,16 @@ class OutlineKeywordSubNode {
     if (imageFileName.isNotEmpty) 'image': imageFileName,
     // 正文节点不写入标题级别，保持文件简洁
     if (headingLevel > 0) 'headingLevel': headingLevel,
+    if (table != null) 'table': table!.toJson(),
     if (styleRanges.isNotEmpty)
       'styleRanges': styleRanges.map(_styleRangeToJson).toList(),
   };
 
   /// 创建一份替换了图片绝对路径的副本
   ///
-  /// 图片路径依赖设定项所在目录，由索引构建时统一解析，序列化时只保留文件名。
-  OutlineKeywordSubNode withImagePath(String imagePath) {
+  /// 图片路径依赖设定项所在目录，由索引构建时统一解析，序列化时只保留文件名；
+  /// [table] 为从备注数据中补齐的表格，为空时沿用原有表格。
+  OutlineKeywordSubNode withImagePath(String imagePath, {OutlineTableData? table}) {
     return OutlineKeywordSubNode(
       depth: depth,
       text: text,
@@ -130,6 +137,7 @@ class OutlineKeywordSubNode {
       imagePath: imagePath,
       styleRanges: styleRanges,
       headingLevel: headingLevel,
+      table: table ?? this.table,
     );
   }
 

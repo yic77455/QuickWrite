@@ -55,7 +55,7 @@ class OutlineCompanionData {
 
 /// 大纲伴生文件读写
 ///
-/// 所有读写操作在同一任务链中串行执行，避免关键词、关联、备注的防抖保存
+/// 所有读写操作在同一任务链中串行执行，避免关键词、关联、备注的保存
 /// 并发读写同一文件而互相覆盖。
 class OutlineCompanionStore {
   OutlineCompanionStore._();
