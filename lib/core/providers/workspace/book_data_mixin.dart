@@ -1042,9 +1042,14 @@ mixin BookDataMixin on WorkspaceStateBase {
       }
     }
 
-    // 重新分配全局 orderIndex
+    // 重新分配全局 orderIndex，序号变化的章节同步更新修改时间，
+    // 使新的排序结果能参与云同步合并
+    final now = DateTime.now();
     for (int i = 0; i < newAllChapters.length; i++) {
-      newAllChapters[i].orderIndex = i;
+      final chapter = newAllChapters[i];
+      if (chapter.orderIndex == i) continue;
+      chapter.orderIndex = i;
+      chapter.updatedAt = now;
     }
 
     _chapters = newAllChapters;
@@ -1985,9 +1990,14 @@ mixin BookDataMixin on WorkspaceStateBase {
       }
     }
 
-    // 重新分配全局 orderIndex
+    // 重新分配全局 orderIndex，序号变化的设定项同步更新修改时间，
+    // 使新的排序结果能参与云同步合并
+    final now = DateTime.now();
     for (int i = 0; i < newAllItems.length; i++) {
-      newAllItems[i].orderIndex = i;
+      final item = newAllItems[i];
+      if (item.orderIndex == i) continue;
+      item.orderIndex = i;
+      item.updatedAt = now;
     }
 
     _settingItems = newAllItems;

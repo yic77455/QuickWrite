@@ -54,6 +54,8 @@ class ThemedCoverImage extends StatelessWidget {
             key: cacheKey != null ? ValueKey('${coverPath}_$cacheKey') : ValueKey(coverPath),
             image: FileImage(File(coverPath)),
             fit: fit,
+            // 新图片解码完成前保留上一帧，避免封面区域出现空白闪动
+            gaplessPlayback: true,
             errorBuilder: errorBuilder,
           );
         }

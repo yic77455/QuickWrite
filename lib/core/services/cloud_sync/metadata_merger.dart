@@ -153,13 +153,19 @@ class MetadataMerger {
 
       // 实体胜出：删除记录不再需要保留，并作为存活实体继续参与同步
       tombstones.remove(key);
-      aliveEntities.add(winner);
+      final mergedEntity = _mergeOrderFields(
+        local: local,
+        remote: remoteEntity,
+        winner: winner,
+        orderFields: type.orderFields,
+      );
+      aliveEntities.add(mergedEntity);
       aliveKeys.add(key);
 
       // 本地与合并结果不一致时才需要写回
       if (local == null ||
-          canonicalEntityOf(local) != canonicalEntityOf(winner)) {
-        upserts.add(winner);
+          canonicalEntityOf(local) != canonicalEntityOf(mergedEntity)) {
+        upserts.add(mergedEntity);
       }
     }
 
@@ -200,6 +206,57 @@ class MetadataMerger {
     return canonicalEntityOf(local).compareTo(canonicalEntityOf(remote)) >= 0
         ? local
         : remote;
+  }
+
+  /// 合并实体的顺序字段
+  ///
+  /// 内容字段沿用 [winner]，顺序字段取顺序调整时间较新的一方，
+  /// 使调整顺序既能同步，又不会因修改时间变化影响其他字段的合并结果
+  Map<String, dynamic> _mergeOrderFields({
+    required Map<String, dynamic>? local,
+    required Map<String, dynamic>? remote,
+    required Map<String, dynamic> winner,
+    required List<String> orderFields,
+  }) {
+    if (orderFields.isEmpty || local == null || remote == null) return winner;
+
+    final localOrderAt = metadataOrderUpdatedAtOf(local);
+    final remoteOrderAt = metadataOrderUpdatedAtOf(remote);
+    final comparison = localOrderAt.compareTo(remoteOrderAt);
+
+    final Map<String, dynamic> orderSource;
+    if (comparison > 0) {
+      orderSource = local;
+    } else if (comparison < 0) {
+      orderSource = remote;
+    } else {
+      // 时间相同时按排序字段的规范化内容比较，保证两端得到相同结论
+      final localOrder = _canonicalOrderFieldsOf(local, orderFields);
+      final remoteOrder = _canonicalOrderFieldsOf(remote, orderFields);
+      orderSource = localOrder.compareTo(remoteOrder) >= 0 ? local : remote;
+    }
+
+    final merged = Map<String, dynamic>.of(winner);
+    for (final field in orderFields) {
+      if (orderSource.containsKey(field)) merged[field] = orderSource[field];
+    }
+    // 记录本次采用的顺序时间，供后续合并继续比较
+    merged[kOrderUpdatedAtField] = metadataOrderUpdatedAtOf(
+      orderSource,
+    ).toIso8601String();
+    return merged;
+  }
+
+  /// 生成仅包含顺序字段的规范化字符串
+  static String _canonicalOrderFieldsOf(
+    Map<String, dynamic> entity,
+    List<String> orderFields,
+  ) {
+    final fields = <String, dynamic>{
+      for (final field in orderFields)
+        if (entity.containsKey(field)) field: entity[field],
+    };
+    return canonicalEntityOf(fields);
   }
 }
 

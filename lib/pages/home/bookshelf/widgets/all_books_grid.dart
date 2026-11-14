@@ -544,10 +544,18 @@ class _AllBooksGridState extends State<AllBooksGrid> {
                           ),
                         ],
                       ),
-                      // 移动端长按抬起时记录位置，用于松手后判断是拖动还是弹菜单
-                      onDragStarted: _handleMobileLiftStart,
+                      onDragStarted: (index) {
+                        // 拖拽期间暂缓书架重载，避免列表被替换导致卡片位置错乱
+                        context.read<BookshelfProvider>().beginBookReorder();
+                        // 移动端长按抬起时记录位置，用于松手后判断是拖动还是弹菜单
+                        _handleMobileLiftStart(index);
+                      },
                       // 拖动结束时：原地松手弹菜单，发生拖动则完成排序
-                      onDragEnd: (_) => _handleMobileLiftEnd(filteredBooks),
+                      onDragEnd: (_) {
+                        // 解除暂缓，被推迟的刷新会在排序落盘后补做
+                        context.read<BookshelfProvider>().endBookReorder();
+                        _handleMobileLiftEnd(filteredBooks);
+                      },
                       onReorder: (ReorderedListFunction reorderedListFunction) {
                         // 使用 context.read 获取 Provider 并调用其方法，不会引起额外重绘
                         // 传入当前分组 ID，用于分组内排序

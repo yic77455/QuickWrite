@@ -30,6 +30,12 @@ class BookModel {
   DateTime createdAt = DateTime.now(); // 创建时间
   
   int orderIndex = 0; // 排序索引
+
+  /// 排序变更时间
+  ///
+  /// 仅记录书架顺序的调整时间，供云同步判断排序结果的新旧；
+  /// 不参与「最近编辑」等基于 [updatedAt] 的展示
+  DateTime? orderUpdatedAt;
   
   /// 所属分组 UUID（空字符串表示未分组，即"全部作品"）
   String groupId = '';
@@ -77,6 +83,7 @@ class BookModel {
     DateTime? updatedAt,
     DateTime? createdAt,
     int? orderIndex,
+    DateTime? orderUpdatedAt,
     String? groupId,
   }) {
     return BookModel()
@@ -90,6 +97,7 @@ class BookModel {
       ..updatedAt = updatedAt ?? this.updatedAt
       ..createdAt = createdAt ?? this.createdAt
       ..orderIndex = orderIndex ?? this.orderIndex
+      ..orderUpdatedAt = orderUpdatedAt ?? this.orderUpdatedAt
       ..groupId = groupId ?? this.groupId;
   }
 
@@ -107,6 +115,7 @@ class BookModel {
       'updatedAt': updatedAt.toIso8601String(),
       'createdAt': createdAt.toIso8601String(),
       'orderIndex': orderIndex,
+      'orderUpdatedAt': orderUpdatedAt?.toIso8601String(),
       'groupId': groupId,
     };
   }
@@ -122,6 +131,9 @@ class BookModel {
       ..updatedAt = json['updatedAt'] != null ? DateTime.parse(json['updatedAt'] as String) : DateTime.now()
       ..createdAt = json['createdAt'] != null ? DateTime.parse(json['createdAt'] as String) : DateTime.now()
       ..orderIndex = json['orderIndex'] as int? ?? 0
+      ..orderUpdatedAt = json['orderUpdatedAt'] != null
+          ? DateTime.tryParse(json['orderUpdatedAt'] as String)
+          : null
       ..groupId = json['groupId'] as String? ?? '';
   }
 }

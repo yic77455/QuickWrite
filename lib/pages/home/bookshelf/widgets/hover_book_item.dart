@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/models/book.dart';
@@ -69,6 +70,19 @@ class _HoverBookItemState extends State<HoverBookItem> {
       fontSize: 18 * widget.width / 160,
       borderRadius: 0,
     );
+  }
+
+  /// 悬停进入：拖拽排序期间不响应，避免拖动反馈中的卡片重新播放悬停动画
+  void _handleHoverEnter(PointerEnterEvent _) {
+    if (widget.isBatchMode || _isHovered) return;
+    if (context.read<BookshelfProvider>().isReorderingBooks) return;
+    setState(() => _isHovered = true);
+  }
+
+  /// 悬停离开
+  void _handleHoverExit(PointerExitEvent _) {
+    if (widget.isBatchMode || !_isHovered) return;
+    setState(() => _isHovered = false);
   }
 
   /// 构建书籍右键菜单项
@@ -167,8 +181,8 @@ class _HoverBookItemState extends State<HoverBookItem> {
       enableMobileLongPress: false,
       child: MouseRegion(
         // 批量模式下禁用悬停效果
-        onEnter: widget.isBatchMode ? null : (_) => setState(() => _isHovered = true),
-        onExit: widget.isBatchMode ? null : (_) => setState(() => _isHovered = false),
+        onEnter: widget.isBatchMode ? null : _handleHoverEnter,
+        onExit: widget.isBatchMode ? null : _handleHoverExit,
         child: GestureDetector(
           onTap: widget.onTap,
           child: AnimatedContainer(
@@ -269,8 +283,8 @@ class _HoverBookItemState extends State<HoverBookItem> {
         menuItems: menuItems,
         enableMobileLongPress: false,
         child: MouseRegion(
-          onEnter: widget.isBatchMode ? null : (_) => setState(() => _isHovered = true),
-          onExit: widget.isBatchMode ? null : (_) => setState(() => _isHovered = false),
+          onEnter: widget.isBatchMode ? null : _handleHoverEnter,
+          onExit: widget.isBatchMode ? null : _handleHoverExit,
           child: GestureDetector(
             onTap: widget.onTap,
             child: AnimatedDefaultTextStyle(

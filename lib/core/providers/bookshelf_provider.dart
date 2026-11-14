@@ -44,6 +44,16 @@ class BookshelfProvider extends ChangeNotifier {
   List<GroupModel> _allGroups = []; // 私有数据：分组列表
   bool _isInitialized = false;
   bool get isInitialized => _isInitialized;
+
+  /// 是否正在拖拽排序书籍
+  bool _isReorderingBooks = false;
+  bool get isReorderingBooks => _isReorderingBooks;
+
+  /// 拖拽排序期间是否有被推迟的书架刷新
+  bool _refreshDeferredForReorder = false;
+
+  /// 本次拖拽是否已进入排序回调
+  bool _reorderCallbackHandled = false;
   
   /// 暴露 Isar 实例（用于全文索引服务）
   Isar get isar => _isar;
@@ -196,8 +206,40 @@ class BookshelfProvider extends ChangeNotifier {
   /// 
   /// 重新从数据库加载所有书籍和分组数据
   Future<void> refresh() async {
-    // 清除所有书籍封面缓存
+    // 拖拽排序期间不重载书架：拖拽中的列表被替换会让卡片位置错乱，
+    // 本次刷新推迟到排序结果落盘后补做
+    if (_isReorderingBooks) {
+      _refreshDeferredForReorder = true;
+      return;
+    }
+    _refreshDeferredForReorder = false;
+
+    // 记录刷新前的修改时间，用于识别封面可能已变化的书籍
+    final previousUpdatedAt = {
+      for (final book in _allBooks) book.uuid: book.updatedAt,
+    };
+
+    await _loadBooks();
+    await _loadGroups();
+
+    // 拖拽排序在刷新过程中开始：保持界面不变，等排序结束后再补做刷新
+    if (_isReorderingBooks) {
+      _refreshDeferredForReorder = true;
+      return;
+    }
+
+    _evictChangedCoverCaches(previousUpdatedAt);
+    notifyListeners();
+  }
+
+  /// 清除封面已变化的书籍封面缓存
+  ///
+  /// 仅处理修改时间发生变化的书籍，避免每次刷新都重新解码全部封面造成书架闪烁
+  void _evictChangedCoverCaches(Map<String, DateTime> previousUpdatedAt) {
     for (final book in _allBooks) {
+      final previous = previousUpdatedAt[book.uuid];
+      if (previous != null && previous == book.updatedAt) continue;
+
       final coverPath = BookFolderService().coverFilePath(book);
       if (coverPath.isEmpty) continue;
 
@@ -206,10 +248,6 @@ class BookshelfProvider extends ChangeNotifier {
         FileImage(coverFile).evict();
       }
     }
-    
-    await _loadBooks();
-    await _loadGroups();
-    notifyListeners();
   }
 
   /// 根据分组 ID 获取书籍列表
@@ -234,6 +272,30 @@ class BookshelfProvider extends ChangeNotifier {
     }
   }
 
+  /// 标记书籍拖拽排序开始
+  ///
+  /// 拖拽期间暂缓书架重载，避免列表在拖拽过程中被替换
+  void beginBookReorder() {
+    _isReorderingBooks = true;
+    _reorderCallbackHandled = false;
+  }
+
+  /// 标记书籍拖拽排序结束
+  ///
+  /// 排序回调紧随拖拽结束执行，被推迟的刷新由 [reorderBooks] 在排序落盘后补做；
+  /// 拖拽取消或位置未变时不会进入排序回调，这里在下一事件循环补做刷新，
+  /// 避免推迟的刷新一直不执行
+  void endBookReorder() {
+    _isReorderingBooks = false;
+    if (!_refreshDeferredForReorder) return;
+
+    Future.microtask(() {
+      if (_reorderCallbackHandled) return;
+      _refreshDeferredForReorder = false;
+      refresh();
+    });
+  }
+
   /// 处理 UI 拖拽并持久化到数据库
   /// 
   /// [reorderedListFunction] 拖拽排序函数
@@ -242,6 +304,9 @@ class BookshelfProvider extends ChangeNotifier {
     ReorderedListFunction reorderedListFunction, {
     String? groupId,
   }) async {
+    // 标记本次拖拽已由排序回调接管刷新
+    _reorderCallbackHandled = true;
+
     // 根据分组获取当前书籍列表
     List<BookModel> currentOrderedBooks;
     if (groupId == null) {
@@ -265,15 +330,27 @@ class BookshelfProvider extends ChangeNotifier {
     List<BookModel> newOrderedBooks =
         reorderedListFunction(currentOrderedBooks) as List<BookModel>;
 
+    // 当前分组内书籍占用的全局序号，用于在保持全局位置的前提下调整组内顺序，
+    // 避免分组内排序与「全部作品」共用序号时产生重复
+    final orderSlots = [for (final book in currentOrderedBooks) book.orderIndex]
+      ..sort();
+
+    // 排序变更时间，用于让云同步识别本次顺序调整
+    final now = DateTime.now();
+
     // Isar 事务 (Transaction)：极速批量更新数据库
     // writeTxn 保证了这段代码要么全部成功，要么全部回滚，绝对安全
     await _isar.writeTxn(() async {
       for (int i = 0; i < newOrderedBooks.length; i++) {
         final book = newOrderedBooks[i];
+        final targetOrderIndex = orderSlots[i];
 
         // 只有当新的序号和原来的序号不同时，才去改数据库，节省性能
-        if (book.orderIndex != i) {
-          book.orderIndex = i; // 直接修改对象的属性
+        if (book.orderIndex != targetOrderIndex) {
+          book.orderIndex = targetOrderIndex; // 直接修改对象的属性
+          // 更新排序变更时间，使排序结果能被同步识别，避免被远端的旧序号覆盖；
+          // 不修改 updatedAt，避免拖动排序影响「最近编辑」的判定
+          book.orderUpdatedAt = now;
           await _isar.bookModels.put(book); // put() 会根据 id 自动更新这一行数据
         }
       }
@@ -284,6 +361,12 @@ class BookshelfProvider extends ChangeNotifier {
 
     // 排序结果已落盘，交由云同步服务安排一次同步
     CloudSyncService.instance.notifyLocalChange();
+
+    // 补做拖拽期间被推迟的书架刷新
+    if (_refreshDeferredForReorder) {
+      _refreshDeferredForReorder = false;
+      await refresh();
+    }
   }
 
   /// 新建一本书
@@ -305,9 +388,10 @@ class BookshelfProvider extends ChangeNotifier {
     final now = DateTime.now();
     final newUuid = const Uuid().v4(); // 生成 UUID
 
-    // 先把所有现有书的 orderIndex +1，腾出第一个位置
+    // 先把所有现有书的 orderIndex +1，腾出第一个位置，并记录本次顺序调整
     for (var book in _allBooks) {
       book.orderIndex++;
+      book.orderUpdatedAt = now;
     }
 
     // 创建 BookModel 实例
@@ -354,9 +438,10 @@ class BookshelfProvider extends ChangeNotifier {
     final now = DateTime.now();
     final bookUuid = const Uuid().v4();
     
-    // 先把所有现有书的 orderIndex +1，腾出第一个位置
+    // 先把所有现有书的 orderIndex +1，腾出第一个位置，并记录本次顺序调整
     for (var book in _allBooks) {
       book.orderIndex++;
+      book.orderUpdatedAt = now;
     }
     
     // 创建 BookModel 实例
@@ -456,8 +541,13 @@ class BookshelfProvider extends ChangeNotifier {
     _allBooks.sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
     
     // 因为删了一本书，后面书的 orderIndex 断层了，重新整理一下序号
+    // 序号发生变化的书同步记录排序变更时间，保证新顺序能覆盖云端的旧序号
+    final reorderTime = DateTime.now();
     for (int i = 0; i < _allBooks.length; i++) {
-      _allBooks[i].orderIndex = i;
+      final book = _allBooks[i];
+      if (book.orderIndex == i) continue;
+      book.orderIndex = i;
+      book.orderUpdatedAt = reorderTime;
     }
     // 把整理好的新序号存进数据库
     await _isar.writeTxn(() async {
@@ -521,9 +611,13 @@ class BookshelfProvider extends ChangeNotifier {
     // 先按 orderIndex 排序，确保顺序正确后再重新整理序号
     _allBooks.sort((a, b) => a.orderIndex.compareTo(b.orderIndex));
 
-    // 重新整理序号
+    // 重新整理序号，并记录排序变更时间，保证新顺序能覆盖云端的旧序号
+    final reorderTime = DateTime.now();
     for (int i = 0; i < _allBooks.length; i++) {
-      _allBooks[i].orderIndex = i;
+      final book = _allBooks[i];
+      if (book.orderIndex == i) continue;
+      book.orderIndex = i;
+      book.orderUpdatedAt = reorderTime;
     }
 
     // 一次性更新所有剩余书籍的序号
@@ -576,9 +670,11 @@ class BookshelfProvider extends ChangeNotifier {
         newOrderIndex: 0, // 恢复到最前面
       );
       
-      // 把现有所有书的 orderIndex +1，腾出第一个位置
+      // 把现有所有书的 orderIndex +1，腾出第一个位置，并记录本次顺序调整
+      final reorderTime = DateTime.now();
       for (var book in _allBooks) {
         book.orderIndex++;
+        book.orderUpdatedAt = reorderTime;
       }
       
       // 在一个事务中：删除回收站记录、存入书籍记录、更新其他书籍序号

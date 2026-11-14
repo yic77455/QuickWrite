@@ -42,28 +42,33 @@ const BookModelSchema = CollectionSchema(
       name: r'orderIndex',
       type: IsarType.long,
     ),
-    r'synopsis': PropertySchema(
+    r'orderUpdatedAt': PropertySchema(
       id: 5,
+      name: r'orderUpdatedAt',
+      type: IsarType.dateTime,
+    ),
+    r'synopsis': PropertySchema(
+      id: 6,
       name: r'synopsis',
       type: IsarType.string,
     ),
     r'title': PropertySchema(
-      id: 6,
+      id: 7,
       name: r'title',
       type: IsarType.string,
     ),
     r'updatedAt': PropertySchema(
-      id: 7,
+      id: 8,
       name: r'updatedAt',
       type: IsarType.dateTime,
     ),
     r'uuid': PropertySchema(
-      id: 8,
+      id: 9,
       name: r'uuid',
       type: IsarType.string,
     ),
     r'wordCount': PropertySchema(
-      id: 9,
+      id: 10,
       name: r'wordCount',
       type: IsarType.long,
     )
@@ -122,11 +127,12 @@ void _bookModelSerialize(
   writer.writeString(offsets[2], object.groupId);
   writer.writeString(offsets[3], object.latestChapter);
   writer.writeLong(offsets[4], object.orderIndex);
-  writer.writeString(offsets[5], object.synopsis);
-  writer.writeString(offsets[6], object.title);
-  writer.writeDateTime(offsets[7], object.updatedAt);
-  writer.writeString(offsets[8], object.uuid);
-  writer.writeLong(offsets[9], object.wordCount);
+  writer.writeDateTime(offsets[5], object.orderUpdatedAt);
+  writer.writeString(offsets[6], object.synopsis);
+  writer.writeString(offsets[7], object.title);
+  writer.writeDateTime(offsets[8], object.updatedAt);
+  writer.writeString(offsets[9], object.uuid);
+  writer.writeLong(offsets[10], object.wordCount);
 }
 
 BookModel _bookModelDeserialize(
@@ -142,11 +148,12 @@ BookModel _bookModelDeserialize(
   object.id = id;
   object.latestChapter = reader.readString(offsets[3]);
   object.orderIndex = reader.readLong(offsets[4]);
-  object.synopsis = reader.readString(offsets[5]);
-  object.title = reader.readString(offsets[6]);
-  object.updatedAt = reader.readDateTime(offsets[7]);
-  object.uuid = reader.readString(offsets[8]);
-  object.wordCount = reader.readLong(offsets[9]);
+  object.orderUpdatedAt = reader.readDateTimeOrNull(offsets[5]);
+  object.synopsis = reader.readString(offsets[6]);
+  object.title = reader.readString(offsets[7]);
+  object.updatedAt = reader.readDateTime(offsets[8]);
+  object.uuid = reader.readString(offsets[9]);
+  object.wordCount = reader.readLong(offsets[10]);
   return object;
 }
 
@@ -168,14 +175,16 @@ P _bookModelDeserializeProp<P>(
     case 4:
       return (reader.readLong(offset)) as P;
     case 5:
-      return (reader.readString(offset)) as P;
+      return (reader.readDateTimeOrNull(offset)) as P;
     case 6:
       return (reader.readString(offset)) as P;
     case 7:
-      return (reader.readDateTime(offset)) as P;
-    case 8:
       return (reader.readString(offset)) as P;
+    case 8:
+      return (reader.readDateTime(offset)) as P;
     case 9:
+      return (reader.readString(offset)) as P;
+    case 10:
       return (reader.readLong(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -936,6 +945,80 @@ extension BookModelQueryFilter
     });
   }
 
+  QueryBuilder<BookModel, BookModel, QAfterFilterCondition>
+      orderUpdatedAtIsNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNull(
+        property: r'orderUpdatedAt',
+      ));
+    });
+  }
+
+  QueryBuilder<BookModel, BookModel, QAfterFilterCondition>
+      orderUpdatedAtIsNotNull() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(const FilterCondition.isNotNull(
+        property: r'orderUpdatedAt',
+      ));
+    });
+  }
+
+  QueryBuilder<BookModel, BookModel, QAfterFilterCondition>
+      orderUpdatedAtEqualTo(DateTime? value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'orderUpdatedAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<BookModel, BookModel, QAfterFilterCondition>
+      orderUpdatedAtGreaterThan(
+    DateTime? value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'orderUpdatedAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<BookModel, BookModel, QAfterFilterCondition>
+      orderUpdatedAtLessThan(
+    DateTime? value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'orderUpdatedAt',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<BookModel, BookModel, QAfterFilterCondition>
+      orderUpdatedAtBetween(
+    DateTime? lower,
+    DateTime? upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'orderUpdatedAt',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+      ));
+    });
+  }
+
   QueryBuilder<BookModel, BookModel, QAfterFilterCondition> synopsisEqualTo(
     String value, {
     bool caseSensitive = true,
@@ -1503,6 +1586,18 @@ extension BookModelQuerySortBy on QueryBuilder<BookModel, BookModel, QSortBy> {
     });
   }
 
+  QueryBuilder<BookModel, BookModel, QAfterSortBy> sortByOrderUpdatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'orderUpdatedAt', Sort.asc);
+    });
+  }
+
+  QueryBuilder<BookModel, BookModel, QAfterSortBy> sortByOrderUpdatedAtDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'orderUpdatedAt', Sort.desc);
+    });
+  }
+
   QueryBuilder<BookModel, BookModel, QAfterSortBy> sortBySynopsis() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'synopsis', Sort.asc);
@@ -1638,6 +1733,18 @@ extension BookModelQuerySortThenBy
     });
   }
 
+  QueryBuilder<BookModel, BookModel, QAfterSortBy> thenByOrderUpdatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'orderUpdatedAt', Sort.asc);
+    });
+  }
+
+  QueryBuilder<BookModel, BookModel, QAfterSortBy> thenByOrderUpdatedAtDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'orderUpdatedAt', Sort.desc);
+    });
+  }
+
   QueryBuilder<BookModel, BookModel, QAfterSortBy> thenBySynopsis() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'synopsis', Sort.asc);
@@ -1736,6 +1843,12 @@ extension BookModelQueryWhereDistinct
     });
   }
 
+  QueryBuilder<BookModel, BookModel, QDistinct> distinctByOrderUpdatedAt() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'orderUpdatedAt');
+    });
+  }
+
   QueryBuilder<BookModel, BookModel, QDistinct> distinctBySynopsis(
       {bool caseSensitive = true}) {
     return QueryBuilder.apply(this, (query) {
@@ -1805,6 +1918,13 @@ extension BookModelQueryProperty
   QueryBuilder<BookModel, int, QQueryOperations> orderIndexProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'orderIndex');
+    });
+  }
+
+  QueryBuilder<BookModel, DateTime?, QQueryOperations>
+      orderUpdatedAtProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'orderUpdatedAt');
     });
   }
 

@@ -28,6 +28,12 @@ const String kSettingItemsCollection = 'settingItems';
 /// 书籍分组集合名
 const String kGroupsCollection = 'groups';
 
+/// 排序变更时间字段名
+///
+/// 实体中记录顺序调整时间的字段，与 [updatedAt]（内容修改时间）区分开，
+/// 使调整顺序不会改变「最近编辑」，同时排序结果仍能参与同步合并
+const String kOrderUpdatedAtField = 'orderUpdatedAt';
+
 /// 码字统计集合名
 const String kStatsCollection = 'stats';
 
@@ -92,6 +98,12 @@ class MetadataEntityType {
   /// 按稳定标识删除本地实体
   final Future<void> Function(Isar isar, Set<String> keys) deleteByKeys;
 
+  /// 表示顺序的字段名
+  ///
+  /// 这些字段按 [kOrderUpdatedAtField] 记录的时间单独合并，
+  /// 不随内容修改时间变化，为空表示该类型不参与顺序合并
+  final List<String> orderFields;
+
   const MetadataEntityType({
     required this.name,
     required this.perBook,
@@ -99,6 +111,7 @@ class MetadataEntityType {
     required this.keyOf,
     required this.putAll,
     required this.deleteByKeys,
+    this.orderFields = const [],
   });
 }
 
@@ -115,6 +128,19 @@ DateTime _updatedAtOf(Map<String, dynamic> json) {
   if (raw == null) return DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
   return DateTime.tryParse(raw) ??
       DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
+}
+
+/// 读取实体的顺序调整时间
+///
+/// 未记录过顺序调整的实体按内容修改时间处理，
+/// 使历史数据沿用原有的合并结论
+DateTime metadataOrderUpdatedAtOf(Map<String, dynamic> json) {
+  final raw = json[kOrderUpdatedAtField] as String?;
+  if (raw != null) {
+    final parsed = DateTime.tryParse(raw);
+    if (parsed != null) return parsed;
+  }
+  return _updatedAtOf(json);
 }
 
 /// 读取全体实体的「稳定标识 → 底层 ID」映射
@@ -151,6 +177,7 @@ final MetadataEntityType _booksType = MetadataEntityType(
   name: kBooksCollection,
   perBook: true,
   keyOf: _uuidKeyOf,
+  orderFields: const ['orderIndex'],
   loadAll: (isar) async {
     final books = await isar.bookModels.where().findAll();
     return [for (final book in books) book.toJson()];
