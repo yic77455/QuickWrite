@@ -296,6 +296,7 @@ class CodeEditor extends StatefulWidget {
     this.autocompleteSymbols,
     this.autocompletePairs,
     this.onNewLine,
+    this.onMobileTapIntercept,
     this.autofocus,
     this.focusNode,
     this.maxLengthSingleLineRendering,
@@ -426,6 +427,13 @@ class CodeEditor extends StatefulWidget {
   /// 移动端软键盘的换行不经过快捷键机制，非空时换行由此回调接管，
   /// 使移动端与桌面端共用同一套换行规则；为空时使用编辑器默认换行。
   final VoidCallback? onNewLine;
+
+  /// 移动端点按拦截回调
+  ///
+  /// 参数依次为点按的全局坐标、该坐标换算出的光标位置与抬起阶段标记；
+  /// 返回 true 表示外部已消费本次点按，编辑器不再移动光标、不唤起输入法，
+  /// 也不会触发双击选词等后续行为。为空时不拦截。
+  final bool Function(Offset position, CodeLineSelection? selection, bool isTapUp)? onMobileTapIntercept;
 
   /// Whether this editor field should focus itself if nothing else is already
   /// focused.
@@ -692,6 +700,7 @@ class _CodeEditorState extends State<CodeEditor> {
       selectionOverlayController: _selectionOverlayController,
       behavior: HitTestBehavior.translucent,
       editorKey: _editorKey,
+      onTapIntercept: widget.onMobileTapIntercept,
       child: editable
     );
     // 移动端与桌面端共用快捷键机制，移动端额外由 [Focus.onKeyEvent] 处理退格

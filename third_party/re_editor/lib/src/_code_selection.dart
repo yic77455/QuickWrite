@@ -8,6 +8,13 @@ class _CodeSelectionGestureDetector extends StatefulWidget {
   final HitTestBehavior? behavior;
   final GlobalKey editorKey;
   final _SelectionOverlayController selectionOverlayController;
+
+  /// 移动端点按拦截回调
+  ///
+  /// 参数依次为点按的全局坐标、该坐标换算出的光标位置与抬起阶段标记；
+  /// 返回 true 表示外部已消费本次点按，编辑器不再移动光标、不唤起输入法。
+  final bool Function(Offset position, CodeLineSelection? selection, bool isTapUp)? onTapIntercept;
+
   final Widget child;
 
   const _CodeSelectionGestureDetector({
@@ -17,6 +24,7 @@ class _CodeSelectionGestureDetector extends StatefulWidget {
     this.behavior,
     required this.editorKey,
     required this.selectionOverlayController,
+    this.onTapIntercept,
     required this.child,
   });
 
@@ -85,9 +93,15 @@ class _CodeSelectionGestureDetectorState extends State<_CodeSelectionGestureDete
           _dragPosition = null;
         },
         onTapUp: (details) {
+          if (_interceptTap(details.globalPosition, isTapUp: true)) {
+            return;
+          }
           _onMobileTapUp(details.globalPosition);
         },
         onTapDown: (details) {
+          if (_interceptTap(details.globalPosition, isTapUp: false)) {
+            return;
+          }
           if (!render.hasFocus) {
             _onMobileTapDown(details.globalPosition);
           }
@@ -170,6 +184,29 @@ class _CodeSelectionGestureDetectorState extends State<_CodeSelectionGestureDete
       LogicalKeyboardKey.shiftLeft,
       LogicalKeyboardKey.shiftRight,
     }.contains);
+
+  /// 将移动端点按交给外部拦截
+  ///
+  /// 点按位置先换算为光标位置再回调外部，供其判断是否命中自定义内容；
+  /// 外部消费本次点按后返回 true，编辑器不再处理该点按。
+  bool _interceptTap(Offset position, {required bool isTapUp}) {
+    final bool Function(Offset, CodeLineSelection?, bool)? intercept = widget.onTapIntercept;
+    if (intercept == null) {
+      return false;
+    }
+    final RenderObject? renderObject = widget.editorKey.currentContext?.findRenderObject();
+    if (renderObject is! _CodeFieldRender) {
+      return false;
+    }
+    final CodeLineSelection? selection = renderObject.setPositionAt(position: position);
+    final bool handled = intercept(position, selection, isTapUp);
+    if (handled) {
+      // 点按已被外部消费，按普通点按的规则收起选区手柄与工具栏
+      widget.selectionOverlayController.hideHandle();
+      widget.selectionOverlayController.hideToolbar();
+    }
+    return handled;
+  }
 
   void _onMobileTapDown(Offset position) {
     _selectPosition(position, _SelectionChangedCause.tapDown);

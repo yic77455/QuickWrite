@@ -221,6 +221,18 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 延迟收起可避免卡片闪烁或提前消失。
   Timer? _keywordHoverExitTimer;
 
+  /// 移动端按下关键词后待抬起时展示的预览数据
+  ///
+  /// 按下阶段只拦截编辑器的手势，抬起后才弹出卡片，
+  /// 使长按选词、拖动滚动等手势不会误弹卡片。
+  ({OutlineKeywordEntry entry, Rect anchor, Color accent})? _pendingMobileKeywordPreview;
+
+  /// 移动端本次点按是否只用于关闭关键词卡片
+  ///
+  /// 卡片已展示时，点按空白处只关闭卡片，不再把这次点按交还编辑器，
+  /// 避免关闭卡片的同一个点按移动光标并唤起输入法。
+  bool _dismissMobileKeywordCardOnTapUp = false;
+
   /// 待消费的编辑事件类型
   ///
   /// 程序化编辑（撤销、粘贴、剪切等）在执行前先置入类型，
@@ -790,6 +802,8 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     _pendingKeywordCard = null;
     _pendingKeywordCardAnchor = null;
     _pendingKeywordCardAccent = null;
+    _pendingMobileKeywordPreview = null;
+    _dismissMobileKeywordCardOnTapUp = false;
     _removeKeywordCardEntry();
     _hoveredKeyword = null;
     _hoveredKeywordRects = const [];
@@ -814,40 +828,70 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     _jumpToOutlineKeyword(entry);
   }
 
-  /// 处理编辑器内的指针抬起
+  /// 拦截移动端点按关键词的手势
   ///
-  /// 移动端开启关键词高亮后，点按落在关键词上时弹出预览卡片，
-  /// 点按空白处则收起已有卡片。
-  void _onEditorPointerUp(PointerUpEvent event) {
-    if (!PlatformCapabilities.isMobile || !_keywordHighlightPinned) return;
-    final Offset position = event.position;
-    // 延后到帧末读取光标，确保点按引起的光标移动已经完成
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_keywordHighlightPinned) return;
-      final TextSelection flatSelection = CodeLineSelectionUtils.flatSelectionOf(
-        widget.controller.text,
-        widget.controller.selection,
-      );
-      if (!flatSelection.isValid || !flatSelection.isCollapsed) return;
+  /// 关键词预览开启后，点按关键词由本方法接管：编辑器不再移动光标、
+  /// 不唤起输入法，只在手指抬起后弹出预览卡片；
+  /// 卡片展示期间点按空白处同样由本方法接管，只关闭卡片，
+  /// 不会顺带移动光标或唤起输入法。
+  bool _interceptMobileKeywordTap(Offset position, CodeLineSelection? caret, bool isTapUp) {
+    if (!PlatformCapabilities.isMobile || !_keywordHighlightPinned) return false;
 
-      // 点按会先移动光标；光标落在词尾时向前取一个字符，避免单字关键词漏判
-      final int caret = flatSelection.baseOffset;
-      final ReEditorSpanBuilder? spanBuilder = widget.spanBuilder;
-      String? keyword = spanBuilder?.outlineKeywordAt(caret);
-      if (keyword == null && caret > 0) {
-        keyword = spanBuilder?.outlineKeywordAt(caret - 1);
-      }
-      if (keyword == null) {
-        _hideKeywordCard();
-        return;
-      }
+    // 按下阶段只记录命中的关键词，避免长按或拖动时提前弹卡
+    if (!isTapUp) {
+      _pendingMobileKeywordPreview = _resolveMobileKeywordPreview(position, caret);
+      _dismissMobileKeywordCardOnTapUp =
+          _pendingMobileKeywordPreview == null && _keywordCardEntry != null;
+      return _pendingMobileKeywordPreview != null || _dismissMobileKeywordCardOnTapUp;
+    }
 
-      final OutlineKeywordEntry? entry = _outlineKeywordService?.entryForKeyword(keyword);
-      if (entry == null) return;
-      // 以点按位置上方一小段作为锚点，卡片优先显示在手指上方
-      final Rect anchor = Rect.fromLTWH(position.dx, position.dy - 20, 0, 20);
-      _showKeywordCard(entry, anchor, _keywordAccentOf(entry, keyword));
-    });
+    final ({OutlineKeywordEntry entry, Rect anchor, Color accent})? pending =
+        _pendingMobileKeywordPreview;
+    _pendingMobileKeywordPreview = null;
+    if (pending != null) {
+      _dismissMobileKeywordCardOnTapUp = false;
+      _showKeywordCard(pending.entry, pending.anchor, pending.accent);
+      return true;
+    }
+    if (_dismissMobileKeywordCardOnTapUp) {
+      _dismissMobileKeywordCardOnTapUp = false;
+      _hideKeywordCard();
+      return true;
+    }
+    return false;
+  }
+
+  /// 解析移动端点按位置对应的关键词预览数据
+  ///
+  /// 点按位置换算为全文偏移后查找命中的关键词；光标落在词尾时向前取一个字符，
+  /// 避免单字关键词漏判。未命中关键词时返回 null。
+  ({OutlineKeywordEntry entry, Rect anchor, Color accent})? _resolveMobileKeywordPreview(
+    Offset position,
+    CodeLineSelection? caret,
+  ) {
+    final ReEditorSpanBuilder? spanBuilder = widget.spanBuilder;
+    if (spanBuilder == null || caret == null) return null;
+    final TextSelection flat = CodeLineSelectionUtils.flatSelectionOf(
+      widget.controller.text,
+      caret,
+    );
+    if (!flat.isValid) return null;
+
+    final int offset = flat.baseOffset;
+    String? keyword = spanBuilder.outlineKeywordAt(offset);
+    if (keyword == null && offset > 0) {
+      keyword = spanBuilder.outlineKeywordAt(offset - 1);
+    }
+    if (keyword == null) return null;
+
+    final OutlineKeywordEntry? entry = _outlineKeywordService?.entryForKeyword(keyword);
+    if (entry == null) return null;
+    // 以点按位置上方一小段作为锚点，卡片优先显示在手指上方
+    return (
+      entry: entry,
+      anchor: Rect.fromLTWH(position.dx, position.dy - 20, 0, 20),
+      accent: _keywordAccentOf(entry, keyword),
+    );
   }
 
   /// 跳转到关键词绑定的节点
@@ -1682,9 +1726,8 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
         : null;
 
     return Listener(
-      // 桌面端按住修饰键点击关键词时跳转，移动端点按关键词时弹出预览卡片
+      // 桌面端按住修饰键点击关键词时跳转
       onPointerDown: _onEditorPointerDown,
-      onPointerUp: _onEditorPointerUp,
       child: ReEditorImeReporter(
         key: _imeReporterKey,
         controller: widget.controller,
@@ -1735,6 +1778,9 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
               onNewLine: PlatformCapabilities.isMobile && !widget.readOnly
                   ? _indentPolicy.handleNewLine
                   : null,
+              // 移动端点按关键词时由本编辑器接管：弹出预览卡片，
+              // 同时不把光标落到关键词、不唤起输入法
+              onMobileTapIntercept: _interceptMobileKeywordTap,
               chunkAnalyzer: const NonCodeChunkAnalyzer(),
               padding: padding,
               margin: EdgeInsets.zero,
