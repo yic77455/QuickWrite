@@ -184,8 +184,6 @@ class _UpdateDialogContentState extends State<_UpdateDialogContent> {
   }
 
   /// 在浏览器中打开版本发布页
-  ///
-  /// 优先打开本次检查所用更新源的发布页，未取得结果时回退到默认发布页
   Future<void> _openReleasePage() async {
     await UrlOpener.open(_result?.releaseUrl ?? UpdateService.releasesPageUrl);
   }

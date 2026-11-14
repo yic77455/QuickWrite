@@ -28,12 +28,11 @@ class UpdateAsset {
 
 /// 更新源描述
 ///
-/// 每个源提供最新发布查询接口与对应的版本发布页地址
+/// 每个源提供最新发布查询接口
 class _UpdateSource {
   const _UpdateSource({
     required this.name,
     required this.latestApi,
-    required this.releasesPageUrl,
     this.headers,
   });
 
@@ -42,9 +41,6 @@ class _UpdateSource {
 
   /// 最新发布查询接口
   final String latestApi;
-
-  /// 版本发布页地址
-  final String releasesPageUrl;
 
   /// 访问该源接口时附加的请求头
   final Map<String, String>? headers;
@@ -121,11 +117,8 @@ class UpdateService {
   /// GitHub 仓库名称
   static const String _githubRepo = 'QuickWrite';
 
-  /// Gitee 版本发布页地址
-  static const String _giteeReleasesPageUrl = 'https://gitee.com/$_owner/$_giteeRepo/releases';
-
-  /// 版本发布页地址（主源 Gitee）
-  static const String releasesPageUrl = _giteeReleasesPageUrl;
+  /// 版本发布页地址
+  static const String releasesPageUrl = 'https://github.com/$_owner/$_githubRepo/releases';
 
   /// 更新源列表
   ///
@@ -134,12 +127,10 @@ class UpdateService {
     _UpdateSource(
       name: 'Gitee',
       latestApi: 'https://gitee.com/api/v5/repos/$_owner/$_giteeRepo/releases/latest',
-      releasesPageUrl: _giteeReleasesPageUrl,
     ),
     _UpdateSource(
       name: 'GitHub',
       latestApi: 'https://api.github.com/repos/$_owner/$_githubRepo/releases/latest',
-      releasesPageUrl: 'https://github.com/$_owner/$_githubRepo/releases',
       headers: {'Accept': 'application/vnd.github+json'},
     ),
   ];
@@ -190,7 +181,7 @@ class UpdateService {
     return UpdateCheckResult(
       hasUpdate: compareVersion(latestVersion, currentVersion) > 0,
       latestVersion: latestVersion,
-      releaseUrl: (data['html_url'] as String?) ?? source.releasesPageUrl,
+      releaseUrl: releasesPageUrl,
       releaseNotes: (data['body'] as String?)?.trim() ?? '',
       asset: _pickPlatformAsset(data['assets'], source.name),
     );
