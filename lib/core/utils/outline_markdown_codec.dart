@@ -78,11 +78,14 @@ class OutlineMarkdownCodec {
   /// 此处逐行去除缩进并反序列化，得到与大纲编辑器中节点文本顺序一致的纯文本行，
   /// 供全文搜索按行匹配并按偏移量定位。
   static List<String> parseContentLines(String content) {
+    final rawLines = content.split('\n');
+    // 文件以换行结尾时最后一项为空字符串，不代表任何节点，需剔除；
+    // 其余空行对应一级空节点，需保留以维持与编辑器文本一致的行结构
+    if (rawLines.isNotEmpty && rawLines.last.isEmpty) {
+      rawLines.removeLast();
+    }
     final lines = <String>[];
-    for (final rawLine in content.split('\n')) {
-      // 跳过空行（末尾换行产生的空行不参与序列化）
-      if (rawLine.isEmpty) continue;
-
+    for (final rawLine in rawLines) {
       // 去除行首缩进（每级一个制表符或 4 个空格）
       var line = rawLine;
       while (true) {

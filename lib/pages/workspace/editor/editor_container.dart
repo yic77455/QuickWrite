@@ -502,6 +502,30 @@ class _EditorContainerState extends State<EditorContainer> {
     );
   }
 
+  /// 记录设定项的字数变化到码字统计
+  ///
+  /// 以标签页的码字基线计算本次净增字数，增量按键盘输入计入会话统计；
+  /// 关闭「包含设定字数」时只同步基线，不写入统计。
+  void _recordSettingWordsChange(EditorTab tab, WorkspaceProvider provider) {
+    if (!tab.sessionBaselineInitialized) return;
+
+    // currentNet = max(0, 当前字数 - 基线字数)，避免删除旧内容让今日码字为负
+    final currentNet = tab.wordCount > tab.sessionBaselineWordCount
+        ? tab.wordCount - tab.sessionBaselineWordCount
+        : 0;
+    final delta = currentNet - tab.recordedSessionWords;
+
+    if (delta != 0) {
+      // 大规模删除视为清理操作，不上报为码字，但仍同步基线
+      final bool isLargeDeletion = delta < -_largeDeletionThreshold;
+      final tracker = provider.sessionTracker;
+      if (!isLargeDeletion && tracker != null && tracker.includeSettingWords) {
+        tracker.onWordsChanged(typedDelta: delta);
+      }
+    }
+    tab.recordedSessionWords = currentNet;
+  }
+
   /// 构建编辑器内容区域
   Widget _buildEditorContent(BuildContext context, WorkspaceProvider provider) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -540,8 +564,10 @@ class _EditorContainerState extends State<EditorContainer> {
                 tab.isModified = true;
                 provider.notifyTabModified(tab.id);
               }
-              // 触发自动保存
-              provider.triggerAutoSave();
+              // 触发自动保存（不含设定字数时，设定编辑不参与码字时长计时）
+              provider.triggerAutoSave(
+                recordActivity: provider.sessionTracker?.includeSettingWords ?? true,
+              );
             },
             // 查找替换栏可见时为编辑器预留顶边距，避免内容被遮挡
             extraTopPadding: provider.findReplaceBarPadding,
@@ -556,6 +582,10 @@ class _EditorContainerState extends State<EditorContainer> {
             // 大纲内容异步加载完成后，若查找替换栏处于打开状态则刷新查找结果，
             // 并通知等待内容就绪的调用方（如全文搜索跳转）
             onContentLoaded: () {
+              // 以加载完成时的字数为码字统计基线，加载前的字数不计入码字
+              tab.sessionBaselineWordCount = tab.wordCount;
+              tab.recordedSessionWords = 0;
+              tab.sessionBaselineInitialized = true;
               provider.refreshFindIfVisible(resetIndex: true);
               provider.notifyTabContentLoaded(tab.id);
             },
@@ -571,8 +601,12 @@ class _EditorContainerState extends State<EditorContainer> {
               }
               // 文本或节点结构变化后重新计算查找匹配，使高亮始终基于当前文本
               provider.refreshFindIfVisible();
-              // 触发自动保存
-              provider.triggerAutoSave();
+              // 内容变化计入码字统计（关闭设定字数时只同步基线）
+              _recordSettingWordsChange(tab, provider);
+              // 触发自动保存（不含设定字数时，设定编辑不参与码字时长计时）
+              provider.triggerAutoSave(
+                recordActivity: provider.sessionTracker?.includeSettingWords ?? true,
+              );
             },
             onSave: () => provider.saveCurrentTab(),
             onStatsChanged: (topicCount, wordCount) {

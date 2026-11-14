@@ -247,6 +247,24 @@ class AppSettings {
   /// 字数浮窗是否额外显示码字速度
   final bool wordCountFloatingSpeedEnabled;
 
+  // ================= 码字统计设置 =================
+
+  /// 码字统计是否包含粘贴字数
+  ///
+  /// 关闭时统计与码字速度均排除粘贴产生的字数
+  final bool statsIncludePasteWords;
+
+  /// 码字统计是否包含设定字数
+  ///
+  /// 开启时设定项的编辑字数计入统计，设定编辑也参与码字时长计时；
+  /// 关闭时两者均不计入
+  final bool statsIncludeSettingWords;
+
+  /// 空闲判定阈值（秒）
+  ///
+  /// 超过该时间无编辑活动即视为空闲，停止累计码字时长
+  final int statsIdleThresholdSeconds;
+
   // ================= 默认配置常量 =================
 
   /// 关闭主窗口行为：每次询问
@@ -346,6 +364,10 @@ class AppSettings {
     this.wordCountFloatingEnabled = false, // 是否启用字数浮窗
     this.wordCountFloatingPosition = 'topRight', // 字数浮窗显示位置（默认右上）
     this.wordCountFloatingSpeedEnabled = false, // 字数浮窗是否显示码字速度
+    // 码字统计设置
+    this.statsIncludePasteWords = false, // 码字统计是否包含粘贴字数
+    this.statsIncludeSettingWords = false, // 码字统计是否包含设定字数
+    this.statsIdleThresholdSeconds = 15, // 空闲判定阈值（单位：秒）
   });
 
   // ================= JSON 序列化 =================
@@ -373,6 +395,7 @@ class AppSettings {
     final autoSaveJson = editorJson['autoSave'] as Map<String, dynamic>? ?? {};
     final autoBackupJson = editorJson['autoBackup'] as Map<String, dynamic>? ?? {};
     final wordCountFloatingJson = editorJson['wordCountFloating'] as Map<String, dynamic>? ?? {};
+    final writingStatsJson = editorJson['writingStats'] as Map<String, dynamic>? ?? {};
 
     return AppSettings(
       // 主题设置（全局）
@@ -462,6 +485,11 @@ class AppSettings {
       wordCountFloatingEnabled: wordCountFloatingJson['enabled'] as bool? ?? defaults.wordCountFloatingEnabled,
       wordCountFloatingPosition: wordCountFloatingJson['position'] as String? ?? defaults.wordCountFloatingPosition,
       wordCountFloatingSpeedEnabled: wordCountFloatingJson['speedEnabled'] as bool? ?? defaults.wordCountFloatingSpeedEnabled,
+
+      // 码字统计设置（编辑器）
+      statsIncludePasteWords: writingStatsJson['includePasteWords'] as bool? ?? defaults.statsIncludePasteWords,
+      statsIncludeSettingWords: writingStatsJson['includeSettingWords'] as bool? ?? defaults.statsIncludeSettingWords,
+      statsIdleThresholdSeconds: writingStatsJson['idleThresholdSeconds'] as int? ?? defaults.statsIdleThresholdSeconds,
     );
   }
 
@@ -574,6 +602,12 @@ class AppSettings {
           'position': wordCountFloatingPosition,
           'speedEnabled': wordCountFloatingSpeedEnabled,
         },
+        // 码字统计设置
+        'writingStats': {
+          'includePasteWords': statsIncludePasteWords,
+          'includeSettingWords': statsIncludeSettingWords,
+          'idleThresholdSeconds': statsIdleThresholdSeconds,
+        },
       },
     };
   }
@@ -664,6 +698,10 @@ class AppSettings {
     bool? wordCountFloatingEnabled,
     String? wordCountFloatingPosition,
     bool? wordCountFloatingSpeedEnabled,
+    // 码字统计设置
+    bool? statsIncludePasteWords,
+    bool? statsIncludeSettingWords,
+    int? statsIdleThresholdSeconds,
   }) {
     return AppSettings(
       themeMode: themeMode ?? this.themeMode,
@@ -742,6 +780,10 @@ class AppSettings {
       wordCountFloatingEnabled: wordCountFloatingEnabled ?? this.wordCountFloatingEnabled,
       wordCountFloatingPosition: wordCountFloatingPosition ?? this.wordCountFloatingPosition,
       wordCountFloatingSpeedEnabled: wordCountFloatingSpeedEnabled ?? this.wordCountFloatingSpeedEnabled,
+      // 码字统计设置
+      statsIncludePasteWords: statsIncludePasteWords ?? this.statsIncludePasteWords,
+      statsIncludeSettingWords: statsIncludeSettingWords ?? this.statsIncludeSettingWords,
+      statsIdleThresholdSeconds: statsIdleThresholdSeconds ?? this.statsIdleThresholdSeconds,
     );
   }
 
@@ -854,7 +896,11 @@ class AppSettings {
            // 字数浮窗设置（移动端）
            other.wordCountFloatingEnabled == wordCountFloatingEnabled &&
            other.wordCountFloatingPosition == wordCountFloatingPosition &&
-           other.wordCountFloatingSpeedEnabled == wordCountFloatingSpeedEnabled;
+           other.wordCountFloatingSpeedEnabled == wordCountFloatingSpeedEnabled &&
+           // 码字统计设置
+           other.statsIncludePasteWords == statsIncludePasteWords &&
+           other.statsIncludeSettingWords == statsIncludeSettingWords &&
+           other.statsIdleThresholdSeconds == statsIdleThresholdSeconds;
   }
 
   @override
@@ -949,6 +995,12 @@ class AppSettings {
         wordCountFloatingEnabled,
         wordCountFloatingPosition,
         wordCountFloatingSpeedEnabled,
+      ),
+      // 码字统计设置
+      Object.hash(
+        statsIncludePasteWords,
+        statsIncludeSettingWords,
+        statsIdleThresholdSeconds,
       ),
     );
   }

@@ -891,6 +891,35 @@ class SettingsService extends ChangeNotifier {
     return updateSettings(newSettings);
   }
 
+  // ================= 码字统计设置相关 =================
+
+  /// 码字统计是否包含粘贴字数
+  bool get statsIncludePasteWords => _settings.statsIncludePasteWords;
+
+  /// 更新码字统计是否包含粘贴字数
+  Future<bool> updateStatsIncludePasteWords(bool value) async {
+    final newSettings = _settings.copyWith(statsIncludePasteWords: value);
+    return updateSettings(newSettings);
+  }
+
+  /// 码字统计是否包含设定字数
+  bool get statsIncludeSettingWords => _settings.statsIncludeSettingWords;
+
+  /// 更新码字统计是否包含设定字数
+  Future<bool> updateStatsIncludeSettingWords(bool value) async {
+    final newSettings = _settings.copyWith(statsIncludeSettingWords: value);
+    return updateSettings(newSettings);
+  }
+
+  /// 空闲判定阈值（秒）
+  int get statsIdleThresholdSeconds => _settings.statsIdleThresholdSeconds;
+
+  /// 更新空闲判定阈值（秒）
+  Future<bool> updateStatsIdleThresholdSeconds(int value) async {
+    final newSettings = _settings.copyWith(statsIdleThresholdSeconds: value);
+    return updateSettings(newSettings);
+  }
+
   // ================= 重置布局和排版设置 =================
   
   /// 重置布局设置为默认值

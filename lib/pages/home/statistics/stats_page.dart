@@ -51,7 +51,7 @@ class _StatsPageState extends State<StatsPage> {
     return ListView(
       padding: const EdgeInsets.all(24),
       children: [
-        // 顶部标题栏：标题 + 粘贴字数开关 + 书籍筛选 + 刷新
+        // 顶部标题栏：标题 + 统计设置 + 书籍筛选 + 刷新
         Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
@@ -60,7 +60,7 @@ class _StatsPageState extends State<StatsPage> {
             letterSpacing: 0.2,
           ),),
             const SizedBox(width: 8),
-            _buildPasteToggle(context, statsProvider),
+            _buildStatsSettingsButton(context, statsProvider),
             const Spacer(),
             // 书籍筛选下拉框
             SizedBox(
@@ -159,12 +159,12 @@ class _StatsPageState extends State<StatsPage> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
       children: [
-        // 顶部标题栏：标题 + 粘贴字数开关
+        // 顶部标题栏：标题 + 统计设置
         Row(
           children: [
             Text('码字统计', style: context.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(width: 8),
-            _buildPasteToggle(context, statsProvider),
+            _buildStatsSettingsButton(context, statsProvider),
           ],
         ),
         const SizedBox(height: 12),
@@ -226,33 +226,26 @@ class _StatsPageState extends State<StatsPage> {
     );
   }
 
-  /// 切换是否将粘贴字数计入统计
-  void _toggleIncludePasteWords(BuildContext context, WritingStatsProvider statsProvider) {
-    final bool enabled = !statsProvider.includePasteWords;
-    statsProvider.toggleIncludePasteWords();
-    SnackBarService.show(context, enabled ? '统计已包含粘贴字数' : '统计已排除粘贴字数');
-  }
-
-  /// 构建粘贴字数统计开关（仅影响统计界面的显示）
-  Widget _buildPasteToggle(BuildContext context, WritingStatsProvider statsProvider) {
+  /// 构建码字统计设置入口
+  ///
+  /// 点击打开设置弹窗，集中管理粘贴字数、设定字数与空闲判定时间
+  Widget _buildStatsSettingsButton(BuildContext context, WritingStatsProvider statsProvider) {
     final colorScheme = Theme.of(context).colorScheme;
     return Transform.translate(
       offset: const Offset(0, 1),
       child: CursorTooltipTarget(
         showTooltip: true,
-        tooltipContent: Text('是否包含粘贴字数', style: context.bodySmall),
+        tooltipContent: Text('统计设置', style: context.bodySmall),
         child: IconButton(
-          icon: const Icon(Icons.content_paste_rounded),
+          icon: const Icon(Icons.settings_rounded),
           iconSize: 16,
           padding: EdgeInsets.zero,
           constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-          color: statsProvider.includePasteWords ? colorScheme.primary : colorScheme.onSurfaceVariant,
-          style: IconButton.styleFrom(
-            backgroundColor: statsProvider.includePasteWords
-                ? colorScheme.primary.withValues(alpha: 0.1)
-                : Colors.transparent,
+          color: colorScheme.onSurfaceVariant,
+          onPressed: () => showWritingStatsSettingsDialog(
+            context: context,
+            provider: statsProvider,
           ),
-          onPressed: () => _toggleIncludePasteWords(context, statsProvider),
         ),
       ),
     );

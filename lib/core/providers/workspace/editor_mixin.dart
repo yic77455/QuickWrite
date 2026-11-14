@@ -1995,9 +1995,12 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
   ///
   /// 在编辑器内容变化时调用，使用防抖机制避免频繁保存：
   /// 每次输入重置定时器，停止输入 1 秒后执行保存
-  void triggerAutoSave() {
+  ///
+  /// [recordActivity] 为 false 时不刷新会话追踪器的活动时间，
+  /// 用于不计入码字时长的编辑场景
+  void triggerAutoSave({bool recordActivity = true}) {
     // 同步更新会话追踪器的活动时间（用于码字时长活跃判定）
-    _sessionTracker?.onActivity();
+    if (recordActivity) _sessionTracker?.onActivity();
 
     if (!SettingsService.instance.autoSaveEnabled) return;
 
@@ -2080,14 +2083,18 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
 
   // ================= 码字会话回调方法 =================
 
-  /// 跨天回调：重置所有章节标签页的码字基线
+  /// 跨天回调：重置所有章节与设定项标签页的码字基线
   ///
-  /// 新一天开始后，已打开章节的旧基线失效（昨日内容已成"旧内容"），
+  /// 新一天开始后，已打开标签页的旧基线失效（昨日内容已成"旧内容"），
   /// 以当前字数重新作为基线，避免删除昨日内容被错误计入今日码字。
   void _onSessionDayChanged() {
     for (final tab in _openedTabs) {
       if (tab.type == EditorTabType.chapter) {
         tab.updateWordCount();
+        tab.sessionBaselineWordCount = tab.wordCount;
+        tab.recordedSessionWords = 0;
+      } else if (tab.type == EditorTabType.settings && tab.sessionBaselineInitialized) {
+        // 设定项字数由大纲编辑器持续上报，直接以当前字数重置基线
         tab.sessionBaselineWordCount = tab.wordCount;
         tab.recordedSessionWords = 0;
       }

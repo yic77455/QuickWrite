@@ -621,8 +621,9 @@ class _OutlineLinkDialogState extends State<OutlineLinkDialog> {
 
   /// 将大纲 Markdown 解析为节点列表
   ///
-  /// 与大纲编辑器的解析规则保持一致：每个非空行对应一个节点，
-  /// 即使节点文本为空也保留（否则后续节点的层级路径会与编辑器错位）。
+  /// 与大纲编辑器的解析规则保持一致：每行对应一个节点（文件末尾换行
+  /// 产生的空行除外），即使节点文本为空也保留，
+  /// 否则后续节点的层级路径会与编辑器错位。
   /// 节点路径由各级索引拼接而成，用于跳转时精确定位节点。
   List<_TargetOption> _parseOutlineNodes(String content) {
     final List<_TargetOption> targets = [];
@@ -631,9 +632,12 @@ class _OutlineLinkDialogState extends State<OutlineLinkDialog> {
     // 每个树层级对应的原始缩进深度，用于把缩进映射到实际的树层级
     final List<int> levelDepths = [];
 
-    for (final String rawLine in content.split('\n')) {
-      if (rawLine.isEmpty) continue;
-
+    final List<String> rawLines = content.split('\n');
+    // 文件以换行结尾时最后一项为空字符串，不代表任何节点，需剔除
+    if (rawLines.isNotEmpty && rawLines.last.isEmpty) {
+      rawLines.removeLast();
+    }
+    for (final String rawLine in rawLines) {
       String line = rawLine;
       int depth = 0;
       while (line.startsWith('\t')) {

@@ -12,7 +12,6 @@ import 'package:quick_write/core/services/cache_services/cache_service.dart';
 /// - 每本书的未分卷组、未分组设定组折叠状态
 /// - 新建章节、设定时分卷或分组选择记忆
 /// - 章节、设定列表是否倒序排列
-/// - 统计界面是否包含粘贴字数
 /// - 工具面板区块显示顺序
 class MiscCacheService extends CacheService<MiscCacheData> {
   // ================= 单例模式 =================
@@ -159,19 +158,6 @@ class MiscCacheService extends CacheService<MiscCacheData> {
   /// 保存设定列表排序方式
   Future<bool> saveSettingReversed(bool reversed) async {
     _data = _data.copyWith(isSettingReversed: reversed);
-    return await save(_data);
-  }
-
-  // ================= 统计设置状态 =================
-
-  /// 获取统计界面是否包含粘贴字数
-  bool isStatsIncludePasteWords() {
-    return _data.statsIncludePasteWords;
-  }
-
-  /// 保存统计界面是否包含粘贴字数
-  Future<bool> saveStatsIncludePasteWords(bool include) async {
-    _data = _data.copyWith(statsIncludePasteWords: include);
     return await save(_data);
   }
 

@@ -526,6 +526,12 @@ class EditorTab {
   /// 每次编辑事件后同步更新为最新 currentNet，撤销/恢复时也同步以保持基线一致性。
   int recordedSessionWords = 0;
 
+  /// 码字统计基线是否已初始化（仅大纲编辑器标签页使用）
+  ///
+  /// 设定项内容由大纲编辑器异步加载，加载期间上报的字数属于文件原始内容，
+  /// 需在内容加载完成后才标记基线就绪，此前的字数变化不计入码字统计。
+  bool sessionBaselineInitialized = false;
+
   /// 大纲主题数（仅大纲类型标签页使用，所有节点总数）
   int topicCount;
 

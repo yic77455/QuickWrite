@@ -19,9 +19,6 @@ class MiscCacheData {
   /// 设定列表是否倒序排列
   final bool isSettingReversed;
 
-  /// 统计界面是否包含粘贴字数
-  final bool statsIncludePasteWords;
-
   /// 工具面板区块显示顺序
   ///
   /// 列表按显示顺序存储"可见"的区块 ID（仅包含开启显示的区块）：
@@ -40,7 +37,6 @@ class MiscCacheData {
     this.selectedGroupId = '',
     this.isChapterReversed = false,
     this.isSettingReversed = false,
-    this.statsIncludePasteWords = false,
     this.toolsSectionOrder = const ['bookInfo', 'stats'],
     this.books = const {},
   });
@@ -59,7 +55,6 @@ class MiscCacheData {
       selectedGroupId: json['selectedGroupId'] as String? ?? '',
       isChapterReversed: json['isChapterReversed'] as bool? ?? false,
       isSettingReversed: json['isSettingReversed'] as bool? ?? false,
-      statsIncludePasteWords: json['statsIncludePasteWords'] as bool? ?? false,
       toolsSectionOrder: (json['toolsSectionOrder'] as List<dynamic>?)
               ?.map((e) => e as String)
               .toList() ??
@@ -74,7 +69,6 @@ class MiscCacheData {
       'selectedGroupId': selectedGroupId,
       'isChapterReversed': isChapterReversed,
       'isSettingReversed': isSettingReversed,
-      'statsIncludePasteWords': statsIncludePasteWords,
       'toolsSectionOrder': toolsSectionOrder,
       'books': books.map((key, value) => MapEntry(key, value.toJson())),
     };
@@ -85,7 +79,6 @@ class MiscCacheData {
     String? selectedGroupId,
     bool? isChapterReversed,
     bool? isSettingReversed,
-    bool? statsIncludePasteWords,
     List<String>? toolsSectionOrder,
     Map<String, BookGroupExpandCache>? books,
   }) {
@@ -93,7 +86,6 @@ class MiscCacheData {
       selectedGroupId: selectedGroupId ?? this.selectedGroupId,
       isChapterReversed: isChapterReversed ?? this.isChapterReversed,
       isSettingReversed: isSettingReversed ?? this.isSettingReversed,
-      statsIncludePasteWords: statsIncludePasteWords ?? this.statsIncludePasteWords,
       toolsSectionOrder: toolsSectionOrder ?? this.toolsSectionOrder,
       books: books ?? this.books,
     );

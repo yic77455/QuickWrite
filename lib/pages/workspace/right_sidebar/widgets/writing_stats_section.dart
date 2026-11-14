@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/providers/writing_session_tracker.dart';
-import 'package:quick_write/core/services/cache_services/misc_cache_service.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 
@@ -20,7 +19,7 @@ Future<void> showWritingStatsDialog({
     adaptiveHeight: true,
     content: Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-      child: WritingStatsSection(tracker: tracker, showTitle: false, showPasteToggle: false),
+      child: WritingStatsSection(tracker: tracker, showTitle: false),
     ),
   );
 }
@@ -28,73 +27,39 @@ Future<void> showWritingStatsDialog({
 /// 码字统计区块
 ///
 /// 展示今日码字、本次码字、码字速度与时长等会话统计数据。
-/// 标题行右侧附带"是否包含粘贴字数"开关，与码字统计界面共享同一状态。
-/// [showTitle] 为 false 时隐藏内置标题，仅保留开关与统计卡片；
-/// [showPasteToggle] 为 false 时隐藏"是否包含粘贴字数"开关
-class WritingStatsSection extends StatefulWidget {
+/// [showTitle] 为 false 时隐藏内置标题，仅保留统计卡片
+class WritingStatsSection extends StatelessWidget {
   /// 会话统计追踪器，为空时展示占位提示
   final WritingSessionTracker? tracker;
 
   /// 是否展示内置的"码字统计"标题
   final bool showTitle;
 
-  /// 是否展示"是否包含粘贴字数"开关
-  final bool showPasteToggle;
-
   const WritingStatsSection({
     super.key,
     required this.tracker,
     this.showTitle = true,
-    this.showPasteToggle = true,
   });
-
-  @override
-  State<WritingStatsSection> createState() => _WritingStatsSectionState();
-}
-
-class _WritingStatsSectionState extends State<WritingStatsSection> {
-  /// 是否包含粘贴字数（与码字统计界面共享同一状态）
-  late bool _includePasteWords;
-
-  @override
-  void initState() {
-    super.initState();
-    _includePasteWords = MiscCacheService.instance.isStatsIncludePasteWords();
-  }
-
-  /// 切换是否包含粘贴字数
-  ///
-  /// 切换后实时影响后续的统计计算，但不会追溯调整已记录的数据
-  void _toggleIncludePasteWords() {
-    setState(() {
-      _includePasteWords = !_includePasteWords;
-    });
-    MiscCacheService.instance.saveStatsIncludePasteWords(_includePasteWords);
-  }
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final tracker = widget.tracker;
+    final tracker = this.tracker;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 标题行（可隐藏） + 粘贴字数开关（可隐藏）
-        if (widget.showTitle || widget.showPasteToggle) ...[
+        // 标题行（可隐藏）
+        if (showTitle) ...[
           Row(
             children: [
-              if (widget.showTitle) ...[
-                Icon(Icons.insights_rounded, size: 16, color: colorScheme.primary),
-                const SizedBox(width: 6),
-                Text(
-                  '码字统计',
-                  style: context.bodySmall?.copyWith(fontWeight: FontWeight.w600, color: colorScheme.onSurfaceVariant),
-                ),
-              ],
-              const Spacer(),
-              if (widget.showPasteToggle) _buildPasteToggle(colorScheme),
+              Icon(Icons.insights_rounded, size: 16, color: colorScheme.primary),
+              const SizedBox(width: 6),
+              Text(
+                '码字统计',
+                style: context.bodySmall?.copyWith(fontWeight: FontWeight.w600, color: colorScheme.onSurfaceVariant),
+              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -165,25 +130,6 @@ class _WritingStatsSectionState extends State<WritingStatsSection> {
             },
           ),
       ],
-    );
-  }
-
-  /// 构建"是否包含粘贴字数"开关
-  Widget _buildPasteToggle(ColorScheme colorScheme) {
-    return CursorTooltipTarget(
-      showTooltip: true,
-      tooltipContent: Text('是否包含粘贴字数', style: context.bodySmall),
-      child: IconButton(
-        icon: const Icon(Icons.content_paste_rounded),
-        iconSize: 16,
-        padding: EdgeInsets.zero,
-        constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-        color: _includePasteWords ? colorScheme.primary : colorScheme.onSurfaceVariant,
-        style: IconButton.styleFrom(
-          backgroundColor: _includePasteWords ? colorScheme.primary.withValues(alpha: 0.1) : Colors.transparent,
-        ),
-        onPressed: _toggleIncludePasteWords,
-      ),
     );
   }
 

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:quick_write/core/services/cache_services/misc_cache_service.dart';
+import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/services/writing_stats_service.dart';
 
 /// 图表区间模式
@@ -18,11 +18,13 @@ enum ChartRangeMode {
 /// - 选中日期（用于"今日数据"卡片，可通过点击日历切换）
 /// - 图表区间模式（本周/本月）
 /// - 是否包含粘贴字数（仅影响统计界面的显示，不影响实际数据录入）
+/// - 是否包含设定字数（决定设定编辑的字数与时长是否计入统计）
+/// - 空闲判定阈值（秒）
 class WritingStatsProvider extends ChangeNotifier {
   WritingStatsProvider() {
     _selectedDate = _normalizeDate(DateTime.now());
     _calendarMonth = DateTime(_selectedDate.year, _selectedDate.month);
-    _loadIncludePasteWords();
+    _loadStatsSettings();
   }
 
   // ================= 筛选状态 =================
@@ -47,9 +49,20 @@ class WritingStatsProvider extends ChangeNotifier {
   bool _includePasteWords = true;
   bool get includePasteWords => _includePasteWords;
 
-  /// 从缓存加载粘贴字数开关状态
-  void _loadIncludePasteWords() {
-    _includePasteWords = MiscCacheService.instance.isStatsIncludePasteWords();
+  /// 是否包含设定字数（同时决定设定编辑是否参与码字时长计时）
+  bool _includeSettingWords = true;
+  bool get includeSettingWords => _includeSettingWords;
+
+  /// 空闲判定阈值（秒）
+  int _idleThresholdSeconds = 30;
+  int get idleThresholdSeconds => _idleThresholdSeconds;
+
+  /// 从设置加载统计设置
+  void _loadStatsSettings() {
+    final settings = SettingsService.instance;
+    _includePasteWords = settings.statsIncludePasteWords;
+    _includeSettingWords = settings.statsIncludeSettingWords;
+    _idleThresholdSeconds = settings.statsIdleThresholdSeconds;
   }
 
   // ================= 加载的数据（原始） =================
@@ -139,7 +152,26 @@ class WritingStatsProvider extends ChangeNotifier {
   void toggleIncludePasteWords() {
     _includePasteWords = !_includePasteWords;
     notifyListeners();
-    MiscCacheService.instance.saveStatsIncludePasteWords(_includePasteWords);
+    SettingsService.instance.updateStatsIncludePasteWords(_includePasteWords);
+  }
+
+  /// 设置是否包含设定字数
+  ///
+  /// 开启后设定项的编辑字数计入码字统计，设定编辑也参与码字时长计时；
+  /// 关闭后两者均不计入
+  void setIncludeSettingWords(bool include) {
+    if (_includeSettingWords == include) return;
+    _includeSettingWords = include;
+    notifyListeners();
+    SettingsService.instance.updateStatsIncludeSettingWords(include);
+  }
+
+  /// 设置空闲判定阈值（秒）
+  void setIdleThresholdSeconds(int seconds) {
+    if (seconds <= 0 || _idleThresholdSeconds == seconds) return;
+    _idleThresholdSeconds = seconds;
+    notifyListeners();
+    SettingsService.instance.updateStatsIdleThresholdSeconds(seconds);
   }
 
   /// 刷新全部数据

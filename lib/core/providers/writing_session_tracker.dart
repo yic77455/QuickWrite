@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:quick_write/core/services/cache_services/misc_cache_service.dart';
+import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/services/writing_stats_service.dart';
 
 /// 码字会话追踪器
@@ -28,13 +28,13 @@ class WritingSessionTracker extends ChangeNotifier {
   /// 本次会话键盘输入字数（不含粘贴，打开工作台时重置为 0）
   int _sessionTypedWords = 0;
 
-  /// 今日码字（根据"是否包含粘贴字数"开关返回 added 或 typed）
+  /// 今日码字（根据"是否包含粘贴字数"设置返回 added 或 typed）
   int get todayWords =>
-      MiscCacheService.instance.isStatsIncludePasteWords() ? _todayWordsAdded : _todayTypedWords;
+      SettingsService.instance.statsIncludePasteWords ? _todayWordsAdded : _todayTypedWords;
 
-  /// 本次码字（根据"是否包含粘贴字数"开关返回 added 或 typed）
+  /// 本次码字（根据"是否包含粘贴字数"设置返回 added 或 typed）
   int get sessionWords =>
-      MiscCacheService.instance.isStatsIncludePasteWords() ? _sessionWordsAdded : _sessionTypedWords;
+      SettingsService.instance.statsIncludePasteWords ? _sessionWordsAdded : _sessionTypedWords;
 
   /// 码字时长（秒，打开工作台时重置）
   int _sessionDurationSeconds = 0;
@@ -64,8 +64,16 @@ class WritingSessionTracker extends ChangeNotifier {
   /// 是否已释放
   bool _isDisposed = false;
 
+  /// 是否已将设定编辑计入码字统计
+  ///
+  /// 开启时设定项的编辑字数计入统计，设定编辑也刷新活动时间参与码字时长计时；
+  /// 关闭时两者均不计入
+  bool get includeSettingWords => SettingsService.instance.statsIncludeSettingWords;
+
   /// 空闲判定阈值（秒）：超过此时间无编辑活动则视为空闲
-  static const int _idleThresholdSeconds = 30;
+  ///
+  /// 每次判定都读取当前设置，使用户在统计设置中修改后立即生效
+  int get _idleThresholdSeconds => SettingsService.instance.statsIdleThresholdSeconds;
 
   // ================= 持久化状态 =================
 

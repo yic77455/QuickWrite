@@ -1211,11 +1211,18 @@ class OutlineEditorState extends State<OutlineEditor>
   /// 桌面端把焦点与光标交给定位到的节点、光标落在文末，便于打开后直接继续输入；
   /// 目标节点未能构建（定位放弃）或标签页未激活时不获取焦点，
   /// 避免后台标签页抢占键盘焦点。
+  /// 完成后把恢复的光标（移动端为定位到的节点）移到视口中间。
   void _finishOpenPositioning(String nodeId) {
-    final bool focused = !PlatformCapabilities.isMobile &&
-        widget.isActive &&
-        _nodeTileGlobalRect(nodeId) != null;
+    // 目标节点未能构建（定位放弃），直接恢复绘制
+    if (_nodeTileGlobalRect(nodeId) == null) {
+      _endContentDeferral();
+      return;
+    }
+
+    final bool focused = !PlatformCapabilities.isMobile && widget.isActive;
     if (!focused) {
+      // 不获取焦点时也按目标节点居中，避免停留在定位过程中的偏下位置
+      _centerOpeningAnchorInViewport(nodeId);
       _endContentDeferral();
       return;
     }
@@ -1223,7 +1230,30 @@ class OutlineEditorState extends State<OutlineEditor>
     _focusNodeWithSelection(nodeId, moveCursorToEnd: true, ensureVisible: false);
     // 延后一帧恢复绘制：输入框获取焦点后可能因光标超出视口而调整滚动位置，
     // 让该调整在隐藏状态下完成，内容呈现时便不再发生移动
-    WidgetsBinding.instance.addPostFrameCallback((_) => _endContentDeferral());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      // 焦点落定后按光标所在行居中，避免先呈现再滚动
+      _centerOpeningAnchorInViewport(nodeId);
+      _endContentDeferral();
+    });
+  }
+
+  /// 将打开定位的目标移到视口中间
+  ///
+  /// 节点已获得焦点时以光标所在行为基准，否则以整行节点为基准；
+  /// 下方内容连同底部安全区不足以填满视口下半区时，滚动被可滚动范围限制，
+  /// 目标顺势停在偏下的位置，不会留下多余空白。
+  void _centerOpeningAnchorInViewport(String nodeId) {
+    if (!_scrollController.hasClients) return;
+
+    final bool hasCaret = _focusNodes[nodeId]?.hasFocus ?? false;
+    final Rect? anchor = (hasCaret ? _caretGlobalRect(nodeId) : null) ?? _nodeTileGlobalRect(nodeId);
+    final Rect? viewportRect = _viewportGlobalRect();
+    if (anchor == null || viewportRect == null) return;
+
+    final position = _scrollController.position;
+    final double target = position.pixels + anchor.center.dy - viewportRect.center.dy;
+    position.jumpTo(target.clamp(position.minScrollExtent, position.maxScrollExtent));
   }
 
   /// 结束内容绘制延迟，让节点列表一次性呈现在定位后的位置
@@ -1284,10 +1314,12 @@ class OutlineEditorState extends State<OutlineEditor>
     final stack = <(OutlineNode, int)>[];
 
     final lines = text.split('\n');
+    // 文件以换行结尾时最后一项为空字符串，不代表任何节点，需剔除；
+    // 其余空行对应一级空节点，必须保留，否则保存后重新打开会丢失
+    if (lines.isNotEmpty && lines.last.isEmpty) {
+      lines.removeLast();
+    }
     for (final rawLine in lines) {
-      // 跳过空行（末尾换行产生的空行）
-      if (rawLine.isEmpty) continue;
-
       // 计算行首制表符数量，确定层级深度
       var depth = 0;
       var line = rawLine;
@@ -2350,10 +2382,11 @@ class OutlineEditorState extends State<OutlineEditor>
 
   /// 通知内容已变化
   ///
-  /// 由编辑器的各类操作在修改数据后调用，触发外部自动保存和备份
+  /// 由编辑器的各类操作在修改数据后调用，触发外部自动保存和备份。
+  /// 先刷新统计信息，使外部回调读取到最新的主题数与字数。
   void _notifyContentChanged() {
-    widget.onContentChanged?.call();
     _notifyStatsChanged();
+    widget.onContentChanged?.call();
   }
 
   /// 通知统计信息变化
@@ -7205,6 +7238,20 @@ class OutlineEditorState extends State<OutlineEditor>
     position.jumpTo(target.clamp(position.minScrollExtent, position.maxScrollExtent));
   }
 
+  /// 取节点光标在全局坐标系中的矩形
+  ///
+  /// 节点控制器或文本渲染对象尚未就绪时返回 null。
+  Rect? _caretGlobalRect(String nodeId) {
+    final controller = _controllers[nodeId];
+    final renderEditable = _findRenderEditable(nodeId);
+    if (controller == null || renderEditable == null || !renderEditable.attached) {
+      return null;
+    }
+
+    final Rect caretRect = renderEditable.getLocalRectForCaret(controller.selection.extent);
+    return MatrixUtils.transformRect(renderEditable.getTransformTo(null), caretRect);
+  }
+
   /// 保证节点光标所在行在编辑区视口内可见
   ///
   /// 节点内文字换行较多时，光标会随可视行移动而移出视口，
@@ -7212,17 +7259,12 @@ class OutlineEditorState extends State<OutlineEditor>
   void _ensureCaretVisibleInViewport(String nodeId) {
     if (!_scrollController.hasClients) return;
 
-    final controller = _controllers[nodeId];
-    final renderEditable = _findRenderEditable(nodeId);
-    final viewportRect = _viewportGlobalRect();
-    if (controller == null || renderEditable == null || !renderEditable.attached || viewportRect == null) {
-      return;
-    }
+    final Rect? caretGlobalRect = _caretGlobalRect(nodeId);
+    final Rect? viewportRect = _viewportGlobalRect();
+    if (caretGlobalRect == null || viewportRect == null) return;
 
-    final Rect caretRect = renderEditable.getLocalRectForCaret(controller.selection.extent);
-    final Rect caretGlobalRect = MatrixUtils.transformRect(renderEditable.getTransformTo(null), caretRect);
     // 光标与视口边缘保留一行高度的间距，避免光标贴边而难以看清
-    final double margin = caretRect.height > 8.0 ? caretRect.height : 8.0;
+    final double margin = caretGlobalRect.height > 8.0 ? caretGlobalRect.height : 8.0;
 
     final double currentOffset = _scrollController.offset;
     double? target;
