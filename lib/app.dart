@@ -39,20 +39,32 @@ Widget _wrapWithAppFontScale(BuildContext context, Widget? child, double scale) 
   );
 }
 
-/// Linux 端为无边框透明窗口补上圆角
+/// Linux 端补齐无边框窗口的圆角与边缘拖拽缩放
 ///
-/// Windows 11 由 DWM 自动给顶层窗口加圆角，Linux 合成器不会，
-/// 透明无边框窗口会直接显示成方角。这里仅在 Linux 给整个界面裁一层圆角，
-/// 最大化时取消，避免四角露出桌面背景。
-Widget _wrapWithLinuxWindowCorners(BuildContext context, Widget? child) {
+/// Windows 11 由 DWM 自动给顶层窗口加圆角，Win32 非客户区也天然支持边缘缩放；
+/// Linux 的 gtk_window_set_decorated(false) 两者都不会提供，需要自行补齐：
+/// - ClipRRect 裁出圆角，最大化时取消，避免四角露出桌面背景；
+/// - DragToResizeArea 在四边四角给出 resize 光标并发起系统级缩放拖拽，
+///   最大化时同样禁用（与 window_manager 的 VirtualWindowFrame 一致）。
+Widget _wrapWithLinuxWindowFrame(BuildContext context, Widget? child) {
   if (!PlatformCapabilities.isLinux) {
     return child ?? const SizedBox.shrink();
   }
   final bool maximized =
       context.select<WindowProvider, bool>((provider) => provider.isMaximized);
-  return ClipRRect(
-    borderRadius: maximized ? BorderRadius.zero : BorderRadius.circular(10),
-    child: child,
+  // Stack 给非定位子项的是 loose 约束，显式撑满可保证命中区始终覆盖整窗，
+  // 不受下层页面当帧尺寸影响。
+  final Widget rounded = SizedBox.expand(
+    child: ClipRRect(
+      borderRadius: maximized ? BorderRadius.zero : BorderRadius.circular(10),
+      child: child,
+    ),
+  );
+  // 命中区放在圆角裁切之外，四角的斜向缩放才不会被裁掉。
+  return DragToResizeArea(
+    enableResizeEdges: maximized ? [] : null,
+    resizeEdgeSize: 6,
+    child: rounded,
   );
 }
 
@@ -134,7 +146,7 @@ class MyWriterApp extends StatelessWidget {
             // 应用界面字号缩放：包裹整个界面，使界面文字按设定倍数显示
             builder: (context, child) => _wrapWithWindowShortcuts(
               context,
-              _wrapWithLinuxWindowCorners(
+              _wrapWithLinuxWindowFrame(
                 context,
                 _wrapWithAppFontScale(context, child, themeProvider.appFontScale),
               ),
@@ -264,7 +276,7 @@ class _WorkspaceAppState extends State<WorkspaceApp> {
             // 应用界面字号缩放：包裹整个界面，使界面文字按设定倍数显示
             builder: (context, child) => _wrapWithWindowShortcuts(
               context,
-              _wrapWithLinuxWindowCorners(
+              _wrapWithLinuxWindowFrame(
                 context,
                 _wrapWithAppFontScale(context, child, themeProvider.appFontScale),
               ),
