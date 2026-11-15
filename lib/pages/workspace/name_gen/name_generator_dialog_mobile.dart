@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:quick_write/core/constants/material_icons.dart';
 import 'package:quick_write/core/models/name_gen/name_dictionary.dart';
 import 'package:quick_write/core/models/name_gen/name_gen_options.dart';
 import 'package:quick_write/core/services/cache_services/name_gen_cache_service.dart';
@@ -69,6 +70,12 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
 
   /// 同一行两个参数项之间的间距
   static const double _itemGap = 16;
+
+  /// 结果区视图切换条的高度
+  static const double _resultTabHeight = 36;
+
+  /// 底部主按钮的高度
+  static const double _primaryButtonHeight = 42;
 
   /// 缓存服务
   final NameGenCacheService _cache = NameGenCacheService.instance;
@@ -330,6 +337,9 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
 
   // ================= 参数变化 =================
 
+  /// 退出输入框焦点
+  void _unfocus() => FocusScope.of(context).unfocus();
+
   /// 参数变化处理
   void _onOptionsChanged(NameGenOptions options) {
     _cache.saveOptions(options);
@@ -390,7 +400,7 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(
             children: [
-              Icon(Icons.auto_stories_outlined, size: 20, color: colorScheme.primary),
+              Icon(MaterialIcons.book_4, size: 20, color: colorScheme.primary),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -430,49 +440,57 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
   /// 构建生成参数
   ///
   /// 参数按每行两项紧凑排布：人名提供性别、名长、姓氏与数量，
-  /// 地名提供主体字数、后缀与数量。
+  /// 地名提供主体字数、后缀与数量，其他类别仅提供数量。
   List<Widget> _buildOptions() {
-    final person = _category == NameCategory.person;
+    switch (_category) {
+      case NameCategory.person:
+        return [
+          _buildOptionRow(
+            left: _buildOptionItem(label: '性别', control: _buildGenderDropdown()),
+            right: _buildOptionItem(label: '名长', control: _buildLengthDropdown()),
+          ),
+          const SizedBox(height: 12),
+          _buildOptionRow(
+            left: _buildOptionItem(
+              label: '姓氏',
+              control: _buildTextControl(
+                controller: _surnameController,
+                hintText: '随机',
+                onChanged: (value) => _onOptionsChanged(_options.copyWith(customSurname: value)),
+              ),
+            ),
+            right: _buildOptionItem(label: '数量', control: _buildCountDropdown()),
+          ),
+        ];
 
-    if (person) {
-      return [
-        _buildOptionRow(
-          left: _buildOptionItem(label: '性别', control: _buildGenderDropdown()),
-          right: _buildOptionItem(label: '名长', control: _buildLengthDropdown()),
-        ),
-        const SizedBox(height: 12),
-        _buildOptionRow(
-          left: _buildOptionItem(
-            label: '姓氏',
-            control: _buildTextControl(
-              controller: _surnameController,
-              hintText: '随机',
-              onChanged: (value) => _onOptionsChanged(_options.copyWith(customSurname: value)),
+      case NameCategory.place:
+        return [
+          _buildOptionRow(
+            left: _buildOptionItem(label: '主体字数', control: _buildLengthDropdown()),
+            right: _buildOptionItem(
+              label: '后缀',
+              control: _buildTextControl(
+                controller: _suffixController,
+                hintText: '随机',
+                onChanged: (value) => _onOptionsChanged(_options.copyWith(customSuffix: value)),
+              ),
             ),
           ),
-          right: _buildOptionItem(label: '数量', control: _buildCountDropdown()),
-        ),
-      ];
-    }
-
-    return [
-      _buildOptionRow(
-        left: _buildOptionItem(label: '主体字数', control: _buildLengthDropdown()),
-        right: _buildOptionItem(
-          label: '后缀',
-          control: _buildTextControl(
-            controller: _suffixController,
-            hintText: '随机',
-            onChanged: (value) => _onOptionsChanged(_options.copyWith(customSuffix: value)),
+          const SizedBox(height: 12),
+          _buildOptionRow(
+            left: _buildOptionItem(label: '数量', control: _buildCountDropdown()),
+            right: const SizedBox.shrink(),
           ),
-        ),
-      ),
-      const SizedBox(height: 12),
-      _buildOptionRow(
-        left: _buildOptionItem(label: '数量', control: _buildCountDropdown()),
-        right: const SizedBox.shrink(),
-      ),
-    ];
+        ];
+
+      case NameCategory.other:
+        return [
+          _buildOptionRow(
+            left: _buildOptionItem(label: '数量', control: _buildCountDropdown()),
+            right: const SizedBox.shrink(),
+          ),
+        ];
+    }
   }
 
   /// 构建一行两个参数项
@@ -562,7 +580,7 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
   /// 构建文本参数输入框
   ///
   /// 输入框与下拉框保持同样高度并填满可用宽度，文字垂直居中，
-  /// 与左侧标签在同一行内对齐。
+  /// 与左侧标签在同一行内对齐；点击输入框以外的区域时退出焦点。
   Widget _buildTextControl({
     required TextEditingController controller,
     required String hintText,
@@ -574,6 +592,7 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
       child: TextField(
         controller: controller,
         onChanged: onChanged,
+        onTapOutside: (_) => _unfocus(),
         // 输入框填满固定高度的容器，文字在其中垂直居中
         expands: true,
         maxLines: null,
@@ -600,7 +619,7 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
 
   /// 构建结果区
   ///
-  /// 顶部为「生成结果 / 历史」切换与清空入口，下方以标签流展示名字，
+  /// 顶部为「生成结果 / 历史」切换，下方以标签流展示名字，
   /// 点击任意名字即可复制。
   Widget _buildResultsSection() {
     final colorScheme = Theme.of(context).colorScheme;
@@ -609,30 +628,11 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: SegmentedControl(
-                labels: NameResultTab.values.map((t) => t.label).toList(),
-                selectedIndex: NameResultTab.values.indexOf(_resultTab),
-                height: 40,
-                onChanged: (index) => setState(() => _resultTab = NameResultTab.values[index]),
-              ),
-            ),
-            if (names.isNotEmpty) ...[
-              const SizedBox(width: 8),
-              Text(
-                '${names.length}',
-                style: context.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
-              ),
-              IconButton(
-                onPressed: _clearCurrentView,
-                icon: const Icon(Icons.delete_sweep_outlined),
-                iconSize: 20,
-                tooltip: '清空${_resultTab.label}',
-              ),
-            ],
-          ],
+        SegmentedControl(
+          labels: NameResultTab.values.map((t) => t.label).toList(),
+          selectedIndex: NameResultTab.values.indexOf(_resultTab),
+          height: _resultTabHeight,
+          onChanged: (index) => setState(() => _resultTab = NameResultTab.values[index]),
         ),
         const SizedBox(height: 8),
         if (names.isEmpty)
@@ -705,18 +705,48 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
     return painter.width;
   }
 
-  /// 构建底部生成按钮
+  /// 构建底部操作栏
+  ///
+  /// 左侧为生成按钮，右侧为清空当前视图的按钮，两者等高；
+  /// 当前视图没有名字时清空按钮不可用。
   Widget _buildGenerateBar() {
+    final colorScheme = Theme.of(context).colorScheme;
+    final hasNames = _namesOfCurrentTab().isNotEmpty;
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(_horizontalPadding, 8, _horizontalPadding, 16),
-      child: SizedBox(
-        width: double.infinity,
-        child: FilledButton.icon(
-          onPressed: _generate,
-          icon: const Icon(Icons.casino_rounded, size: 20),
-          label: const Text('生成'),
-          style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
-        ),
+      padding: const EdgeInsets.fromLTRB(_horizontalPadding, 8, _horizontalPadding, 12),
+      child: Row(
+        children: [
+          Expanded(
+            child: SizedBox(
+              height: _primaryButtonHeight,
+              child: FilledButton.icon(
+                onPressed: _generate,
+                icon: const Icon(Icons.casino_rounded, size: 20),
+                label: const Text('生成'),
+                style: FilledButton.styleFrom(padding: EdgeInsets.zero),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: _primaryButtonHeight,
+            height: _primaryButtonHeight,
+            child: Tooltip(
+              message: '清空${_resultTab.label}',
+              child: PressScale(
+                onTap: hasNames ? _clearCurrentView : null,
+                child: Center(
+                  child: Icon(
+                    Icons.delete_sweep_outlined,
+                    size: 24,
+                    color: colorScheme.onSurfaceVariant.withValues(alpha: hasNames ? 1 : 0.3),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -13,6 +13,7 @@ import 'package:quick_write/core/services/cache_services/cache_service.dart';
 /// - 新建章节、设定时分卷或分组选择记忆
 /// - 章节、设定列表是否倒序排列
 /// - 工具面板区块显示顺序
+/// - 移动端正文关键词预览开关状态
 class MiscCacheService extends CacheService<MiscCacheData> {
   // ================= 单例模式 =================
 
@@ -173,6 +174,19 @@ class MiscCacheService extends CacheService<MiscCacheData> {
   /// 保存工具面板区块显示顺序
   Future<bool> saveToolsSectionOrder(List<String> order) async {
     _data = _data.copyWith(toolsSectionOrder: order);
+    return await save(_data);
+  }
+
+  // ================= 移动端正文关键词开关 =================
+
+  /// 获取移动端正文关键词预览开关是否开启
+  bool isKeywordHighlightEnabled() {
+    return _data.keywordHighlightEnabled;
+  }
+
+  /// 保存移动端正文关键词预览开关状态
+  Future<bool> saveKeywordHighlightEnabled(bool enabled) async {
+    _data = _data.copyWith(keywordHighlightEnabled: enabled);
     return await save(_data);
   }
 

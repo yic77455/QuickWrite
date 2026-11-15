@@ -8,6 +8,7 @@ export 'context_menu.dart';
 export 'default_cover.dart';
 export 'mobile_page_header.dart';
 export 'mobile_page_transition.dart';
+export 'press_scale.dart';
 export 'qw_dialogs.dart';
 export 'qw_snackbar.dart';
 export 'qw_tooltip.dart';

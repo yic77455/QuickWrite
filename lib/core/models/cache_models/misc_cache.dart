@@ -27,6 +27,11 @@ class MiscCacheData {
   /// 隐藏某区块即从列表移除，显示则加入；调整顺序即重排列表
   final List<String> toolsSectionOrder;
 
+  /// 移动端正文关键词预览开关是否开启
+  ///
+  /// 开启后正文常驻关键词高亮，点按关键词可弹出预览卡片
+  final bool keywordHighlightEnabled;
+
   /// 书籍展开状态映射
   ///
   /// Key: 书籍 UUID
@@ -38,6 +43,7 @@ class MiscCacheData {
     this.isChapterReversed = false,
     this.isSettingReversed = false,
     this.toolsSectionOrder = const ['bookInfo', 'stats'],
+    this.keywordHighlightEnabled = false,
     this.books = const {},
   });
 
@@ -59,6 +65,7 @@ class MiscCacheData {
               ?.map((e) => e as String)
               .toList() ??
           const ['bookInfo', 'stats'],
+      keywordHighlightEnabled: json['keywordHighlightEnabled'] as bool? ?? false,
       books: books,
     );
   }
@@ -70,6 +77,7 @@ class MiscCacheData {
       'isChapterReversed': isChapterReversed,
       'isSettingReversed': isSettingReversed,
       'toolsSectionOrder': toolsSectionOrder,
+      'keywordHighlightEnabled': keywordHighlightEnabled,
       'books': books.map((key, value) => MapEntry(key, value.toJson())),
     };
   }
@@ -80,6 +88,7 @@ class MiscCacheData {
     bool? isChapterReversed,
     bool? isSettingReversed,
     List<String>? toolsSectionOrder,
+    bool? keywordHighlightEnabled,
     Map<String, BookGroupExpandCache>? books,
   }) {
     return MiscCacheData(
@@ -87,6 +96,7 @@ class MiscCacheData {
       isChapterReversed: isChapterReversed ?? this.isChapterReversed,
       isSettingReversed: isSettingReversed ?? this.isSettingReversed,
       toolsSectionOrder: toolsSectionOrder ?? this.toolsSectionOrder,
+      keywordHighlightEnabled: keywordHighlightEnabled ?? this.keywordHighlightEnabled,
       books: books ?? this.books,
     );
   }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/constants/material_icons.dart';
+import 'package:quick_write/core/constants/quick_input_action.dart';
 import 'package:quick_write/core/services/backup_service.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
@@ -74,6 +75,9 @@ class _OtherPanelState extends State<OtherPanel> {
     final previewModeEnabled = settingsService.previewModeEnabled;
     final quickInputBarEnabled = settingsService.quickInputBarEnabled;
     final punctuationAutoCompleteEnabled = settingsService.punctuationAutoCompleteEnabled;
+    final pairedSymbolEnterJumpEnabled = settingsService.pairedSymbolEnterJumpEnabled;
+    final quickInputBarLeftAction = settingsService.quickInputBarLeftAction;
+    final quickInputBarRightAction = settingsService.quickInputBarRightAction;
     final wordCountFloatingEnabled = settingsService.wordCountFloatingEnabled;
     final wordCountFloatingPosition = settingsService.wordCountFloatingPosition;
     final wordCountFloatingSpeedEnabled = settingsService.wordCountFloatingSpeedEnabled;
@@ -109,10 +113,23 @@ class _OtherPanelState extends State<OtherPanel> {
                   if (widget.scope != OtherPanelScope.backup)
                     _buildEditorBehaviorSection(context, openChapterCursorMode, previewModeEnabled),
 
+                  // 输入习惯设置区块（桌面端专属，「备份设置」入口下隐藏）
+                  if (!PlatformCapabilities.isMobile && widget.scope != OtherPanelScope.backup) ...[
+                    const SizedBox(height: 20),
+                    _buildInputHabitSection(context, pairedSymbolEnterJumpEnabled),
+                  ],
+
                   // 快捷输入设置区块（移动端专属，「备份设置」入口下隐藏）
                   if (PlatformCapabilities.isMobile && widget.scope != OtherPanelScope.backup) ...[
                     const SizedBox(height: 20),
-                    _buildQuickInputSection(context, quickInputBarEnabled, punctuationAutoCompleteEnabled),
+                    _buildQuickInputSection(
+                      context,
+                      quickInputBarEnabled,
+                      punctuationAutoCompleteEnabled,
+                      pairedSymbolEnterJumpEnabled,
+                      quickInputBarLeftAction,
+                      quickInputBarRightAction,
+                    ),
                   ],
 
                   // 字数浮窗设置区块（移动端专属，「备份设置」入口下隐藏）
@@ -281,41 +298,16 @@ class _OtherPanelState extends State<OtherPanel> {
       icon: Icons.edit_outlined,
       children: [
         // 标签文字和下拉框分行显示
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 标签行：图标 + 文字
-              Row(
-                children: [
-                  Icon(
-                    Icons.open_in_new,
-                    size: 18,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 10),
-                  Text(
-                    '打开文件时',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              // 下拉框独占一行
-              CustomDropdown(
-                width: double.infinity,
-                value: openChapterCursorMode,
-                items: cursorModeItems,
-                onChanged: (value) {
-                  SettingsService.instance.updateOpenChapterCursorMode(value);
-                  setState(() {});
-                },
-              ),
-            ],
-          ),
+        _buildDropdownSettingItem(
+          context,
+          icon: Icons.open_in_new,
+          label: '打开文件时',
+          value: openChapterCursorMode,
+          items: cursorModeItems,
+          onChanged: (value) {
+            SettingsService.instance.updateOpenChapterCursorMode(value);
+            setState(() {});
+          },
         ),
         // 预览模式开关（移动端不提供预览模式，隐藏此项）
         if (!PlatformCapabilities.isMobile)
@@ -332,10 +324,44 @@ class _OtherPanelState extends State<OtherPanel> {
     );
   }
 
+  /// 构建输入习惯设置区块（桌面端专属）
+  ///
+  /// 管理正文输入过程中的行为习惯
+  Widget _buildInputHabitSection(BuildContext context, bool pairedSymbolEnterJumpEnabled) {
+    return SettingsSection(
+      title: '输入习惯',
+      icon: Icons.keyboard_alt_outlined,
+      children: [
+        SwitchSettingItem(
+          icon: Icons.keyboard_return,
+          label: '成对符号回车跳出',
+          value: pairedSymbolEnterJumpEnabled,
+          onChanged: (value) {
+            SettingsService.instance.updatePairedSymbolEnterJumpEnabled(value);
+            setState(() {});
+          },
+        ),
+      ],
+    );
+  }
+
+  /// 快捷输入栏右侧操作区图标的候选项（由动作枚举统一生成）
+  static final List<DropdownItem> _quickInputActionItems = QuickInputAction.values
+      .map((action) => DropdownItem(displayText: action.label, value: action.id))
+      .toList();
+
   /// 构建快捷输入设置区块（移动端专属）
   ///
-  /// 管理键盘上方的快捷输入栏及其标点自动补全行为
-  Widget _buildQuickInputSection(BuildContext context, bool quickInputBarEnabled, bool punctuationAutoCompleteEnabled) {
+  /// 管理键盘上方的快捷输入栏、标点自动补全与成对符号回车跳出，
+  /// 并支持自定义快捷输入栏右侧操作区两个图标的种类与左右顺序
+  Widget _buildQuickInputSection(
+    BuildContext context,
+    bool quickInputBarEnabled,
+    bool punctuationAutoCompleteEnabled,
+    bool pairedSymbolEnterJumpEnabled,
+    QuickInputAction leftAction,
+    QuickInputAction rightAction,
+  ) {
     return SettingsSection(
       title: '快捷输入',
       icon: Icons.bolt_outlined,
@@ -349,6 +375,31 @@ class _OtherPanelState extends State<OtherPanel> {
             setState(() {});
           },
         ),
+        // 图标配置仅在快捷输入栏开启后可调
+        if (quickInputBarEnabled) ...[
+          _buildDropdownSettingItem(
+            context,
+            icon: leftAction.icon,
+            label: '右侧图标一',
+            value: leftAction.id,
+            items: _quickInputActionItems,
+            onChanged: (value) => _updateQuickInputAction(
+              isLeft: true,
+              action: QuickInputAction.fromId(value, fallback: leftAction),
+            ),
+          ),
+          _buildDropdownSettingItem(
+            context,
+            icon: rightAction.icon,
+            label: '右侧图标二',
+            value: rightAction.id,
+            items: _quickInputActionItems,
+            onChanged: (value) => _updateQuickInputAction(
+              isLeft: false,
+              action: QuickInputAction.fromId(value, fallback: rightAction),
+            ),
+          ),
+        ],
         SwitchSettingItem(
           icon: Icons.auto_fix_high_outlined,
           label: '标点自动补全',
@@ -358,7 +409,74 @@ class _OtherPanelState extends State<OtherPanel> {
             setState(() {});
           },
         ),
+        SwitchSettingItem(
+          icon: Icons.keyboard_return,
+          label: '成对符号回车跳出',
+          value: pairedSymbolEnterJumpEnabled,
+          onChanged: (value) {
+            SettingsService.instance.updatePairedSymbolEnterJumpEnabled(value);
+            setState(() {});
+          },
+        ),
       ],
+    );
+  }
+
+  /// 更新快捷输入栏某一侧的图标
+  ///
+  /// 左右两侧需显示不同图标：所选动作已出现在另一侧时，交换两侧位置
+  void _updateQuickInputAction({required bool isLeft, required QuickInputAction action}) {
+    final service = SettingsService.instance;
+    final QuickInputAction left = service.quickInputBarLeftAction;
+    final QuickInputAction right = service.quickInputBarRightAction;
+
+    if (isLeft) {
+      service.updateQuickInputBarActions(action, right == action ? left : right);
+    } else {
+      service.updateQuickInputBarActions(left == action ? right : left, action);
+    }
+    setState(() {});
+  }
+
+  /// 构建带图标标签与下拉框的设置项
+  ///
+  /// 标签与下拉框分行显示，下拉框独占一行以充分利用面板宽度
+  Widget _buildDropdownSettingItem(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required String value,
+    required List<DropdownItem> items,
+    required ValueChanged<String> onChanged,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 标签行：图标 + 文字
+          Row(
+            children: [
+              Icon(icon, size: 18, color: colorScheme.onSurfaceVariant),
+              const SizedBox(width: 10),
+              Text(
+                label,
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(color: colorScheme.onSurface),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // 下拉框独占一行
+          CustomDropdown(
+            width: double.infinity,
+            value: value,
+            items: items,
+            onChanged: onChanged,
+          ),
+        ],
+      ),
     );
   }
 
@@ -389,41 +507,16 @@ class _OtherPanelState extends State<OtherPanel> {
         ),
         // 显示位置与码字速度在浮窗开启后才可配置
         if (enabled) ...[
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 标签行：图标 + 文字
-                Row(
-                  children: [
-                    Icon(
-                      Icons.pin_drop_outlined,
-                      size: 18,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                    const SizedBox(width: 10),
-                    Text(
-                      '显示位置',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                // 下拉框独占一行
-                CustomDropdown(
-                  width: double.infinity,
-                  value: position,
-                  items: positionItems,
-                  onChanged: (value) {
-                    SettingsService.instance.updateWordCountFloatingPosition(value);
-                    setState(() {});
-                  },
-                ),
-              ],
-            ),
+          _buildDropdownSettingItem(
+            context,
+            icon: Icons.pin_drop_outlined,
+            label: '显示位置',
+            value: position,
+            items: positionItems,
+            onChanged: (value) {
+              SettingsService.instance.updateWordCountFloatingPosition(value);
+              setState(() {});
+            },
           ),
           SwitchSettingItem(
             icon: Icons.speed_outlined,

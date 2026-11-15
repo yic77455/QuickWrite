@@ -44,6 +44,12 @@ class NameGenCacheService extends CacheService<NameGenCacheData> {
   /// 内存中的全部词典（内置词典 + 自定义词典）
   List<NameDictionary> _dictionaries = const [];
 
+  /// 应用资源中全部内置词典的 ID
+  ///
+  /// 编辑或删除内置词典后内存中的来源标记可能变化，需单独记录才能识别
+  /// 某个 ID 是否来自内置资源。
+  Set<String> _builtinIds = const {};
+
   // ================= 初始化方法 =================
 
   @override
@@ -72,10 +78,22 @@ class NameGenCacheService extends CacheService<NameGenCacheData> {
   }
 
   /// 从 JSON 文件加载全部词典到内存
+  ///
+  /// 同 ID 的自定义词典（编辑内置词典后的覆盖文件）优先于内置词典；
+  /// 用户删除过的内置词典不再加载。
   Future<void> _loadDictionaries() async {
     final builtin = await _store.loadBuiltinDictionaries();
     final custom = await _store.loadCustomDictionaries();
-    _dictionaries = [...builtin, ...custom];
+
+    _builtinIds = builtin.map((d) => d.id).toSet();
+    final customIds = custom.map((d) => d.id).toSet();
+    _dictionaries = [
+      ...builtin.where(
+        (d) =>
+            !customIds.contains(d.id) && !_data.hiddenBuiltinIds.contains(d.id),
+      ),
+      ...custom,
+    ];
   }
 
   // ================= 反序列化实现 =================
@@ -102,17 +120,15 @@ class NameGenCacheService extends CacheService<NameGenCacheData> {
 
   /// 新增或更新词典
   ///
-  /// 写入自定义词典文件，并同步更新内存列表；已存在相同 ID 的词典则覆盖并
-  /// 保留其排序序号，否则追加到自定义词典末尾。内置词典不允许新增或修改，
-  /// 此类请求直接拒绝并返回 false。
+  /// 写入词典文件，并同步更新内存列表；已存在相同 ID 的词典则覆盖并保留其
+  /// 排序序号（编辑内置词典即以此方式生成覆盖文件），否则追加到自定义词典
+  /// 末尾。
   Future<bool> saveDictionary(NameDictionary dictionary) async {
-    if (dictionary.isBuiltin) return false;
     final dictionaries = List<NameDictionary>.from(_dictionaries);
     final index = dictionaries.indexWhere((d) => d.id == dictionary.id);
 
     final NameDictionary saved;
     if (index >= 0) {
-      if (dictionaries[index].isBuiltin) return false;
       // 编辑已有词典时沿用原排序序号，避免其在列表中的位置发生变动
       saved = dictionary.copyWith(orderIndex: dictionaries[index].orderIndex);
       dictionaries[index] = saved;
@@ -144,14 +160,23 @@ class NameGenCacheService extends CacheService<NameGenCacheData> {
 
   /// 删除指定 ID 的词典
   ///
-  /// 删除对应的自定义词典文件并同步更新内存列表。
-  /// 内置词典不允许删除，此类请求直接拒绝并返回 false。
+  /// 删除对应的词典文件并同步更新内存列表；若该 ID 来自内置词典，
+  /// 同时记录到隐藏列表，避免下次启动时再次从应用资源中加载。
   Future<bool> deleteDictionary(String id) async {
     final index = _dictionaries.indexWhere((d) => d.id == id);
-    if (index < 0 || _dictionaries[index].isBuiltin) return false;
+    if (index < 0) return false;
     if (!await _store.deleteDictionary(id)) return false;
+
     final dictionaries = List<NameDictionary>.from(_dictionaries)..removeAt(index);
     _dictionaries = dictionaries;
+
+    if (_builtinIds.contains(id)) {
+      _data = _data.copyWith(
+        hiddenBuiltinIds: {..._data.hiddenBuiltinIds, id},
+      );
+      await save(_data);
+    }
+
     // 词典文件已删除，交由云同步服务安排一次同步
     CloudSyncService.instance.notifyLocalChange();
     return true;
@@ -163,9 +188,7 @@ class NameGenCacheService extends CacheService<NameGenCacheData> {
   ///
   /// 缓存中记录的 ID 无效时回退为该类别的第一个词典。
   String getSelectedDictionaryId(NameCategory category) {
-    final stored = category == NameCategory.person
-        ? _data.selectedPersonDictId
-        : _data.selectedPlaceDictId;
+    final stored = _data.selectedDictionaryIds[category.id] ?? '';
     final dictionaries = getDictionaries(category);
     if (dictionaries.any((d) => d.id == stored)) return stored;
     return dictionaries.isEmpty ? '' : dictionaries.first.id;
@@ -173,9 +196,9 @@ class NameGenCacheService extends CacheService<NameGenCacheData> {
 
   /// 保存指定类别选中的词典 ID
   Future<bool> saveSelectedDictionaryId(NameCategory category, String id) async {
-    _data = category == NameCategory.person
-        ? _data.copyWith(selectedPersonDictId: id)
-        : _data.copyWith(selectedPlaceDictId: id);
+    _data = _data.copyWith(
+      selectedDictionaryIds: {..._data.selectedDictionaryIds, category.id: id},
+    );
     return await save(_data);
   }
 

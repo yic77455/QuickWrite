@@ -11,6 +11,7 @@ import 'package:quick_write/shared/widgets/qw_dropdown.dart';
 /// 参数按当前类别展示：
 /// - 人名：性别取向、名字字数（选项随词典类型变化）、自定义姓氏
 /// - 地名：主体词字数（选项随词典类型变化）、自定义后缀
+/// - 其他：仅每次生成数量（词组池由词典决定）
 /// - 通用：每次生成数量
 class NameOptionsPanel extends StatelessWidget {
   /// 当前类别
@@ -140,7 +141,7 @@ class NameOptionsPanel extends StatelessWidget {
             hintText: '随机',
             onChanged: (value) => onChanged(options.copyWith(customSurname: value)),
           ),
-        ] else ...[
+        ] else if (category == NameCategory.place) ...[
           _buildDropdownField(
             context,
             label: '主体字数',

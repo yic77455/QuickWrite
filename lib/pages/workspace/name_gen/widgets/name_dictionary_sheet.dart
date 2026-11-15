@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:quick_write/core/constants/material_icons.dart';
 import 'package:quick_write/core/models/name_gen/name_dictionary.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 
@@ -32,6 +33,9 @@ class NameDictionarySheetAction {
 
   const NameDictionarySheetAction(this.type, [this.dictionary]);
 }
+
+/// 词典管理弹窗底部新建按钮的高度
+const double _createButtonHeight = 42;
 
 /// 显示移动端词典管理弹窗
 ///
@@ -104,7 +108,7 @@ class _NameDictionarySheet extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(20, 16, 20, 10),
               child: Row(
                 children: [
-                  Icon(Icons.auto_stories_outlined, size: 18, color: colorScheme.primary),
+                  Icon(MaterialIcons.book_4, size: 18, color: colorScheme.primary),
                   const SizedBox(width: 8),
                   Text(
                     '词典',
@@ -141,12 +145,13 @@ class _NameDictionarySheet extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
               child: SizedBox(
                 width: double.infinity,
+                height: _createButtonHeight,
                 child: FilledButton.tonalIcon(
                   onPressed: () => Navigator.of(context)
                       .pop(const NameDictionarySheetAction(NameDictionarySheetActionType.create)),
                   icon: const Icon(Icons.add_rounded, size: 18),
                   label: const Text('新建词典'),
-                  style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
+                  style: FilledButton.styleFrom(padding: EdgeInsets.zero),
                 ),
               ),
             ),
@@ -158,8 +163,8 @@ class _NameDictionarySheet extends StatelessWidget {
 
   /// 构建单个词典条目
   ///
-  /// 点击整项即选中该词典；自定义词典在右侧提供编辑与删除按钮，
-  /// 内置词典以「内置」标记说明其不可修改。
+  /// 点击整项即选中该词典；右侧提供编辑与删除按钮，内置词典以「内置」
+  /// 标记说明其来源。
   Widget _buildTile(BuildContext context, NameDictionary dictionary) {
     final colorScheme = Theme.of(context).colorScheme;
     final bool selected = dictionary.id == selectedId;
@@ -179,9 +184,7 @@ class _NameDictionarySheet extends StatelessWidget {
             child: Row(
               children: [
                 Icon(
-                  dictionary.category == NameCategory.person
-                      ? Icons.person_outline_rounded
-                      : Icons.place_outlined,
+                  _categoryIcon(dictionary.category),
                   size: 18,
                   color: selected ? colorScheme.primary : colorScheme.onSurfaceVariant,
                 ),
@@ -197,32 +200,30 @@ class _NameDictionarySheet extends StatelessWidget {
                     ),
                   ),
                 ),
-                // 内置词典不可修改，以文字标记加以说明
+                // 内置词典以文字标记说明来源
                 if (dictionary.isBuiltin)
                   Text(
                     '内置',
                     style: context.bodySmall?.copyWith(
                       color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
                     ),
-                  )
-                else ...[
-                  _buildActionIcon(
-                    context,
-                    icon: Icons.edit_outlined,
-                    tooltip: '编辑',
-                    onTap: () => Navigator.of(context).pop(
-                      NameDictionarySheetAction(NameDictionarySheetActionType.edit, dictionary),
-                    ),
                   ),
-                  _buildActionIcon(
-                    context,
-                    icon: Icons.delete_outline_rounded,
-                    tooltip: '删除',
-                    onTap: () => Navigator.of(context).pop(
-                      NameDictionarySheetAction(NameDictionarySheetActionType.delete, dictionary),
-                    ),
+                _buildActionIcon(
+                  context,
+                  icon: Icons.edit_outlined,
+                  tooltip: '编辑',
+                  onTap: () => Navigator.of(context).pop(
+                    NameDictionarySheetAction(NameDictionarySheetActionType.edit, dictionary),
                   ),
-                ],
+                ),
+                _buildActionIcon(
+                  context,
+                  icon: Icons.delete_outline_rounded,
+                  tooltip: '删除',
+                  onTap: () => Navigator.of(context).pop(
+                    NameDictionarySheetAction(NameDictionarySheetActionType.delete, dictionary),
+                  ),
+                ),
                 // 选中标记
                 if (selected)
                   Padding(
@@ -252,5 +253,17 @@ class _NameDictionarySheet extends StatelessWidget {
       onPressed: onTap,
       visualDensity: VisualDensity.compact,
     );
+  }
+}
+
+/// 类别对应的图标
+IconData _categoryIcon(NameCategory category) {
+  switch (category) {
+    case NameCategory.person:
+      return Icons.person_outline_rounded;
+    case NameCategory.place:
+      return Icons.place_outlined;
+    case NameCategory.other:
+      return Icons.widgets_outlined;
   }
 }

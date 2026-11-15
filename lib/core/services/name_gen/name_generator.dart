@@ -5,23 +5,29 @@ import 'package:quick_write/core/models/name_gen/name_gen_options.dart';
 
 /// 名字生成器
 ///
-/// 纯函数式的名字生成逻辑，根据词典与参数组合出人名或地名。
-/// 生成方式由词典的 [NameDictionary.isCharBased] 声明：
-/// 逐字式按字数组合多个单字，整词式直接取一个完整词条。
+/// 纯函数式的名字生成逻辑，根据词典与参数组合出人名、地名或其他名字。
+/// 人名与地名由词典的 [NameDictionary.isCharBased] 声明生成方式：
+/// 逐字式按字数组合多个单字，整词式直接取一个完整词条；
+/// 其他类别按用户定义的一组词组池依次取词拼接。
 class NameGenerator {
   NameGenerator._();
 
   /// 生成单个名字
   ///
-  /// 根据词典类别自动分派到人名或地名生成，返回 null 表示词典数据不足。
+  /// 根据词典类别自动分派到对应的生成逻辑，返回 null 表示词典数据不足。
   static String? generate(
     NameDictionary dictionary, {
     required NameGenOptions options,
     required Random random,
   }) {
-    return dictionary.category == NameCategory.person
-        ? generatePerson(dictionary, options: options, random: random)
-        : generatePlace(dictionary, options: options, random: random);
+    switch (dictionary.category) {
+      case NameCategory.person:
+        return generatePerson(dictionary, options: options, random: random);
+      case NameCategory.place:
+        return generatePlace(dictionary, options: options, random: random);
+      case NameCategory.other:
+        return generateOther(dictionary, random: random);
+    }
   }
 
   /// 批量生成名字
@@ -87,6 +93,26 @@ class NameGenerator {
         ? customSuffix
         : (_pickOne(dictionary.pool(NamePoolKeys.suffix), random) ?? '');
     return '$stem$suffix';
+  }
+
+  /// 生成其他类别的名字
+  ///
+  /// 按词典中各组词池的顺序，依次从每个词组池随机取一个词条并拼接；
+  /// 任一词组池没有词条时无法组合出完整名字，返回 null。
+  static String? generateOther(
+    NameDictionary dictionary, {
+    required Random random,
+  }) {
+    final keys = dictionary.partKeys;
+    if (keys.isEmpty) return null;
+
+    final buffer = StringBuffer();
+    for (final key in keys) {
+      final part = _pickOne(dictionary.pool(key), random);
+      if (part == null) return null;
+      buffer.write(part);
+    }
+    return buffer.toString();
   }
 
   /// 构建名字部分

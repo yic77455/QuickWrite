@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:quick_write/core/constants/material_icons.dart';
 import 'package:quick_write/core/models/name_gen/name_dictionary.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/qw_tooltip.dart';
@@ -6,7 +7,7 @@ import 'package:quick_write/shared/widgets/qw_tooltip.dart';
 /// 词典面板
 ///
 /// 随机取名弹窗左侧的词典列表，展示当前类别的全部词典，
-/// 支持选中与新建；编辑、删除仅对用户自定义词典开放，内置词典不可修改。
+/// 支持选中、新建、编辑与删除；内置词典与自定义词典均可编辑和删除。
 class NameDictionaryPanel extends StatelessWidget {
   /// 当前类别的词典列表
   final List<NameDictionary> dictionaries;
@@ -48,7 +49,7 @@ class NameDictionaryPanel extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
           child: Row(
             children: [
-              Icon(Icons.auto_stories_outlined, size: 16, color: colorScheme.primary),
+              Icon(MaterialIcons.book_4, size: 16, color: colorScheme.primary),
               const SizedBox(width: 6),
               Text(
                 '词典',
@@ -110,10 +111,27 @@ class NameDictionaryPanel extends StatelessWidget {
   }
 }
 
+/// 列表项操作按钮的边长
+const double _actionButtonSize = 22;
+
+/// 列表项操作区预留宽度（两个按钮 + 间距）
+const double _actionAreaWidth = _actionButtonSize * 2 + 2;
+
+/// 类别对应的图标
+IconData _categoryIcon(NameCategory category) {
+  switch (category) {
+    case NameCategory.person:
+      return Icons.person_outline_rounded;
+    case NameCategory.place:
+      return Icons.place_outlined;
+    case NameCategory.other:
+      return Icons.widgets_outlined;
+  }
+}
+
 /// 词典列表项
 ///
-/// 选中时使用主色底强调；自定义词典在鼠标悬浮时显示编辑与删除按钮，
-/// 内置词典不提供这两个操作。
+/// 选中时使用主色底强调；鼠标悬浮时显示编辑与删除按钮。
 class _DictionaryTile extends StatefulWidget {
   final NameDictionary dictionary;
   final bool selected;
@@ -163,9 +181,7 @@ class _DictionaryTileState extends State<_DictionaryTile> {
               child: Row(
                 children: [
                   Icon(
-                    dictionary.category == NameCategory.person
-                        ? Icons.person_outline_rounded
-                        : Icons.place_outlined,
+                    _categoryIcon(dictionary.category),
                     size: 16,
                     color: selected ? colorScheme.primary : colorScheme.onSurfaceVariant,
                   ),
@@ -181,19 +197,37 @@ class _DictionaryTileState extends State<_DictionaryTile> {
                       ),
                     ),
                   ),
-                  // 自定义词典悬浮时显示编辑/删除按钮
-                  if (_hovered && !dictionary.isBuiltin) ...[
-                    _buildActionIcon(
-                      icon: Icons.edit_outlined,
-                      tooltip: '编辑',
-                      onTap: widget.onEdit,
+                  // 编辑/删除按钮始终占位，仅通过透明度显隐，避免尺寸变化导致位移
+                  SizedBox(
+                    width: _actionAreaWidth,
+                    child: IgnorePointer(
+                      ignoring: !_hovered,
+                      child: ExcludeSemantics(
+                        excluding: !_hovered,
+                        child: AnimatedOpacity(
+                          opacity: _hovered ? 1 : 0,
+                          duration: const Duration(milliseconds: 120),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              _ActionIconButton(
+                                icon: Icons.edit_outlined,
+                                tooltip: '编辑',
+                                onTap: widget.onEdit,
+                              ),
+                              const SizedBox(width: 2),
+                              _ActionIconButton(
+                                icon: Icons.delete_outline_rounded,
+                                tooltip: '删除',
+                                hoverColor: colorScheme.error,
+                                onTap: widget.onDelete,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
-                    _buildActionIcon(
-                      icon: Icons.delete_outline_rounded,
-                      tooltip: '删除',
-                      onTap: widget.onDelete,
-                    ),
-                  ],
+                  ),
                 ],
               ),
             ),
@@ -202,22 +236,59 @@ class _DictionaryTileState extends State<_DictionaryTile> {
       ),
     );
   }
+}
 
-  /// 构建列表项右侧的小操作按钮
-  Widget _buildActionIcon({
-    required IconData icon,
-    required String tooltip,
-    required VoidCallback onTap,
-  }) {
+/// 列表项右侧的小操作按钮
+///
+/// 尺寸固定并在鼠标悬浮时变色；显隐由外层控制，不参与尺寸计算。
+class _ActionIconButton extends StatefulWidget {
+  final IconData icon;
+  final String tooltip;
+
+  /// 鼠标悬浮时的图标颜色，为空时使用主题主色
+  final Color? hoverColor;
+
+  final VoidCallback onTap;
+
+  const _ActionIconButton({
+    required this.icon,
+    required this.tooltip,
+    this.hoverColor,
+    required this.onTap,
+  });
+
+  @override
+  State<_ActionIconButton> createState() => _ActionIconButtonState();
+}
+
+class _ActionIconButtonState extends State<_ActionIconButton> {
+  /// 鼠标是否悬浮在按钮上
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+
     return CursorTooltipTarget(
-      tooltipContent: Text(tooltip),
-      child: InkResponse(
-        onTap: onTap,
-        radius: 14,
-        child: Padding(
-          padding: const EdgeInsets.all(2),
-          child: Icon(icon, size: 15, color: colorScheme.onSurfaceVariant),
+      tooltipContent: Text(widget.tooltip),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovered = true),
+        onExit: (_) => setState(() => _hovered = false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.onTap,
+          child: SizedBox(
+            width: _actionButtonSize,
+            height: _actionButtonSize,
+            child: Icon(
+              widget.icon,
+              size: 15,
+              color: _hovered
+                  ? (widget.hoverColor ?? colorScheme.primary)
+                  : colorScheme.onSurfaceVariant,
+            ),
+          ),
         ),
       ),
     );

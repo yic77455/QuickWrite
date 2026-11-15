@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
+import 'package:quick_write/core/constants/quick_input_action.dart';
 import 'package:quick_write/core/models/app_settings.dart';
 import 'package:quick_write/core/theme/custom_theme.dart';
 import 'package:quick_write/core/theme/theme_store.dart';
@@ -645,6 +646,21 @@ class SettingsService extends ChangeNotifier {
   /// 获取标点符号自动补全是否启用
   bool get punctuationAutoCompleteEnabled => _settings.punctuationAutoCompleteEnabled;
 
+  /// 获取成对符号回车跳出是否启用
+  bool get pairedSymbolEnterJumpEnabled => _settings.pairedSymbolEnterJumpEnabled;
+
+  /// 获取快捷输入栏右侧操作区左侧图标的动作
+  QuickInputAction get quickInputBarLeftAction => QuickInputAction.fromId(
+        _settings.quickInputBarLeftAction,
+        fallback: QuickInputAction.defaultLeft,
+      );
+
+  /// 获取快捷输入栏右侧操作区右侧图标的动作
+  QuickInputAction get quickInputBarRightAction => QuickInputAction.fromId(
+        _settings.quickInputBarRightAction,
+        fallback: QuickInputAction.defaultRight,
+      );
+
   /// 获取字数浮窗是否启用
   /// 移动端专属功能，桌面端始终返回关闭
   bool get wordCountFloatingEnabled =>
@@ -873,6 +889,21 @@ class SettingsService extends ChangeNotifier {
     return updateSettings(newSettings);
   }
 
+  /// 更新成对符号回车跳出开关
+  Future<bool> updatePairedSymbolEnterJumpEnabled(bool value) async {
+    final newSettings = _settings.copyWith(pairedSymbolEnterJumpEnabled: value);
+    return updateSettings(newSettings);
+  }
+
+  /// 更新快捷输入栏右侧操作区左右两个图标的动作
+  Future<bool> updateQuickInputBarActions(QuickInputAction left, QuickInputAction right) async {
+    final newSettings = _settings.copyWith(
+      quickInputBarLeftAction: left.id,
+      quickInputBarRightAction: right.id,
+    );
+    return updateSettings(newSettings);
+  }
+
   /// 更新字数浮窗开关
   Future<bool> updateWordCountFloatingEnabled(bool value) async {
     final newSettings = _settings.copyWith(wordCountFloatingEnabled: value);
@@ -989,6 +1020,9 @@ class SettingsService extends ChangeNotifier {
       openChapterCursorMode: AppSettings.defaults.openChapterCursorMode,
       quickInputBarEnabled: AppSettings.defaults.quickInputBarEnabled,
       punctuationAutoCompleteEnabled: AppSettings.defaults.punctuationAutoCompleteEnabled,
+      pairedSymbolEnterJumpEnabled: AppSettings.defaults.pairedSymbolEnterJumpEnabled,
+      quickInputBarLeftAction: AppSettings.defaults.quickInputBarLeftAction,
+      quickInputBarRightAction: AppSettings.defaults.quickInputBarRightAction,
       wordCountFloatingEnabled: AppSettings.defaults.wordCountFloatingEnabled,
       wordCountFloatingPosition: AppSettings.defaults.wordCountFloatingPosition,
       wordCountFloatingSpeedEnabled: AppSettings.defaults.wordCountFloatingSpeedEnabled,

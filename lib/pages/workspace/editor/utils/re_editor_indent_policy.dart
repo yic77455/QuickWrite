@@ -1,3 +1,4 @@
+import 'package:quick_write/core/constants/punctuation_symbols.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:re_editor/re_editor.dart';
 
@@ -17,15 +18,31 @@ class ReEditorIndentPolicy {
   /// 段落首行缩进使用的两个全角空格
   static const String indent = '\u3000\u3000';
 
+  /// 成对符号的起始符号到结束符号的映射
+  ///
+  /// 取自标点符号表，与快捷输入栏、标点自动补全共用同一份成对符号数据
+  static final Map<String, String> _closingSymbols = {
+    for (final symbol in PunctuationSymbols.quickInputKeys)
+      if (symbol.isPairStart) symbol.symbol: symbol.closing!,
+  };
+
+  /// 成对符号的结束符号到起始符号的映射
+  static final Map<String, String> _openingSymbols = {
+    for (final entry in _closingSymbols.entries) entry.value: entry.key,
+  };
+
   /// 被操作的编辑控制器
   final CodeLineEditingController controller;
 
   /// 处理回车
   ///
+  /// 光标位于成对符号之间时，将光标移至结束符号之后；
   /// 光标位于行首时不触发自动格式化，仅插入换行；
   /// 位于行中或行末时，按设置依次补空行与首行缩进。
   /// 仅在缩进由全角空格实现时写入缩进字符。
   void handleNewLine() {
+    if (_jumpOverClosingSymbolIfNeeded()) return;
+
     final SettingsService settings = SettingsService.instance;
     final CodeLineSelection selection = controller.selection;
     final bool atLineStart = selection.isCollapsed && selection.startOffset == 0;
@@ -42,6 +59,57 @@ class ReEditorIndentPolicy {
       buffer.write(indent);
     }
     controller.replaceSelection(buffer.toString());
+  }
+
+  /// 成对符号回车跳出
+  ///
+  /// 光标位于某一对成对符号内部时（不论符号内是否已有内容），
+  /// 把光标移到该对结束符号之后，不插入换行。
+  /// 返回是否已处理（处理时不再执行换行）。
+  bool _jumpOverClosingSymbolIfNeeded() {
+    if (!SettingsService.instance.pairedSymbolEnterJumpEnabled) return false;
+
+    final CodeLineSelection selection = controller.selection;
+    if (!selection.isCollapsed) return false;
+
+    final String line = controller.codeLines[selection.startIndex].text;
+    final int offset = selection.startOffset;
+
+    // 扫描光标之前的文本，记录尚未闭合的起始符号
+    final List<String> pending = [];
+    for (int i = 0; i < offset; i++) {
+      final String char = line[i];
+      if (_closingSymbols.containsKey(char)) {
+        pending.add(char);
+      } else if (_openingSymbols.containsKey(char) &&
+          pending.isNotEmpty &&
+          _closingSymbols[pending.last] == char) {
+        pending.removeLast();
+      }
+    }
+    if (pending.isEmpty) return false;
+
+    // 光标处的嵌套深度，用于识别最内层符号的结束位置
+    final int depth = pending.length;
+    for (int i = offset; i < line.length; i++) {
+      final String char = line[i];
+      if (_closingSymbols.containsKey(char)) {
+        pending.add(char);
+      } else if (_openingSymbols.containsKey(char) &&
+          pending.isNotEmpty &&
+          _closingSymbols[pending.last] == char) {
+        pending.removeLast();
+        // 回到光标所在的层级，说明已到达这对符号的结束处
+        if (pending.length == depth - 1) {
+          controller.selection = CodeLineSelection.collapsed(
+            index: selection.startIndex,
+            offset: i + char.length,
+          );
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   /// 处理 Tab：在光标处插入两个全角空格

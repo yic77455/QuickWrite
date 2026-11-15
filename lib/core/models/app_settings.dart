@@ -234,6 +234,17 @@ class AppSettings {
   /// 开启后输入成对符号的起始符号时自动补出结束符号，光标置于两者之间
   final bool punctuationAutoCompleteEnabled;
 
+  /// 是否开启成对符号回车跳出
+  /// 开启后光标位于成对符号（如双引号、括号）之间时，按下回车跳过结束符号
+  final bool pairedSymbolEnterJumpEnabled;
+
+  /// 快捷输入栏右侧操作区左侧图标的动作标识
+  /// 取值见 QuickInputAction：keywordToggle、settings、findReplace、fullTextSearch、randomName
+  final String quickInputBarLeftAction;
+
+  /// 快捷输入栏右侧操作区右侧图标的动作标识，取值同 [quickInputBarLeftAction]
+  final String quickInputBarRightAction;
+
   // ================= 字数浮窗设置（移动端）=================
 
   /// 是否启用字数浮窗
@@ -360,6 +371,9 @@ class AppSettings {
     this.previewModeEnabled = true, // 是否启用预览模式
     this.quickInputBarEnabled = true, // 是否显示快捷输入栏（移动端）
     this.punctuationAutoCompleteEnabled = true, // 是否开启标点符号自动补全（移动端）
+    this.pairedSymbolEnterJumpEnabled = false, // 是否开启成对符号回车跳出
+    this.quickInputBarLeftAction = 'keywordToggle', // 快捷输入栏右侧操作区左侧图标
+    this.quickInputBarRightAction = 'settings', // 快捷输入栏右侧操作区右侧图标
     // 字数浮窗设置（移动端）
     this.wordCountFloatingEnabled = false, // 是否启用字数浮窗
     this.wordCountFloatingPosition = 'topRight', // 字数浮窗显示位置（默认右上）
@@ -480,6 +494,9 @@ class AppSettings {
       previewModeEnabled: autoBackupJson['previewModeEnabled'] as bool? ?? defaults.previewModeEnabled,
       quickInputBarEnabled: autoBackupJson['quickInputBarEnabled'] as bool? ?? defaults.quickInputBarEnabled,
       punctuationAutoCompleteEnabled: autoBackupJson['punctuationAutoCompleteEnabled'] as bool? ?? defaults.punctuationAutoCompleteEnabled,
+      pairedSymbolEnterJumpEnabled: autoBackupJson['pairedSymbolEnterJumpEnabled'] as bool? ?? defaults.pairedSymbolEnterJumpEnabled,
+      quickInputBarLeftAction: autoBackupJson['quickInputBarLeftAction'] as String? ?? defaults.quickInputBarLeftAction,
+      quickInputBarRightAction: autoBackupJson['quickInputBarRightAction'] as String? ?? defaults.quickInputBarRightAction,
 
       // 字数浮窗设置（编辑器）
       wordCountFloatingEnabled: wordCountFloatingJson['enabled'] as bool? ?? defaults.wordCountFloatingEnabled,
@@ -595,6 +612,9 @@ class AppSettings {
           'previewModeEnabled': previewModeEnabled,
           'quickInputBarEnabled': quickInputBarEnabled,
           'punctuationAutoCompleteEnabled': punctuationAutoCompleteEnabled,
+          'pairedSymbolEnterJumpEnabled': pairedSymbolEnterJumpEnabled,
+          'quickInputBarLeftAction': quickInputBarLeftAction,
+          'quickInputBarRightAction': quickInputBarRightAction,
         },
         // 字数浮窗设置（移动端）
         'wordCountFloating': {
@@ -694,6 +714,10 @@ class AppSettings {
     bool? previewModeEnabled,
     bool? quickInputBarEnabled,
     bool? punctuationAutoCompleteEnabled,
+    bool? pairedSymbolEnterJumpEnabled,
+    // 快捷输入栏右侧操作区图标
+    String? quickInputBarLeftAction,
+    String? quickInputBarRightAction,
     // 字数浮窗设置（移动端）
     bool? wordCountFloatingEnabled,
     String? wordCountFloatingPosition,
@@ -776,6 +800,10 @@ class AppSettings {
       previewModeEnabled: previewModeEnabled ?? this.previewModeEnabled,
       quickInputBarEnabled: quickInputBarEnabled ?? this.quickInputBarEnabled,
       punctuationAutoCompleteEnabled: punctuationAutoCompleteEnabled ?? this.punctuationAutoCompleteEnabled,
+      pairedSymbolEnterJumpEnabled: pairedSymbolEnterJumpEnabled ?? this.pairedSymbolEnterJumpEnabled,
+      // 快捷输入栏右侧操作区图标
+      quickInputBarLeftAction: quickInputBarLeftAction ?? this.quickInputBarLeftAction,
+      quickInputBarRightAction: quickInputBarRightAction ?? this.quickInputBarRightAction,
       // 字数浮窗设置（移动端）
       wordCountFloatingEnabled: wordCountFloatingEnabled ?? this.wordCountFloatingEnabled,
       wordCountFloatingPosition: wordCountFloatingPosition ?? this.wordCountFloatingPosition,
@@ -893,6 +921,10 @@ class AppSettings {
            other.previewModeEnabled == previewModeEnabled &&
            other.quickInputBarEnabled == quickInputBarEnabled &&
            other.punctuationAutoCompleteEnabled == punctuationAutoCompleteEnabled &&
+           other.pairedSymbolEnterJumpEnabled == pairedSymbolEnterJumpEnabled &&
+           // 快捷输入栏右侧操作区图标
+           other.quickInputBarLeftAction == quickInputBarLeftAction &&
+           other.quickInputBarRightAction == quickInputBarRightAction &&
            // 字数浮窗设置（移动端）
            other.wordCountFloatingEnabled == wordCountFloatingEnabled &&
            other.wordCountFloatingPosition == wordCountFloatingPosition &&
@@ -970,7 +1002,7 @@ class AppSettings {
         dialogueHighlightColorLight,
         dialogueHighlightColorDark,
       ),
-      // 字体设置和其他设置
+      // 字体设置
       Object.hash(
         fontFamily,
         fontSize,
@@ -982,7 +1014,9 @@ class AppSettings {
         // 大纲编辑器字体设置
         outlineFontFamily,
         outlineFontSize,
-        // 其他设置（右侧边栏 - 其他设置面板）
+      ),
+      // 其他设置（右侧边栏 - 其他设置面板）与字数浮窗设置（移动端）
+      Object.hash(
         autoSaveEnabled,
         autoBackupEnabled,
         backupInterval,
@@ -991,7 +1025,9 @@ class AppSettings {
         previewModeEnabled,
         quickInputBarEnabled,
         punctuationAutoCompleteEnabled,
-        // 字数浮窗设置（移动端）
+        pairedSymbolEnterJumpEnabled,
+        quickInputBarLeftAction,
+        quickInputBarRightAction,
         wordCountFloatingEnabled,
         wordCountFloatingPosition,
         wordCountFloatingSpeedEnabled,

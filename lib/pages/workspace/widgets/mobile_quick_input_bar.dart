@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/constants/punctuation_symbols.dart';
+import 'package:quick_write/core/constants/quick_input_action.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/pages/workspace/editor/novel_editor.dart';
+import 'package:quick_write/pages/workspace/name_gen/name_generator_dialog_mobile.dart';
 import 'package:quick_write/pages/workspace/widgets/punctuation_key_button.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 import 'package:re_editor/re_editor.dart';
@@ -11,7 +13,7 @@ import 'package:re_editor/re_editor.dart';
 /// 移动端快捷输入栏
 ///
 /// 软键盘弹出时贴在键盘上方，提供常用标点符号的快捷输入；
-/// 右端提供关键词高亮开关与前往「其他设置」的入口。
+/// 右端提供两个可自定义的快捷操作按钮，默认分别为关键词高亮开关与其他设置入口。
 class MobileQuickInputBar extends StatefulWidget {
   const MobileQuickInputBar({super.key});
 
@@ -146,6 +148,78 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
     context.read<WorkspaceProvider>().openRightSidebar(RightSidebarType.other);
   }
 
+  /// 打开或关闭当前编辑器的查找替换栏
+  void _handleFindReplaceTap() {
+    context.read<WorkspaceProvider>().toggleFindReplace();
+  }
+
+  /// 打开全文搜索面板
+  void _handleFullTextSearchTap() {
+    // 先收起输入法，避免键盘遮挡展开的搜索面板
+    FocusManager.instance.primaryFocus?.unfocus();
+    context.read<WorkspaceProvider>().openRightSidebar(RightSidebarType.search);
+  }
+
+  /// 打开随机取名弹窗
+  void _handleRandomNameTap() {
+    // 先收起输入法，避免键盘遮挡弹窗
+    FocusManager.instance.primaryFocus?.unfocus();
+    showMobileNameGeneratorDialog(context: context);
+  }
+
+  /// 构建右侧操作区的两个图标按钮
+  ///
+  /// 图标种类与左右顺序均取自设置：先渲染左侧图标，再渲染右侧图标
+  List<Widget> _buildRightActions(NovelEditorState editorState) {
+    final settings = SettingsService.instance;
+    return [
+      _buildActionButton(editorState, settings.quickInputBarLeftAction),
+      _buildActionButton(editorState, settings.quickInputBarRightAction),
+    ];
+  }
+
+  /// 构建单个操作图标按钮
+  ///
+  /// 关键词高亮开关需要跟随编辑器状态显示选中态，故单独处理；
+  /// 当前正文未绑定关键词时不显示该按钮，避免出现无效入口。
+  Widget _buildActionButton(NovelEditorState editorState, QuickInputAction action) {
+    switch (action) {
+      case QuickInputAction.keywordToggle:
+        if (!editorState.hasOutlineKeywords) return const SizedBox.shrink();
+        return ValueListenableBuilder<bool>(
+          valueListenable: editorState.keywordHighlightNotifier,
+          builder: (context, enabled, _) => ToggleToolButton(
+            icon: action.icon,
+            tooltip: action.label,
+            isSelected: enabled,
+            size: 44,
+            iconSize: 20,
+            onChanged: (_) => editorState.toggleKeywordHighlight(),
+          ),
+        );
+      case QuickInputAction.settings:
+        return _buildSmallActionButton(action, _handleSettingsTap);
+      case QuickInputAction.findReplace:
+        return _buildSmallActionButton(action, _handleFindReplaceTap);
+      case QuickInputAction.fullTextSearch:
+        return _buildSmallActionButton(action, _handleFullTextSearchTap);
+      case QuickInputAction.randomName:
+        return _buildSmallActionButton(action, _handleRandomNameTap);
+    }
+  }
+
+  /// 构建普通样式的操作按钮
+  Widget _buildSmallActionButton(QuickInputAction action, VoidCallback onPressed) {
+    return SmallToolbarButton(
+      icon: action.icon,
+      tooltip: action.label,
+      width: 44,
+      height: _barHeight,
+      iconSize: 20,
+      onPressed: onPressed,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // 切换标签页时重新判断显隐
@@ -195,29 +269,8 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
                 color: colorScheme.outlineVariant,
               ),
 
-              // 关键词高亮开关：开启后正文常驻关键词高亮，点按关键词可预览
-              if (editorState.hasOutlineKeywords)
-                ValueListenableBuilder<bool>(
-                  valueListenable: editorState.keywordHighlightNotifier,
-                  builder: (context, enabled, _) => ToggleToolButton(
-                    icon: Icons.sell_outlined,
-                    tooltip: '关键词高亮',
-                    isSelected: enabled,
-                    size: 44,
-                    iconSize: 20,
-                    onChanged: (_) => editorState.toggleKeywordHighlight(),
-                  ),
-                ),
-
-              // 其他设置入口，与关键词开关同属右侧操作区
-              SmallToolbarButton(
-                icon: Icons.settings_rounded,
-                tooltip: '其他设置',
-                width: 44,
-                height: _barHeight,
-                iconSize: 20,
-                onPressed: _handleSettingsTap,
-              ),
+              // 右侧操作区：两个快捷操作图标，种类与顺序由设置决定
+              ..._buildRightActions(editorState),
             ],
           ),
         ),

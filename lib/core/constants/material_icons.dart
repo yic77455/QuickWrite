@@ -25,4 +25,5 @@ class MaterialIcons {
   static const IconData table_edit = IconData(0xf3c6, fontFamily: 'MaterialIconsRounded');
   static const IconData select_check_box = IconData(0xf1fe, fontFamily: 'MaterialIconsRounded');
   static const IconData view_column = IconData(0xe8ec, fontFamily: 'MaterialIconsRounded');
+  static const IconData book_4 = IconData(0xf53c, fontFamily: 'MaterialIconsRounded');
 }

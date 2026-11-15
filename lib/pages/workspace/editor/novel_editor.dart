@@ -9,6 +9,7 @@ import 'package:quick_write/core/constants/punctuation_symbols.dart';
 import 'package:quick_write/core/models/outline_keyword.dart';
 import 'package:quick_write/core/providers/window_provider.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
+import 'package:quick_write/core/services/cache_services/misc_cache_service.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/services/workspace/custom_highlight_service.dart';
 import 'package:quick_write/core/services/workspace/outline_keyword_service.dart';
@@ -340,6 +341,11 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
 
     // 监听关键词修饰键状态，按住时叠加大纲关键词高亮
     _keywordModifierPressed = _readKeywordModifierPressed();
+    // 移动端恢复上次的常驻关键词高亮开关状态
+    if (PlatformCapabilities.isMobile) {
+      _keywordHighlightPinned = MiscCacheService.instance.isKeywordHighlightEnabled();
+      keywordHighlightNotifier.value = _keywordHighlightPinned;
+    }
     HardwareKeyboard.instance.addHandler(_onHardwareKeyEvent);
     _bindKeywordCallbacks();
 
@@ -553,6 +559,8 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   void toggleKeywordHighlight() {
     _keywordHighlightPinned = !_keywordHighlightPinned;
     keywordHighlightNotifier.value = _keywordHighlightPinned;
+    // 开关状态持久化到缓存，切换章节或重启应用后保持
+    MiscCacheService.instance.saveKeywordHighlightEnabled(_keywordHighlightPinned);
     _applyKeywordHighlightState();
     if (!_keywordHighlightActive) _hideKeywordCard();
   }

@@ -1,12 +1,16 @@
 /// 名字类别
 ///
-/// 随机取名功能按类别区分人名与地名，两类使用不同的词典结构与生成规则。
+/// 随机取名功能按类别区分人名、地名与其他，各类别使用不同的词典结构
+/// 与生成规则；其他类别不提供内置词典，完全由用户自定义组成结构。
 enum NameCategory {
   /// 人名
   person('person', '人名'),
 
   /// 地名
-  place('place', '地名');
+  place('place', '地名'),
+
+  /// 其他（自定义词组池，无内置词典）
+  other('other', '其他');
 
   /// 类别唯一标识（用于持久化）
   final String id;
@@ -26,6 +30,7 @@ enum NameCategory {
 /// 不同类别使用不同的分组，各分组下存放对应的词条列表：
 /// - 人名：姓氏、男性名字用字、女性名字用字
 /// - 地名：主体词、后缀
+/// - 其他：由用户指定数量的若干词组池（词组池 1、词组池 2……）
 class NamePoolKeys {
   /// 人名：姓氏
   static const String surname = 'surname';
@@ -42,18 +47,53 @@ class NamePoolKeys {
   /// 地名：后缀
   static const String suffix = 'suffix';
 
+  /// 其他类别：词组池分组键的前缀
+  static const String partPrefix = 'part';
+
+  /// 其他类别：默认词组池数量
+  static const int defaultPartCount = 2;
+
+  /// 其他类别：词组池数量的下限
+  static const int minPartCount = 2;
+
+  /// 其他类别：词组池数量的上限
+  static const int maxPartCount = 5;
+
+  /// 生成其他类别第 [index] 个词组池的分组键（从 0 开始）
+  static String partKey(int index) => '$partPrefix${index + 1}';
+
+  /// 判断分组键是否为其他类别的词组池键
+  static bool isPartKey(String key) =>
+      RegExp('^$partPrefix\\d+\$').hasMatch(key);
+
+  /// 解析词组池键的序号（从 0 开始）
+  ///
+  /// 仅用于 [isPartKey] 判定为 true 的键。
+  static int partIndexOf(String key) =>
+      int.parse(key.substring(partPrefix.length)) - 1;
+
   /// 获取指定类别的分组键列表（按编辑界面的显示顺序）
-  static List<String> keysOf(NameCategory category) {
+  ///
+  /// [partCount] 为其他类别的词组池数量，其余类别忽略该参数。
+  static List<String> keysOf(
+    NameCategory category, {
+    int partCount = defaultPartCount,
+  }) {
     switch (category) {
       case NameCategory.person:
         return const [surname, male, female];
       case NameCategory.place:
         return const [stem, suffix];
+      case NameCategory.other:
+        return [for (int i = 0; i < partCount; i++) partKey(i)];
     }
   }
 
   /// 获取分组的显示名称
   static String labelOf(NameCategory category, String key) {
+    // 其他类别的词组池按序号显示
+    if (isPartKey(key)) return '词组池 ${partIndexOf(key) + 1}';
+
     switch (key) {
       case surname:
         return '姓氏';
@@ -73,8 +113,9 @@ class NamePoolKeys {
 
 /// 名字词典
 ///
-/// 描述一个可用于生成人名的字库集合。词典可分为内置词典与自定义词典，
-/// 内置词典随应用提供，自定义词典由用户创建。
+/// 描述一个可用于生成名字的字库集合。词典可分为内置词典与自定义词典，
+/// 内置词典随应用提供，自定义词典由用户创建；其他类别没有内置词典，
+/// 其词组池数量与内容均由用户自定义。
 class NameDictionary {
   /// 自定义词典排序序号的起始值
   ///
@@ -193,10 +234,22 @@ class NameDictionary {
   /// 读取指定分组的词条（分组不存在时返回空列表）
   List<String> pool(String key) => pools[key] ?? const [];
 
+  /// 其他类别：按组合顺序排列的词组池分组键
+  List<String> get partKeys {
+    final keys = pools.keys.where(NamePoolKeys.isPartKey).toList()
+      ..sort((a, b) => NamePoolKeys.partIndexOf(a)
+          .compareTo(NamePoolKeys.partIndexOf(b)));
+    return keys;
+  }
+
+  /// 其他类别：词组池数量
+  int get partCount => partKeys.length;
+
   /// 依据类别与词条池推断是否按"逐字"方式生成
   ///
   /// 人名依据男女名字用字池，地名依据主体词池；相关词条全部为单字时
-  /// 按逐字生成。供未显式声明生成方式的词典（如早期自定义词典）使用。
+  /// 按逐字生成。其他类别按词组池整词拼接，不按逐字处理。
+  /// 供未显式声明生成方式的词典（如早期自定义词典）使用。
   static bool inferCharBased(NameCategory category, Map<String, List<String>> pools) {
     switch (category) {
       case NameCategory.person:
@@ -204,6 +257,8 @@ class NameDictionary {
             _isCharPool(pools[NamePoolKeys.female] ?? const []);
       case NameCategory.place:
         return _isCharPool(pools[NamePoolKeys.stem] ?? const []);
+      case NameCategory.other:
+        return false;
     }
   }
 
