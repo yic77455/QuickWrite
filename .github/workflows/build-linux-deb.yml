@@ -1,0 +1,265 @@
+name: Build Linux installer (deb)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  LANG: C.UTF-8
+
+jobs:
+  build:
+    # 固定 24.04：与测试虚拟机一致，保证 glibc 基线不漂移
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev \
+            libayatana-appindicator3-dev libsecret-1-dev \
+            imagemagick desktop-file-utils
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.2'
+          channel: stable
+          cache: true
+
+      - name: Enable Linux desktop
+        run: flutter config --enable-linux-desktop
+
+      - name: Fetch packages
+        run: flutter pub get
+
+      - name: Build release bundle
+        run: flutter build linux --release
+
+      - name: Build .deb package
+        run: |
+          set -euo pipefail
+
+          APP_ID="com.quickwrite.app"
+          PKG_NAME="quickwrite"
+          BIN_NAME="QuickWrite"
+          BUNDLE="build/linux/x64/release/bundle"
+          PKG_ROOT="pkg"
+          APPDIR="${PKG_ROOT}/opt/quickwrite"
+
+          # 版本号统一从 pubspec.yaml 读取，避免 workflow 里写死与代码脱节。
+          FULL_VERSION="$(awk '/^version:/ {print $2; exit}' pubspec.yaml | tr -d '"')"
+          APP_VERSION="${FULL_VERSION%%+*}"
+          BUILD_NUMBER="${FULL_VERSION#*+}"
+          if [ "${BUILD_NUMBER}" = "${FULL_VERSION}" ]; then BUILD_NUMBER=""; fi
+          TODAY="$(date -u +%F)"
+          echo "应用版本 ${APP_VERSION}，构建号 ${BUILD_NUMBER:-无}，打包日期 ${TODAY}"
+
+          if [ ! -x "${BUNDLE}/${BIN_NAME}" ]; then
+            echo "未找到 ${BUNDLE}/${BIN_NAME}，构建产物不完整" >&2
+            exit 1
+          fi
+
+          # ---------- 1. 应用本体 ----------
+          rm -rf "${PKG_ROOT}"
+          mkdir -p "${APPDIR}"
+          cp -a "${BUNDLE}/." "${APPDIR}/"
+
+          # ---------- 2. /usr/bin 启动器 ----------
+          # 用 exec 转发，不留额外进程；相比软链不依赖 /proc/self/exe 的解析方式
+          mkdir -p "${PKG_ROOT}/usr/bin"
+          cat > "${PKG_ROOT}/usr/bin/${PKG_NAME}" <<'LAUNCHER'
+          #!/bin/sh
+          exec /opt/quickwrite/QuickWrite "$@"
+          LAUNCHER
+          chmod 755 "${PKG_ROOT}/usr/bin/${PKG_NAME}"
+
+          # ---------- 3. 菜单项 ----------
+          # runner 里调了 g_set_prgname(APPLICATION_ID)，所以 WM_CLASS 就是 com.quickwrite.app；
+          # StartupWMClass 用同一个值，任务栏 / 程序坞才能正确归组并显示应用图标
+          mkdir -p "${PKG_ROOT}/usr/share/applications"
+          cat > "${PKG_ROOT}/usr/share/applications/${APP_ID}.desktop" <<DESKTOP
+          [Desktop Entry]
+          Type=Application
+          Version=1.0
+          Name=快码字
+          Name[en]=QuickWrite
+          GenericName=小说写作工具
+          GenericName[en]=Novel writing tool
+          Comment=专注小说创作的本地写作工具
+          Comment[en]=A local-first writing tool for novelists
+          Exec=${PKG_NAME}
+          TryExec=${PKG_NAME}
+          Icon=${APP_ID}
+          Terminal=false
+          Categories=Office;WordProcessor;
+          Keywords=writer;novel;editor;写作;小说;编辑器;
+          StartupNotify=true
+          StartupWMClass=${APP_ID}
+          DESKTOP
+
+          # ---------- 4. 图标 ----------
+          ICON_SRC="assets/icon/icon_rounded.png"
+          ICON_ROOT="${PKG_ROOT}/usr/share/icons/hicolor"
+          for size in 16 24 32 48 64 128 256 512; do
+            mkdir -p "${ICON_ROOT}/${size}x${size}/apps"
+            convert "${ICON_SRC}" -resize "${size}x${size}" -strip \
+              "PNG32:${ICON_ROOT}/${size}x${size}/apps/${APP_ID}.png"
+          done
+          echo "图标已生成 8 种尺寸"
+
+          # ---------- 5. AppStream 元数据（软件中心展示用）----------
+          mkdir -p "${PKG_ROOT}/usr/share/metainfo"
+          cat > "${PKG_ROOT}/usr/share/metainfo/${APP_ID}.metainfo.xml" <<METAINFO
+          <?xml version="1.0" encoding="UTF-8"?>
+          <component type="desktop-application">
+            <id>${APP_ID}</id>
+            <metadata_license>CC0-1.0</metadata_license>
+            <project_license>GPL-3.0-only</project_license>
+            <name>快码字</name>
+            <summary>专注小说创作的本地写作工具</summary>
+            <description>
+              <p>快码字是一款一款面向小说、网文、剧本作者开发的文字创作工具，界面干净，功能齐全，只为码字而生。</p>
+            </description>
+            <launchable type="desktop-id">${APP_ID}.desktop</launchable>
+            <url type="homepage">https://github.com/yic77455/QuickWrite</url>
+            <developer id="io.github.yic77455">
+              <name>yic77455</name>
+            </developer>
+            <content_rating type="oars-1.1"/>
+            <releases>
+              <release version="${APP_VERSION}" date="${TODAY}"/>
+            </releases>
+          </component>
+          METAINFO
+
+          # ---------- 6. 文档与许可证 ----------
+          # 项目是 GPL-3.0，分发二进制时必须随包附带许可文本
+          DOC_DIR="${PKG_ROOT}/usr/share/doc/${PKG_NAME}"
+          mkdir -p "${DOC_DIR}"
+          install -m644 LICENSE "${DOC_DIR}/LICENSE"
+          {
+            echo "Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/"
+            echo "Upstream-Name: QuickWrite"
+            echo "Source: https://github.com/yic77455/QuickWrite"
+            echo
+            echo "Files: *"
+            echo "Copyright: 2026 yic77455"
+            echo "License: GPL-3.0-only"
+            echo " 本项目以 GNU General Public License v3.0 发布，完整许可文本见同目录 LICENSE。"
+            echo " On Debian systems, the complete text of the GNU General Public License"
+            echo " version 3 can be found in /usr/share/common-licenses/GPL-3."
+          } > "${DOC_DIR}/copyright"
+
+          # ---------- 7. control ----------
+          # Depends 对应实测过的运行时依赖：GTK3、libsecret（云同步密码）、
+          # libayatana-appindicator3（托盘）、blkid / lzma（Flutter 引擎）
+          INSTALLED_SIZE="$(du -sk --exclude=DEBIAN "${PKG_ROOT}" | cut -f1)"
+          mkdir -p "${PKG_ROOT}/DEBIAN"
+          {
+            echo "Package: ${PKG_NAME}"
+            echo "Version: ${APP_VERSION}"
+            echo "Architecture: amd64"
+            echo "Maintainer: yic77455 <yic77455@users.noreply.github.com>"
+            echo "Installed-Size: ${INSTALLED_SIZE}"
+            echo "Depends: libgtk-3-0t64 | libgtk-3-0, libblkid1, liblzma5, libsecret-1-0, libayatana-appindicator3-1, libstdc++6"
+            echo "Recommends: fonts-noto-cjk, gnome-keyring"
+            echo "Section: editors"
+            echo "Priority: optional"
+            echo "Homepage: https://github.com/yic77455/QuickWrite"
+            echo "Description: 快码字 —— 专注小说创作的本地写作工具"
+            echo " 快码字是一款面向小说创作者的本地写作工具，提供章节管理、大纲"
+            echo " 表格、排版样式与云端同步等功能，正文数据默认保存在本地。"
+            echo " ."
+            echo " 支持 WebDAV 与 S3 兼容存储的多端同步，以及导入自定义字体。"
+          } > "${PKG_ROOT}/DEBIAN/control"
+
+          # ---------- 8. 安装 / 卸载钩子 ----------
+          cat > "${PKG_ROOT}/DEBIAN/postinst" <<'POSTINST'
+          #!/bin/sh
+          set -e
+          if [ "${1:-}" = "configure" ]; then
+            if command -v update-desktop-database >/dev/null 2>&1; then
+              update-desktop-database -q /usr/share/applications || true
+            fi
+            if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+              gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
+            fi
+          fi
+          exit 0
+          POSTINST
+          chmod 755 "${PKG_ROOT}/DEBIAN/postinst"
+
+          cat > "${PKG_ROOT}/DEBIAN/postrm" <<'POSTRM'
+          #!/bin/sh
+          set -e
+          if [ "${1:-}" = "remove" ] || [ "${1:-}" = "purge" ]; then
+            if command -v update-desktop-database >/dev/null 2>&1; then
+              update-desktop-database -q /usr/share/applications || true
+            fi
+            if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+              gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
+            fi
+          fi
+          exit 0
+          POSTRM
+          chmod 755 "${PKG_ROOT}/DEBIAN/postrm"
+
+          # ---------- 9. 打包 ----------
+          DEB_FILE="${PKG_NAME}_${APP_VERSION}_amd64.deb"
+          dpkg-deb --root-owner-group -Zxz --build "${PKG_ROOT}" "${DEB_FILE}"
+
+          echo "=== control ==="
+          dpkg-deb --info "${DEB_FILE}"
+          echo "=== 包内文件 ==="
+          dpkg-deb --contents "${DEB_FILE}"
+          ls -lh "${DEB_FILE}"
+
+      - name: Verify package
+        run: |
+          set -euo pipefail
+          DEB_FILE="$(ls -1 quickwrite_*.deb | head -1)"
+          echo "校验 ${DEB_FILE}"
+
+          # 菜单项格式校验：只提示不阻断，避免格式告警卡住出包
+          desktop-file-validate "pkg/usr/share/applications/com.quickwrite.app.desktop" \
+            || echo "（菜单项校验有提示，见上，不影响安装）"
+
+          sudo apt-get install -y --no-install-recommends "./${DEB_FILE}"
+
+          echo "=== 安装后的关键文件 ==="
+          test -x /usr/bin/quickwrite
+          test -x /opt/quickwrite/QuickWrite
+          test -f /usr/share/applications/com.quickwrite.app.desktop
+          test -f /usr/share/icons/hicolor/256x256/apps/com.quickwrite.app.png
+          echo "关键文件齐全"
+
+          echo "=== 检查动态库缺失 ==="
+          if ldd /opt/quickwrite/QuickWrite | grep "not found"; then
+            echo "存在缺失的动态库依赖，Depends 需要补充" >&2
+            exit 1
+          fi
+          echo "无缺失依赖"
+
+          echo "=== 卸载测试 ==="
+          sudo apt-get remove -y quickwrite
+          if [ -e /opt/quickwrite/QuickWrite ]; then
+            echo "/opt/quickwrite 未被清理干净" >&2
+            exit 1
+          fi
+          echo "卸载干净"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: quick-write-linux-deb
+          path: quickwrite_*.deb
+          if-no-files-found: error
+          retention-days: 30
