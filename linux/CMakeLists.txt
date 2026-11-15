@@ -4,10 +4,13 @@ project(runner LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
-set(BINARY_NAME "quick_write")
+set(BINARY_NAME "QuickWrite")
 # The unique GTK application identifier for this application. See:
 # https://wiki.gnome.org/HowDoI/ChooseApplicationID
-set(APPLICATION_ID "com.example.quick_write")
+# 与 Android applicationId、macOS PRODUCT_BUNDLE_IDENTIFIER 保持一致。
+# 注意：flutter_secure_storage_linux 会把该值编译进 libsecret 密钥环标签，
+# 一旦发布就不能再修改，否则用户已保存的云同步密码会读取不到。
+set(APPLICATION_ID "com.quickwrite.app")
 
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.

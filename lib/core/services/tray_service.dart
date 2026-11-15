@@ -32,6 +32,12 @@ class TrayService with TrayListener {
   /// macOS 图标只支持位图，且需要透明背景以便系统按模板图取色
   static const String _macOSIconPath = 'assets/icon/tray_macos.png';
 
+  /// Linux 托盘图标资源路径
+  ///
+  /// AppIndicator 只接受 PNG/SVG，不能传 ICO；使用彩色图标以同时
+  /// 适配 GNOME 深色顶栏与浅色主题
+  static const String _linuxIconPath = 'assets/icon/tray_linux.png';
+
   /// 右键菜单项：[显示主窗口]
   static const String _menuKeyShowWindow = 'show_main_window';
 
@@ -103,12 +109,26 @@ class TrayService with TrayListener {
     if (_iconVisible) return;
     _iconVisible = true;
 
+    // Windows 用 ICO、macOS 用模板 PNG；Linux 的 AppIndicator 只接受
+    // PNG/SVG，需要单独指定彩色图标。Windows 取值保持原样不变。
+    String iconPath = _windowsIconPath;
+    if (PlatformCapabilities.isMacOS) {
+      iconPath = _macOSIconPath;
+    } else if (PlatformCapabilities.isLinux) {
+      iconPath = _linuxIconPath;
+    }
     await trayManager.setIcon(
-      PlatformCapabilities.isMacOS ? _macOSIconPath : _windowsIconPath,
+      iconPath,
       // macOS 使用模板图，由系统根据菜单栏明暗自动着色
       isTemplate: PlatformCapabilities.isMacOS,
     );
-    await trayManager.setToolTip(GlobalConstants.appTitle);
+    // Linux 的 AppIndicator 原生层未实现 setToolTip（其 setTitle 实际是
+    // app_indicator_set_label，会在顶栏显示文字而非悬停提示）。
+    // 该方法返回 not_implemented 会抛异常，而托盘初始化位于 main() 的裸
+    // await 链路上，会直接阻断启动，因此 Linux 跳过。
+    if (!PlatformCapabilities.isLinux) {
+      await trayManager.setToolTip(GlobalConstants.appTitle);
+    }
     await trayManager.setContextMenu(
       Menu(
         items: [
@@ -145,6 +165,9 @@ class TrayService with TrayListener {
 
   @override
   void onTrayIconRightMouseDown() {
+    // Linux 由 AppIndicator 自行展示 setContextMenu 注册的菜单，
+    // 原生层未实现 popUpContextMenu，调用只会得到 not_implemented。
+    if (PlatformCapabilities.isLinux) return;
     // 托盘右键不会自动弹出菜单，需要手动弹出
     trayManager.popUpContextMenu();
   }
