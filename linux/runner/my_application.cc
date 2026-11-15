@@ -3,6 +3,7 @@
 #include <flutter_linux/flutter_linux.h>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "desktop_multi_window/desktop_multi_window_plugin.h"
 
 struct _MyApplication {
   GtkApplication parent_instance;
@@ -59,6 +60,13 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
+
+  // desktop_multi_window 创建子窗口时会新建一个 FlView / Flutter engine，
+  // 但它只替子窗口注册自己的通信插件，其余插件需要 runner 通过此回调补上。
+  // 缺少这一步时，子窗口在 main() 里调用 path_provider / window_manager 等
+  // 插件会失败，工作台永远发不出「就绪」通知，主窗口的加载弹窗会一直转圈。
+  desktop_multi_window_plugin_set_window_created_callback(
+      [](FlPluginRegistry* registry) { fl_register_plugins(registry); });
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }

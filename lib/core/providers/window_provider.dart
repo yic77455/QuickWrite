@@ -236,20 +236,36 @@ class WindowProvider extends ChangeNotifier with WindowListener {
   // 窗口调整大小后的回调，用户调整窗口大小时触发
   @override
   void onWindowResized() {
-    // 最大化或全屏状态下窗口尺寸不是用户设定的尺寸，不保存
-    if (_isMaximized || _isFullScreen) {
-      return;
-    }
-    _debounceSave();
+    _saveWindowStateOnChange();
   }
 
   // 窗口移动后的回调，用户移动窗口时触发
   @override
   void onWindowMoved() {
-    // 最大化或全屏状态下窗口位置不是用户设定的位置，不保存
-    if (_isMaximized || _isFullScreen) {
-      return;
-    }
+    _saveWindowStateOnChange();
+  }
+
+  // Linux 的 window_manager 只发出 resize / move（进行中）事件，不会发出
+  // onWindowResized / onWindowMoved 对应的 resized / moved（插件把后两者
+  // 标注为仅 macOS / Windows 支持）。只监听「已完成」事件时，Linux 上拖动
+  // 或缩放窗口后缓存永远不会被更新，窗口大小与位置看起来就没有被记住。
+  // 这里补上 Linux 分支，Windows / Android 行为保持不变。
+  @override
+  void onWindowResize() {
+    if (!PlatformCapabilities.isLinux) return;
+    _saveWindowStateOnChange();
+  }
+
+  @override
+  void onWindowMove() {
+    if (!PlatformCapabilities.isLinux) return;
+    _saveWindowStateOnChange();
+  }
+
+  // 窗口尺寸或位置变化后安排一次防抖保存
+  void _saveWindowStateOnChange() {
+    // 最大化或全屏状态下窗口尺寸与位置不是用户设定的值，不保存
+    if (_isMaximized || _isFullScreen) return;
     _debounceSave();
   }
 
