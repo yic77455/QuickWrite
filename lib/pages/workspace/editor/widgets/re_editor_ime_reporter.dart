@@ -5,9 +5,10 @@ import 'package:re_editor/re_editor.dart';
 
 /// re_editor 输入法光标上报器
 ///
-/// Windows 端候选框坐标由原生层劫持 IME 消息后覆盖（见 `windows/runner/flutter_window.cpp`），
-/// 该机制与编辑器实现无关，因此这里只需按 re_editor 的光标模型算出光标/组合区域矩形，
-/// 再通过 [ImeCursorFixer] 上报相同的通道数据。
+/// 按 re_editor 的光标模型算出光标/组合区域矩形，再通过 [ImeCursorFixer] 上报：
+/// Windows 端由原生层劫持 IME 消息覆盖坐标（见 `windows/runner/flutter_window.cpp`），
+/// Linux 端则由引擎依据 `TextInput.setMarkedTextRect` 与编辑区变换定位候选框。
+/// 两者都需要这里持续回填光标矩形；Windows 专用的原生通道在 Linux 会被跳过。
 ///
 /// 光标几何直接取自 re_editor 渲染对象提供的坐标换算结果，避免重复实现文本排版。
 /// 取值失败时跳过本次上报，由原生层沿用上一次坐标。
@@ -54,7 +55,7 @@ class ReEditorImeReporterState extends State<ReEditorImeReporter> with WidgetsBi
   /// 编辑器在布局阶段修正滚动位置后调用，使引擎在当帧内就拿到滚动后的坐标，
   /// 不必等到下一帧才纠正输入法窗口，避免候选框先出现在滚动前的位置再跳回。
   void reportNow() {
-    if (!PlatformCapabilities.needsImeCursorFix) return;
+    if (!PlatformCapabilities.needsImeEngineRectSync) return;
     if (!widget.focusNode.hasFocus) return;
     if (!_tryReportNow()) _scheduleReport();
   }
@@ -108,7 +109,7 @@ class ReEditorImeReporterState extends State<ReEditorImeReporter> with WidgetsBi
   /// 此时同步上报可确保引擎在用户下一次按键之前就拿到新位置，
   /// 避免首次输入时候选框仍按旧光标显示。
   void _onControllerChanged() {
-    if (!PlatformCapabilities.needsImeCursorFix) return;
+    if (!PlatformCapabilities.needsImeEngineRectSync) return;
     _tryReportNow();
     // 文本变化会改变排版与滚动，帧后再核对一次最终位置
     _scheduleReport();
@@ -117,7 +118,7 @@ class ReEditorImeReporterState extends State<ReEditorImeReporter> with WidgetsBi
   /// 等当前帧布局完成后再读取光标坐标
   void _scheduleReport() {
     // 当前平台不需要修正输入法候选框时，跳过整个上报流程
-    if (!PlatformCapabilities.needsImeCursorFix) return;
+    if (!PlatformCapabilities.needsImeEngineRectSync) return;
     // 锚点只对持有焦点的输入框有意义，失焦后不再安排帧末上报
     if (!widget.focusNode.hasFocus) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -132,7 +133,7 @@ class ReEditorImeReporterState extends State<ReEditorImeReporter> with WidgetsBi
   /// 目的是在用户按下第一个 IME 键触发合成开始之前，原生层已缓存正确的光标坐标。
   void _onFocusChanged() {
     // 当前平台不需要修正输入法候选框时，跳过整个上报流程
-    if (!PlatformCapabilities.needsImeCursorFix) return;
+    if (!PlatformCapabilities.needsImeEngineRectSync) return;
     if (!widget.focusNode.hasFocus) return;
     if (!_tryReportNow()) {
       // 组件刚构建尚未完成布局时读取失败，等下一帧重试

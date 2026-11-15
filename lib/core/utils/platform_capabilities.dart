@@ -84,4 +84,13 @@ class PlatformCapabilities {
   ///
   /// 仅 Flutter Windows 端存在候选框不跟随光标的缺陷，需要原生层介入修正
   static bool get needsImeCursorFix => isWindows;
+
+  /// 是否需要主动向引擎回填光标矩形与编辑区变换
+  ///
+  /// Windows 端由原生层劫持 IME 消息覆盖坐标，同时也回填引擎缓存；
+  /// Linux 端引擎仅依据 `TextInput.setMarkedTextRect` 与
+  /// `TextInput.setEditableSizeAndTransform` 定位候选框，而正文编辑器
+  /// 不会在无组字时持续上报这两项，需要由 ReEditorImeReporter 主动回填。
+  /// 注意：不含 Android / macOS，移动端与 macOS 行为保持不变。
+  static bool get needsImeEngineRectSync => isWindows || isLinux;
 }

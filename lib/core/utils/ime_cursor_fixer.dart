@@ -19,8 +19,13 @@ class ImeCursorFixer {
   /// 与 C++ 侧通信的通道
   static const MethodChannel _channel = MethodChannel('ime_cursor_channel');
 
-  /// 仅在需要修正输入法候选框位置的平台启用
+  /// Windows 原生通道（ime_cursor_channel）仅在 Windows 端注册，
+  /// Linux runner 没有该通道，向其发消息只会得到 MissingPluginException。
   static bool get _enabled => PlatformCapabilities.needsImeCursorFix;
+
+  /// 引擎光标矩形回填：Windows 与 Linux 都需要，只走 SystemChannels.textInput
+  static bool get _engineRectSyncEnabled =>
+      PlatformCapabilities.needsImeEngineRectSync;
 
   /// 上报输入法跟随区域到 C++ 侧缓存
   ///
@@ -55,7 +60,7 @@ class ImeCursorFixer {
     required Size size,
     required List<double> transform,
   }) async {
-    if (!_enabled) return;
+    if (!_engineRectSyncEnabled) return;
     try {
       await SystemChannels.textInput.invokeMethod<void>('TextInput.setEditableSizeAndTransform', {
         'width': size.width,
@@ -75,7 +80,7 @@ class ImeCursorFixer {
   ///
   /// [localRect] 光标在渲染层局部坐标系下的矩形，与框架上报组合区域时使用的坐标系一致。
   static Future<void> reportCaretRectToEngine(Rect localRect) async {
-    if (!_enabled || !localRect.isFinite) return;
+    if (!_engineRectSyncEnabled || !localRect.isFinite) return;
     try {
       await SystemChannels.textInput.invokeMethod<void>('TextInput.setMarkedTextRect', {
         'x': localRect.left,

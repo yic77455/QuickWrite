@@ -22,6 +22,14 @@ static void my_application_activate(GApplication* application) {
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
 
+  // 无边框透明窗口需要 RGBA visual，否则 FlView 的 #00000000 在部分
+  // 合成器下不生效，裁出的圆角外会露出黑色底。必须在 realize 之前设置。
+  GdkVisual* rgba_visual =
+      gdk_screen_get_rgba_visual(gtk_widget_get_screen(GTK_WIDGET(window)));
+  if (rgba_visual != nullptr) {
+    gtk_widget_set_visual(GTK_WIDGET(window), rgba_visual);
+  }
+
   // 应用使用自绘标题栏（WindowService 的 TitleBarStyle.hidden），
   // 与 Windows 端保持一致，因此不创建 GTK header bar，避免两套标题栏叠加。
   // Dart 层会通过 window_manager 把标题设为「快码字」，这里仅作为

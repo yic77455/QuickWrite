@@ -39,6 +39,23 @@ Widget _wrapWithAppFontScale(BuildContext context, Widget? child, double scale) 
   );
 }
 
+/// Linux 端为无边框透明窗口补上圆角
+///
+/// Windows 11 由 DWM 自动给顶层窗口加圆角，Linux 合成器不会，
+/// 透明无边框窗口会直接显示成方角。这里仅在 Linux 给整个界面裁一层圆角，
+/// 最大化时取消，避免四角露出桌面背景。
+Widget _wrapWithLinuxWindowCorners(BuildContext context, Widget? child) {
+  if (!PlatformCapabilities.isLinux) {
+    return child ?? const SizedBox.shrink();
+  }
+  final bool maximized =
+      context.select<WindowProvider, bool>((provider) => provider.isMaximized);
+  return ClipRRect(
+    borderRadius: maximized ? BorderRadius.zero : BorderRadius.circular(10),
+    child: child,
+  );
+}
+
 /// 为应用界面绑定 macOS 惯用的窗口快捷键
 ///
 /// Command+W 关闭当前窗口时转交窗口关闭流程，
@@ -117,7 +134,10 @@ class MyWriterApp extends StatelessWidget {
             // 应用界面字号缩放：包裹整个界面，使界面文字按设定倍数显示
             builder: (context, child) => _wrapWithWindowShortcuts(
               context,
-              _wrapWithAppFontScale(context, child, themeProvider.appFontScale),
+              _wrapWithLinuxWindowCorners(
+                context,
+                _wrapWithAppFontScale(context, child, themeProvider.appFontScale),
+              ),
             ),
           );
         },
@@ -244,7 +264,10 @@ class _WorkspaceAppState extends State<WorkspaceApp> {
             // 应用界面字号缩放：包裹整个界面，使界面文字按设定倍数显示
             builder: (context, child) => _wrapWithWindowShortcuts(
               context,
-              _wrapWithAppFontScale(context, child, themeProvider.appFontScale),
+              _wrapWithLinuxWindowCorners(
+                context,
+                _wrapWithAppFontScale(context, child, themeProvider.appFontScale),
+              ),
             ),
           );
         },
