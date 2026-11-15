@@ -167,6 +167,15 @@ class SyncConfigStore {
       }
     }
 
+    // 只有在确实保存过连接配置时才访问系统密钥环。
+    //
+    // Linux 上密钥由 gnome-keyring 保管，登录密钥环未解锁时（例如开启了自动登录，
+    // PAM 拿不到密码就无法解锁），任何读取都会弹出「需要认证」的系统对话框。
+    // 没用过云同步的用户不该被要求输入系统密码，否则会误以为应用在越权取密钥。
+    if (serverUrl.isEmpty && s3Bucket.isEmpty) {
+      return;
+    }
+
     // 读取密钥
     try {
       _password = await _secureStorage.read(key: _passwordKey) ?? '';
