@@ -1,0 +1,58 @@
+name: Build Linux release
+
+# 仅手动触发：在 Actions 页面点 Run workflow 出包，避免每次 push 都跑完整构建
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  LANG: C.UTF-8
+
+jobs:
+  build:
+    # 显式固定 24.04：测试虚拟机也是 24.04，避免 ubuntu-latest 漂移后 glibc 基线变高
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev \
+            libayatana-appindicator3-dev libsecret-1-dev
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.2'
+          channel: stable
+          cache: true
+
+      - name: Enable Linux desktop
+        run: flutter config --enable-linux-desktop
+
+      - name: Fetch packages
+        run: flutter pub get
+
+      - name: Build release bundle
+        run: flutter build linux --release
+
+      - name: Package bundle
+        run: |
+          cd build/linux/x64/release/bundle
+          tar -czf "$GITHUB_WORKSPACE/quick-write-linux-x64.tar.gz" .
+          ls -lh "$GITHUB_WORKSPACE/quick-write-linux-x64.tar.gz"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: quick-write-linux-x64
+          path: quick-write-linux-x64.tar.gz
+          if-no-files-found: error
+          retention-days: 30
