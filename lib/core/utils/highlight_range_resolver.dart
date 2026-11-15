@@ -1,4 +1,5 @@
 import 'package:flutter/widgets.dart';
+import 'package:quick_write/core/utils/custom_highlight_regex.dart';
 
 /// 带颜色与优先级的高亮范围
 ///
@@ -112,6 +113,24 @@ class HighlightRangeResolver {
       if (index == -1) break;
       ranges.add(HighlightRange(index, index + keyword.length, color, priority));
       searchStart = index + keyword.length;
+    }
+    return ranges;
+  }
+
+  /// 解析单个正则表达式在文本中的所有命中范围
+  ///
+  /// 字面量模式仍走 [parseKeywordRanges]，此处只处理已经编译成功的表达式；
+  /// 编译失败（非法正则）由调用方跳过，不产生任何范围。命中区间由
+  /// CustomHighlightRegex 计算，含捕获组时只着色第 1 组。
+  static List<HighlightRange> parseRegexRanges(
+    String text,
+    RegExp regex,
+    Color color, {
+    int priority = customKeywordPriority,
+  }) {
+    final List<HighlightRange> ranges = [];
+    for (final match in CustomHighlightRegex.findMatches(text, regex)) {
+      ranges.add(HighlightRange(match.start, match.end, color, priority));
     }
     return ranges;
   }

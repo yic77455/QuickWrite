@@ -211,6 +211,8 @@ class FormatButton extends StatelessWidget {
 /// 支持两种模式：
 /// - 非受控模式（默认）：通过 [initialValue] 设置初始状态，内部管理切换
 /// - 受控模式：传入 [isSelected]（非 null），由外部控制选中状态
+///
+/// 选中状态只改变图标颜色，不绘制常驻背景，适合嵌入输入框等紧凑区域。
 class ToggleToolButton extends StatefulWidget {
   /// 按钮图标
   final IconData icon;
@@ -236,6 +238,15 @@ class ToggleToolButton extends StatefulWidget {
   /// 点击时仅通过 [onChanged] 通知外部，不自动切换。
   final bool? isSelected;
 
+  /// 选中状态的图标颜色，默认使用主题主色
+  final Color? selectedColor;
+
+  /// 未选中状态的图标颜色，默认使用主题的 [ColorScheme.onSurfaceVariant]
+  final Color? unselectedColor;
+
+  /// 点击与悬停背景是否为圆形，默认使用圆角矩形
+  final bool circular;
+
   const ToggleToolButton({
     super.key,
     required this.icon,
@@ -245,6 +256,9 @@ class ToggleToolButton extends StatefulWidget {
     this.iconSize = 18,
     this.size = 32,
     this.isSelected,
+    this.selectedColor,
+    this.unselectedColor,
+    this.circular = false,
   });
 
   @override
@@ -287,6 +301,9 @@ class _ToggleToolButtonState extends State<ToggleToolButton> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final selected = _currentSelected;
+    // 圆形模式下背景直径为按钮边长，圆角矩形保持 6 的圆角
+    final borderRadius =
+        BorderRadius.circular(widget.circular ? widget.size / 2 : 6);
 
     return CursorTooltipTarget(
       tooltipContent: Text(widget.tooltip),
@@ -294,19 +311,21 @@ class _ToggleToolButtonState extends State<ToggleToolButton> {
         color: Colors.transparent,
         child: InkWell(
           onTap: _handleTap,
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: borderRadius,
           child: Container(
             width: widget.size,
             height: widget.size,
             decoration: BoxDecoration(
-              // color: _isSelected ? colorScheme.primary.withValues(alpha: 0.12) : Colors.transparent,
               color: Colors.transparent,
-              borderRadius: BorderRadius.circular(6),
+              borderRadius: borderRadius,
             ),
             child: Icon(
               widget.icon,
               size: widget.iconSize,
-              color: selected ? colorScheme.primary : colorScheme.onSurfaceVariant,
+              // 仅通过图标颜色区分状态，不绘制常驻背景
+              color: selected
+                  ? (widget.selectedColor ?? colorScheme.primary)
+                  : (widget.unselectedColor ?? colorScheme.onSurfaceVariant),
             ),
           ),
         ),

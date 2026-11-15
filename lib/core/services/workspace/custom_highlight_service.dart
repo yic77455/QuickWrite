@@ -3,9 +3,22 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:quick_write/core/models/custom_highlight.dart';
 import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
+import 'package:quick_write/core/utils/custom_highlight_regex.dart';
 
 /// 自定义高亮配置文件名（保存在书籍根目录下）
 const String kCustomHighlightFileName = 'custom_highlights.json';
+
+/// 自定义高亮项增删改的结果
+enum CustomHighlightMutationResult {
+  /// 已写入配置文件并通知编辑器刷新
+  ok,
+
+  /// 按原有规则静默忽略（空内容、重名、索引越界、模式无变化）
+  skipped,
+
+  /// 正则表达式语法非法，配置保持原值不变
+  invalidRegex,
+}
 
 /// 自定义高亮服务
 ///
@@ -89,16 +102,32 @@ class CustomHighlightService extends ChangeNotifier {
   ///
   /// [keyword] 不能为空字符串，否则跳过。
   /// 同名关键词不重复添加（保持配置整洁，避免重复扫描浪费性能）。
-  Future<void> addItem(String keyword, String colorHex) async {
+  /// [isRegex] 为 true 时先校验表达式语法，非法则不写入配置，
+  /// 字面量模式（默认）的行为与旧版本完全一致。
+  Future<CustomHighlightMutationResult> addItem(
+    String keyword,
+    String colorHex, {
+    bool isRegex = false,
+  }) async {
     final trimmed = keyword.trim();
-    if (trimmed.isEmpty) return;
-    if (_config.items.any((e) => e.keyword == trimmed)) return;
+    if (trimmed.isEmpty) return CustomHighlightMutationResult.skipped;
+    if (_config.items.any((e) => e.keyword == trimmed)) {
+      return CustomHighlightMutationResult.skipped;
+    }
+    if (isRegex && !CustomHighlightRegex.isValid(trimmed)) {
+      return CustomHighlightMutationResult.invalidRegex;
+    }
 
     final newItems = List<CustomHighlightItem>.from(_config.items)
-      ..add(CustomHighlightItem(keyword: trimmed, colorHex: colorHex));
+      ..add(CustomHighlightItem(
+        keyword: trimmed,
+        colorHex: colorHex,
+        isRegex: isRegex,
+      ));
     _config = _config.copyWith(items: newItems);
     await _save();
     notifyListeners();
+    return CustomHighlightMutationResult.ok;
   }
 
   /// 修改指定索引处高亮项的颜色
@@ -111,20 +140,57 @@ class CustomHighlightService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 修改指定索引处高亮项的关键词
-  Future<void> updateItemKeyword(int index, String keyword) async {
+  /// 修改指定索引处高亮项的关键词（或正则表达式）
+  ///
+  /// 正则项会按该项当前模式校验新表达式，非法时保留原值。
+  Future<CustomHighlightMutationResult> updateItemKeyword(
+    int index,
+    String keyword,
+  ) async {
     final trimmed = keyword.trim();
-    if (index < 0 || index >= _config.items.length) return;
-    if (trimmed.isEmpty) return;
+    if (index < 0 || index >= _config.items.length) {
+      return CustomHighlightMutationResult.skipped;
+    }
+    if (trimmed.isEmpty) return CustomHighlightMutationResult.skipped;
     // 与其他项重名时跳过（保留原值）
     for (int i = 0; i < _config.items.length; i++) {
-      if (i != index && _config.items[i].keyword == trimmed) return;
+      if (i != index && _config.items[i].keyword == trimmed) {
+        return CustomHighlightMutationResult.skipped;
+      }
+    }
+    if (_config.items[index].isRegex && !CustomHighlightRegex.isValid(trimmed)) {
+      return CustomHighlightMutationResult.invalidRegex;
     }
     final newItems = List<CustomHighlightItem>.from(_config.items);
     newItems[index] = newItems[index].copyWith(keyword: trimmed);
     _config = _config.copyWith(items: newItems);
     await _save();
     notifyListeners();
+    return CustomHighlightMutationResult.ok;
+  }
+
+  /// 切换指定索引处高亮项的匹配模式（字面量 / 正则）
+  ///
+  /// 从字面量切到正则时，若现有关键词本身不是合法表达式则拒绝切换，
+  /// 避免把坏配置写入文件；云端同步来的坏配置仍由渲染层跳过兜底。
+  Future<CustomHighlightMutationResult> updateItemRegex(
+    int index,
+    bool isRegex,
+  ) async {
+    if (index < 0 || index >= _config.items.length) {
+      return CustomHighlightMutationResult.skipped;
+    }
+    final CustomHighlightItem current = _config.items[index];
+    if (current.isRegex == isRegex) return CustomHighlightMutationResult.skipped;
+    if (isRegex && !CustomHighlightRegex.isValid(current.keyword)) {
+      return CustomHighlightMutationResult.invalidRegex;
+    }
+    final newItems = List<CustomHighlightItem>.from(_config.items);
+    newItems[index] = current.copyWith(isRegex: isRegex);
+    _config = _config.copyWith(items: newItems);
+    await _save();
+    notifyListeners();
+    return CustomHighlightMutationResult.ok;
   }
 
   /// 删除指定索引处的高亮项
@@ -137,6 +203,9 @@ class CustomHighlightService extends ChangeNotifier {
   }
 
   /// 批量替换全部高亮项（用于对话框一次性提交修改）
+  ///
+  /// 每项的模式随 [CustomHighlightItem] 一起保留并序列化；若外部传入了
+  /// 非法正则项，渲染层会跳过该项，不会抛出异常。
   Future<void> replaceAll(List<CustomHighlightItem> newItems) async {
     // 去重并过滤空关键词，保留首次出现的同名项
     final seen = <String>{};

@@ -4,6 +4,7 @@ import 'package:quick_write/core/services/workspace/custom_highlight_service.dar
 import 'package:quick_write/core/services/workspace/outline_keyword_service.dart';
 import 'package:quick_write/core/models/outline_keyword.dart';
 import 'package:quick_write/core/utils/color_utils.dart';
+import 'package:quick_write/core/utils/custom_highlight_regex.dart';
 import 'package:quick_write/core/utils/find_match_highlighter.dart';
 import 'package:quick_write/core/utils/highlight_range_resolver.dart';
 import 'package:re_editor/re_editor.dart';
@@ -62,12 +63,19 @@ class ReEditorSpanBuilder {
   /// 缓存：每一行在全文中的起始偏移量
   List<int> _lineStarts = const [];
 
+  /// 缓存：自定义高亮正则表达式的编译结果（key 为表达式原文，null 表示非法）
+  ///
+  /// 正文每输入一个字都会重新解析范围，但配置通常不变，编译结果可复用；
+  /// 配置指纹变化时清空，避免旧表达式长期驻留。
+  final Map<String, RegExp?> _regexCache = <String, RegExp?>{};
+
   /// 根据当前文本与高亮配置刷新缓存
   ///
   /// 文本与配置均未变化时直接复用缓存，避免逐帧重复解析。
   void update({required BuildContext context, required String text}) {
     final String signature = _configSignatureOf();
     if (text == _text && signature == _configSignature) return;
+    if (signature != _configSignature) _regexCache.clear();
     _text = text;
     _configSignature = signature;
     _lineStarts = HighlightRangeResolver.lineStarts(text);
@@ -196,15 +204,19 @@ class ReEditorSpanBuilder {
       ));
     }
 
-    // 自定义关键词高亮
+    // 自定义高亮：字面量沿用原逐字匹配，正则模式另行编译并解析
     final CustomHighlightService? service = customHighlightService;
     if (service != null && service.enabled) {
       for (final item in service.items) {
-        ranges.addAll(HighlightRangeResolver.parseKeywordRanges(
-          text,
-          item.keyword,
-          ColorUtils.parseHex(item.colorHex),
-        ));
+        final Color color = ColorUtils.parseHex(item.colorHex);
+        if (item.isRegex) {
+          // 非法正则（本地配置损坏或云端同步而来）直接跳过，不参与着色
+          final RegExp? regex = _regexFor(item.keyword);
+          if (regex == null) continue;
+          ranges.addAll(HighlightRangeResolver.parseRegexRanges(text, regex, color));
+        } else {
+          ranges.addAll(HighlightRangeResolver.parseKeywordRanges(text, item.keyword, color));
+        }
       }
     }
 
@@ -287,6 +299,14 @@ class ReEditorSpanBuilder {
     return result;
   }
 
+  /// 取（带缓存的）正则编译结果，非法表达式返回 null
+  RegExp? _regexFor(String pattern) {
+    if (_regexCache.containsKey(pattern)) return _regexCache[pattern];
+    final RegExp? regex = CustomHighlightRegex.tryCompile(pattern);
+    _regexCache[pattern] = regex;
+    return regex;
+  }
+
   /// 生成高亮配置指纹，用于判断是否需要重新解析
   String _configSignatureOf() {
     final SettingsService settings = SettingsService.instance;
@@ -314,7 +334,10 @@ class ReEditorSpanBuilder {
           ..write('|')
           ..write(item.keyword)
           ..write(':')
-          ..write(item.colorHex);
+          ..write(item.colorHex)
+          // 模式切换必须触发重新解析（缓存的编译结果也会随之清空）
+          ..write(':')
+          ..write(item.isRegex ? 'R' : 'L');
       }
     }
     return buffer.toString();

@@ -568,6 +568,9 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 设置变化时刷新样式并重绘
   void _onSettingsChanged() {
     if (!mounted) return;
+    // 自定义高亮（含字面量 / 正则模式切换）、大纲关键词等配置变化后，
+    // 解析缓存必须按新配置重算，否则正文要等到下一次输入才会按新配置着色
+    widget.spanBuilder?.update(context: context, text: widget.controller.text);
     // 标题字号、标题显隐等设置会改变标题区域高度，需要重新测量
     if (widget.chapterTitleController != null && SettingsService.instance.showChapterTitle) {
       _scheduleTitleAreaMeasure();

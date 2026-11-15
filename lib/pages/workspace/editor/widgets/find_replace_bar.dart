@@ -199,10 +199,11 @@ class FindReplaceBarState extends State<FindReplaceBar> {
     widget.onShowReplaceChanged?.call(_showReplace);
   }
 
-  /// 切换大小写敏感
-  void _toggleCaseSensitive() {
+  /// 设置大小写敏感状态
+  void _setCaseSensitive(bool value) {
+    if (_caseSensitive == value) return;
     setState(() {
-      _caseSensitive = !_caseSensitive;
+      _caseSensitive = value;
     });
     widget.onCaseSensitiveChanged?.call(_caseSensitive);
     // 移动端没有悬停提示，以浮动提示反馈切换结果
@@ -444,24 +445,20 @@ class FindReplaceBarState extends State<FindReplaceBar> {
   }
 
   /// 构建文本框内嵌的大小写敏感按钮
+  ///
+  /// 仅通过图标颜色区分开关状态，不显示常驻背景。
   Widget _buildCaseSensitiveButton(ColorScheme colorScheme) {
     return Padding(
       padding: const EdgeInsets.only(right: 4),
-      child: SizedBox(
-        width: 24,
-        height: 24,
-        child: IconButton(
-          tooltip: '区分大小写',
-          onPressed: _toggleCaseSensitive,
-          icon: Icon(Icons.text_fields_rounded, size: 14),
-          padding: EdgeInsets.zero,
-          color: _caseSensitive ? colorScheme.primary : colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
-          style: IconButton.styleFrom(
-            backgroundColor: _caseSensitive ? colorScheme.primary.withValues(alpha: 0.12) : Colors.transparent,
-          ),
-          hoverColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.08),
-          highlightColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.12),
-        ),
+      child: ToggleToolButton(
+        icon: Icons.text_fields_rounded,
+        tooltip: '区分大小写',
+        isSelected: _caseSensitive,
+        size: 24,
+        iconSize: 14,
+        unselectedColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+        circular: true,
+        onChanged: _setCaseSensitive,
       ),
     );
   }

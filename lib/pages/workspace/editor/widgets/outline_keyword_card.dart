@@ -59,9 +59,7 @@ class OutlineKeywordCard extends StatefulWidget {
     return CursorTooltipTarget(
       tooltipContent: const Text('功能说明'),
       // 按钮整体上移，使图标与标题文字视觉居中对齐
-      child: Transform.translate(
-        offset: const Offset(0, -1),
-        child: IconButton(
+      child: IconButton(
           onPressed: () => _showHelp(context),
           icon: const Icon(Icons.help_outline_rounded, size: 16),
           padding: EdgeInsets.zero,
@@ -69,7 +67,6 @@ class OutlineKeywordCard extends StatefulWidget {
           visualDensity: VisualDensity.compact,
           color: Theme.of(context).colorScheme.onSurfaceVariant,
         ),
-      ),
     );
   }
 
