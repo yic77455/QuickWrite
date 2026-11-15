@@ -13,7 +13,8 @@ import 'package:re_editor/re_editor.dart';
 /// 移动端快捷输入栏
 ///
 /// 软键盘弹出时贴在键盘上方，提供常用标点符号的快捷输入；
-/// 右端提供两个可自定义的快捷操作按钮，默认分别为关键词高亮开关与其他设置入口。
+/// 右端提供两个可自定义的快捷操作按钮（可设为「无」隐藏），
+/// 默认分别为关键词高亮开关与其他设置入口。
 class MobileQuickInputBar extends StatefulWidget {
   const MobileQuickInputBar({super.key});
 
@@ -167,15 +168,24 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
     showMobileNameGeneratorDialog(context: context);
   }
 
-  /// 构建右侧操作区的两个图标按钮
+  /// 右侧操作区实际需要渲染的动作
   ///
-  /// 图标种类与左右顺序均取自设置：先渲染左侧图标，再渲染右侧图标
-  List<Widget> _buildRightActions(NovelEditorState editorState) {
+  /// 「无」不占位、不渲染。标点按键列表是 Expanded，剩余按钮始终贴着整栏右端，
+  /// 因此图标一有值而图标二为「无」时，图标一会自然落到原本图标二的位置，
+  /// 不需要改动配置值，也不需要在设置面板中禁止这种组合。
+  List<QuickInputAction> _visibleActions() {
     final settings = SettingsService.instance;
     return [
-      _buildActionButton(editorState, settings.quickInputBarLeftAction),
-      _buildActionButton(editorState, settings.quickInputBarRightAction),
-    ];
+      settings.quickInputBarLeftAction,
+      settings.quickInputBarRightAction,
+    ].where((action) => !action.isNone).toList(growable: false);
+  }
+
+  /// 按设置的左右顺序构建右侧操作区图标按钮
+  List<Widget> _buildRightActions(NovelEditorState editorState, List<QuickInputAction> actions) {
+    return actions
+        .map((action) => _buildActionButton(editorState, action))
+        .toList(growable: false);
   }
 
   /// 构建单个操作图标按钮
@@ -183,13 +193,19 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
   /// 关键词高亮开关需要跟随编辑器状态显示选中态，故单独处理；
   /// 当前正文未绑定关键词时不显示该按钮，避免出现无效入口。
   Widget _buildActionButton(NovelEditorState editorState, QuickInputAction action) {
+    // 「无」没有图标，直接返回空占位；正常渲染流程已在 _visibleActions 中过滤
+    final IconData? icon = action.icon;
+    if (icon == null) return const SizedBox.shrink();
     switch (action) {
+      case QuickInputAction.none:
+        // 仅用于穷举枚举：none 的 icon 为 null，上方已返回
+        return const SizedBox.shrink();
       case QuickInputAction.keywordToggle:
         if (!editorState.hasOutlineKeywords) return const SizedBox.shrink();
         return ValueListenableBuilder<bool>(
           valueListenable: editorState.keywordHighlightNotifier,
           builder: (context, enabled, _) => ToggleToolButton(
-            icon: action.icon,
+            icon: icon,
             tooltip: action.label,
             isSelected: enabled,
             size: 44,
@@ -198,20 +214,20 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
           ),
         );
       case QuickInputAction.settings:
-        return _buildSmallActionButton(action, _handleSettingsTap);
+        return _buildSmallActionButton(action, icon, _handleSettingsTap);
       case QuickInputAction.findReplace:
-        return _buildSmallActionButton(action, _handleFindReplaceTap);
+        return _buildSmallActionButton(action, icon, _handleFindReplaceTap);
       case QuickInputAction.fullTextSearch:
-        return _buildSmallActionButton(action, _handleFullTextSearchTap);
+        return _buildSmallActionButton(action, icon, _handleFullTextSearchTap);
       case QuickInputAction.randomName:
-        return _buildSmallActionButton(action, _handleRandomNameTap);
+        return _buildSmallActionButton(action, icon, _handleRandomNameTap);
     }
   }
 
   /// 构建普通样式的操作按钮
-  Widget _buildSmallActionButton(QuickInputAction action, VoidCallback onPressed) {
+  Widget _buildSmallActionButton(QuickInputAction action, IconData icon, VoidCallback onPressed) {
     return SmallToolbarButton(
-      icon: action.icon,
+      icon: icon,
       tooltip: action.label,
       width: 44,
       height: _barHeight,
@@ -231,6 +247,7 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
     if (editorState == null) return const SizedBox.shrink();
 
     final colorScheme = Theme.of(context).colorScheme;
+    final visibleActions = _visibleActions();
 
     // 整栏纳入编辑器的点击区域组：编辑区在点击自身区域之外时会主动失焦收起输入法，
     // 快捷栏必须归属同一区域组，否则一碰就会收起键盘
@@ -261,16 +278,18 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
                 ),
               ),
 
-              // 与右侧操作区之间的分隔线，上下留白避免顶满整栏
-              Container(
-                width: 1,
-                height: _barHeight - 16,
-                margin: const EdgeInsets.symmetric(horizontal: 4),
-                color: colorScheme.outlineVariant,
-              ),
+              // 与右侧操作区之间的分隔线，上下留白避免顶满整栏；
+              // 两个图标都设为「无」时一并隐藏，标点按键占满整栏
+              if (visibleActions.isNotEmpty)
+                Container(
+                  width: 1,
+                  height: _barHeight - 16,
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  color: colorScheme.outlineVariant,
+                ),
 
-              // 右侧操作区：两个快捷操作图标，种类与顺序由设置决定
-              ..._buildRightActions(editorState),
+              // 右侧操作区：最多两个快捷操作图标，种类与顺序由设置决定
+              ..._buildRightActions(editorState, visibleActions),
             ],
           ),
         ),

@@ -5,6 +5,7 @@ import 'package:quick_write/core/constants/material_icons.dart';
 import 'package:quick_write/core/models/name_gen/name_dictionary.dart';
 import 'package:quick_write/core/models/name_gen/name_gen_options.dart';
 import 'package:quick_write/core/services/cache_services/name_gen_cache_service.dart';
+import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 import 'package:quick_write/core/services/name_gen/name_generator.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/pages/workspace/name_gen/widgets/name_dictionary_editor_dialog.dart';
@@ -80,6 +81,12 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
   /// 缓存服务
   final NameGenCacheService _cache = NameGenCacheService.instance;
 
+  /// 云同步服务：词典文件由同步直接落盘，需要据此重新读盘
+  final CloudSyncService _syncService = CloudSyncService.instance;
+
+  /// 已处理过的同步版本号，避免同步进度通知反复触发读盘
+  int _handledSyncRevision = 0;
+
   /// 随机数发生器
   final Random _random = Random();
 
@@ -123,10 +130,16 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
     _reloadHistory();
     // 打开弹窗时立即生成一次结果
     _results = _generateNames();
+
+    _handledSyncRevision = _syncService.syncRevision;
+    _syncService.addListener(_onCloudSyncChanged);
+    // 云同步可能已把新词典写进 dict 目录，先按内存渲染首帧，再从磁盘校正
+    _refreshDictionariesFromDisk();
   }
 
   @override
   void dispose() {
+    _syncService.removeListener(_onCloudSyncChanged);
     _surnameController.dispose();
     _suffixController.dispose();
     super.dispose();
@@ -143,6 +156,24 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
   }
 
   // ================= 数据读取 =================
+
+  /// 云同步结束后重新读盘
+  ///
+  /// 同步服务在同步进度、忙碌状态变化时会频繁通知，只有数据真正落地后
+  /// 版本号才会递增，据此避免无谓的磁盘扫描
+  void _onCloudSyncChanged() {
+    final revision = _syncService.syncRevision;
+    if (revision == _handledSyncRevision) return;
+    _handledSyncRevision = revision;
+    _refreshDictionariesFromDisk();
+  }
+
+  /// 从磁盘重载词典并刷新界面
+  Future<void> _refreshDictionariesFromDisk() async {
+    await _cache.reloadDictionaries();
+    if (!mounted) return;
+    setState(_reloadDictionaries);
+  }
 
   /// 重新加载各类别的词典列表与选中项
   void _reloadDictionaries() {

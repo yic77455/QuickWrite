@@ -1,5 +1,4 @@
 import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:isar/isar.dart';
 import 'package:quick_write/core/models/book.dart';
@@ -15,6 +14,7 @@ import 'package:quick_write/core/services/cloud_sync/metadata_codec.dart';
 import 'package:quick_write/core/services/cloud_sync/metadata_merger.dart';
 import 'package:quick_write/core/services/cloud_sync/metadata_types.dart';
 import 'package:quick_write/core/services/cloud_sync/sync_state_store.dart';
+import 'package:quick_write/core/services/cloud_sync/sync_models.dart';
 import 'package:quick_write/core/services/cloud_sync/remote_storage.dart';
 import 'package:quick_write/core/services/recycle_item_service.dart';
 import 'package:quick_write/core/utils/relative_path_utils.dart';
@@ -105,7 +105,7 @@ class MetadataSync {
     final outcome = await _merger.merge(
       isar: isar,
       remote: remote.combined,
-      baselineKeys: _stateStore.entityBaselines,
+      baselineKeys: _effectiveBaselineKeys(),
     );
 
     // 先安置被移除实体的正文文件，再删除实体本身
@@ -128,6 +128,39 @@ class MetadataSync {
       deletedDictIds: deletedDictIdsOf(outcome.merged),
       deletedThemeIds: deletedThemeIdsOf(outcome.merged),
     );
+  }
+
+  // ================= 删除判定修正 =================
+
+  /// 构造供合并器使用的实体基线
+  ///
+  /// 元数据同步先于正文文件同步：远端词典/主题实体在本轮合并结束后就会写进
+  /// 实体基线，而对应的 JSON 文件要到下一阶段才下载。若本轮同步因风险确认、
+  /// 网络失败或退出而中止，下一次同步会看到「基线中有、本地文件却不存在」，
+  /// 从而把它误判成用户删除，进而把云端文件也一并删掉，词典就再也同步不过来。
+  ///
+  /// 词典与主题的本地实体完全由磁盘文件推导，因此可借助文件层的同步基线区分
+  /// 两种缺失：文件基线中留有记录说明该文件曾在本机落盘，此时缺失才可能是真正的删除；
+  /// 没有记录说明文件从未下载成功，本次不参与删除判定，交给文件层继续补齐。
+  /// 其它集合仍沿用原基线，保持既有删除语义。
+  Map<String, Set<String>> _effectiveBaselineKeys() {
+    final baselines = <String, Set<String>>{
+      for (final entry in _stateStore.entityBaselines.entries)
+        entry.key: Set<String>.of(entry.value),
+    };
+    final fileBaselines = _stateStore.baselines;
+
+    void keepOnlyLanded(String collection, String Function(String) fileKeyOf) {
+      final keys = baselines[collection];
+      if (keys == null || keys.isEmpty) return;
+      baselines[collection] = keys
+          .where((id) => fileBaselines.containsKey(fileKeyOf(id)))
+          .toSet();
+    }
+
+    keepOnlyLanded(kDictsCollection, dictSyncKeyOf);
+    keepOnlyLanded(kThemesCollection, themeSyncKeyOf);
+    return baselines;
   }
 
   // ================= 远端读取 =================

@@ -345,7 +345,7 @@ class _OtherPanelState extends State<OtherPanel> {
     );
   }
 
-  /// 快捷输入栏右侧操作区图标的候选项（由动作枚举统一生成）
+  /// 快捷输入栏右侧操作区图标的候选项（由动作枚举统一生成，含「无」）
   static final List<DropdownItem> _quickInputActionItems = QuickInputAction.values
       .map((action) => DropdownItem(displayText: action.label, value: action.id))
       .toList();
@@ -353,7 +353,7 @@ class _OtherPanelState extends State<OtherPanel> {
   /// 构建快捷输入设置区块（移动端专属）
   ///
   /// 管理键盘上方的快捷输入栏、标点自动补全与成对符号回车跳出，
-  /// 并支持自定义快捷输入栏右侧操作区两个图标的种类与左右顺序
+  /// 并支持自定义快捷输入栏右侧操作区两个图标的种类与左右顺序（可选「无」隐藏）
   Widget _buildQuickInputSection(
     BuildContext context,
     bool quickInputBarEnabled,
@@ -424,26 +424,36 @@ class _OtherPanelState extends State<OtherPanel> {
 
   /// 更新快捷输入栏某一侧的图标
   ///
-  /// 左右两侧需显示不同图标：所选动作已出现在另一侧时，交换两侧位置
+  /// 普通动作左右互斥：所选动作已出现在另一侧时交换两侧位置；
+  /// 「无」允许两侧同时设置（此时快捷输入栏右侧不显示任何图标），
+  /// 因此不参与互斥交换，也不会把另一侧的动作顶掉。
   void _updateQuickInputAction({required bool isLeft, required QuickInputAction action}) {
     final service = SettingsService.instance;
-    final QuickInputAction left = service.quickInputBarLeftAction;
-    final QuickInputAction right = service.quickInputBarRightAction;
+    final QuickInputAction oldLeft = service.quickInputBarLeftAction;
+    final QuickInputAction oldRight = service.quickInputBarRightAction;
+    final bool exclusive = !action.isNone;
 
     if (isLeft) {
-      service.updateQuickInputBarActions(action, right == action ? left : right);
+      service.updateQuickInputBarActions(
+        action,
+        exclusive && oldRight == action ? oldLeft : oldRight,
+      );
     } else {
-      service.updateQuickInputBarActions(left == action ? right : left, action);
+      service.updateQuickInputBarActions(
+        exclusive && oldLeft == action ? oldRight : oldLeft,
+        action,
+      );
     }
     setState(() {});
   }
 
   /// 构建带图标标签与下拉框的设置项
   ///
-  /// 标签与下拉框分行显示，下拉框独占一行以充分利用面板宽度
+  /// 标签与下拉框分行显示，下拉框独占一行以充分利用面板宽度；
+  /// [icon] 传 null 时（如快捷输入图标被设为「无」）以等宽空白占位保持文字对齐
   Widget _buildDropdownSettingItem(
     BuildContext context, {
-    required IconData icon,
+    required IconData? icon,
     required String label,
     required String value,
     required List<DropdownItem> items,
@@ -456,10 +466,13 @@ class _OtherPanelState extends State<OtherPanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 标签行：图标 + 文字
+          // 标签行：图标 + 文字（无图标时保留 18 宽的空白占位）
           Row(
             children: [
-              Icon(icon, size: 18, color: colorScheme.onSurfaceVariant),
+              if (icon == null)
+                const SizedBox(width: 18)
+              else
+                Icon(icon, size: 18, color: colorScheme.onSurfaceVariant),
               const SizedBox(width: 10),
               Text(
                 label,

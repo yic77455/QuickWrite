@@ -1,9 +1,11 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/models/chapter.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
+import 'package:quick_write/core/utils/clipboard_state_cache.dart';
 import 'package:quick_write/core/utils/code_line_selection_utils.dart';
 import 'package:quick_write/core/utils/paragraph_formatter.dart';
 import 'package:quick_write/pages/workspace/editor/novel_editor.dart';
@@ -26,6 +28,8 @@ enum MobileToolAction {
   exportChapter,
   /// 码字统计
   writingStats,
+  /// 复制本章
+  copyChapter,
   /// 随机取名
   randomName,
   /// 布局设置
@@ -69,6 +73,7 @@ class MobileToolsCard extends StatelessWidget {
       _ToolEntry(MobileToolAction.history, Icons.history_rounded, '历史版本'),
       _ToolEntry(MobileToolAction.exportChapter, Icons.file_download_outlined, '导出本章'),
       _ToolEntry(MobileToolAction.writingStats, Icons.insights_rounded, '码字统计'),
+      _ToolEntry(MobileToolAction.copyChapter, Icons.copy_all_rounded, '复制本章', chapterOnly: true),
       _ToolEntry(MobileToolAction.randomName, Icons.casino_rounded, '随机取名'),
     ]),
     // 各类设置面板入口
@@ -83,13 +88,24 @@ class MobileToolsCard extends StatelessWidget {
   /// 选中某项后的回调
   final ValueChanged<MobileToolAction> onSelected;
 
+  /// 当前标签页是否为章节
+  ///
+  /// 由弹出方提供：卡片以弹窗承载，其 context 不在工作台 Provider 之下，
+  /// 无法自行读取标签页状态。章节专属动作在非章节标签页下置灰禁用。
+  final bool isChapterTab;
+
   /// 卡片的最大高度
   ///
   /// 由弹出方按操作栏下方的屏幕剩余空间给出，内容超出该高度时转为内部纵向滚动，
   /// 避免横屏等纵向空间紧张的场景下工具项被截断
   final double maxHeight;
 
-  const MobileToolsCard({super.key, required this.onSelected, required this.maxHeight});
+  const MobileToolsCard({
+    super.key,
+    required this.onSelected,
+    required this.isChapterTab,
+    required this.maxHeight,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -122,7 +138,7 @@ class MobileToolsCard extends StatelessWidget {
                     if (i > 0) _buildDivider(colorScheme),
                     _buildGroupLabel(context, _sections[i].label, colorScheme),
                     const SizedBox(height: 12),
-                    ..._buildSectionRows(_sections[i].entries),
+                    ..._buildSectionRows(_sections[i].entries, isChapterTab),
                   ],
                 ],
               ),
@@ -166,23 +182,26 @@ class MobileToolsCard extends StatelessWidget {
   }
 
   /// 将分区内的工具项按 [_columns] 个一行拆分为若干行
-  List<Widget> _buildSectionRows(List<_ToolEntry> entries) {
+  ///
+  /// [isChapterTab] 决定章节专属工具项是否可用（非章节标签页下置灰禁用）
+  List<Widget> _buildSectionRows(List<_ToolEntry> entries, bool isChapterTab) {
     final rows = <Widget>[];
     for (int i = 0; i < entries.length; i += _columns) {
       if (i > 0) rows.add(const SizedBox(height: 6));
-      rows.add(_buildRow(entries.sublist(i, math.min(i + _columns, entries.length))));
+      rows.add(_buildRow(entries.sublist(i, math.min(i + _columns, entries.length)), isChapterTab));
     }
     return rows;
   }
 
   /// 构建一行工具项，并为不足一行的部分补空位，保证各行图标纵向对齐
-  Widget _buildRow(List<_ToolEntry> entries) {
+  Widget _buildRow(List<_ToolEntry> entries, bool isChapterTab) {
     return Row(
       children: [
         for (final entry in entries)
           Expanded(
             child: _ToolItem(
               entry: entry,
+              enabled: !entry.chapterOnly || isChapterTab,
               onTap: () => onSelected(entry.action),
             ),
           ),
@@ -203,7 +222,17 @@ class _ToolEntry {
   /// 名称
   final String label;
 
-  const _ToolEntry(this.action, this.icon, this.label);
+  /// 是否仅在当前标签页为章节时可用
+  ///
+  /// 为 true 时，设定项等非章节标签页下该项置灰且不可点击
+  final bool chapterOnly;
+
+  const _ToolEntry(
+    this.action,
+    this.icon,
+    this.label, {
+    this.chapterOnly = false,
+  });
 }
 
 /// 工具卡片分区（分区名称与分区内的工具项）
@@ -218,21 +247,40 @@ class _ToolSection {
 }
 
 /// 单个工具项（圆角底色图标 + 名称）
+///
+/// [enabled] 为 false 时整体置灰并屏蔽点击，用于当前标签页不支持的动作
 class _ToolItem extends StatelessWidget {
+  /// 置灰态的不透明度，与移动端顶栏图标按钮的禁用态保持一致
+  static const double _disabledOpacity = 0.38;
+
   /// 工具项配置
   final _ToolEntry entry;
 
   /// 点击回调
   final VoidCallback onTap;
 
-  const _ToolItem({required this.entry, required this.onTap});
+  /// 是否可用
+  final bool enabled;
+
+  const _ToolItem({
+    required this.entry,
+    required this.onTap,
+    this.enabled = true,
+  });
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final Color disabledColor = colorScheme.onSurfaceVariant.withValues(alpha: _disabledOpacity);
+    final Color iconColor = enabled ? colorScheme.primary : disabledColor;
+    final Color labelColor = enabled ? colorScheme.onSurfaceVariant : disabledColor;
+    final Color background = enabled
+        ? colorScheme.primary.withValues(alpha: 0.08)
+        : colorScheme.onSurfaceVariant.withValues(alpha: 0.08);
 
     return InkWell(
-      onTap: onTap,
+      // 禁用时不挂载点击回调，水波纹与按压反馈随之一并关闭
+      onTap: enabled ? onTap : null,
       borderRadius: BorderRadius.circular(12),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
@@ -244,10 +292,10 @@ class _ToolItem extends StatelessWidget {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: colorScheme.primary.withValues(alpha: 0.08),
+                color: background,
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Icon(entry.icon, size: 20, color: colorScheme.primary),
+              child: Icon(entry.icon, size: 20, color: iconColor),
             ),
             const SizedBox(height: 6),
             // 名称
@@ -255,7 +303,7 @@ class _ToolItem extends StatelessWidget {
               entry.label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: labelColor),
             ),
           ],
         ),
@@ -295,6 +343,10 @@ Future<void> handleMobileToolAction(BuildContext context, MobileToolAction actio
       // 以弹窗展示码字统计
       showWritingStatsDialog(context: context, tracker: provider.sessionTracker);
       break;
+    case MobileToolAction.copyChapter:
+      // 复制当前章节正文到剪贴板
+      await _copyCurrentChapter(context, provider);
+      break;
     case MobileToolAction.randomName:
       // 打开随机取名弹窗
       showMobileNameGeneratorDialog(context: context);
@@ -316,6 +368,28 @@ Future<void> handleMobileToolAction(BuildContext context, MobileToolAction actio
       provider.openRightSidebar(RightSidebarType.other);
       break;
   }
+}
+
+/// 复制当前章节正文到剪贴板
+///
+/// 文本取自当前编辑器的文本控制器（与段落整理一致，包含尚未落盘的改动），
+/// 写入沿用系统剪贴板与应用内复制状态标记，不额外读取章节文件。
+Future<void> _copyCurrentChapter(BuildContext context, WorkspaceProvider provider) async {
+  final tab = provider.currentTab;
+  // 设定项等非章节标签页不复制；正常情况下该入口已置灰禁用，此处仅作兜底
+  if (tab == null || tab.type != EditorTabType.chapter) return;
+
+  final String text = tab.textController?.text ?? '';
+  if (text.isEmpty) {
+    SnackBarService.show(context, '当前章节没有可复制的正文');
+    return;
+  }
+
+  await Clipboard.setData(ClipboardData(text: text));
+  // 应用内复制后同步标记剪贴板状态，避免右键菜单的「粘贴」项被误禁用
+  ClipboardStateCache.markHasContent();
+  if (!context.mounted) return;
+  SnackBarService.show(context, '已复制本章');
 }
 
 /// 依据排版设置一键整理当前标签页的段落

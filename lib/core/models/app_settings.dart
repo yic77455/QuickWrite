@@ -239,7 +239,8 @@ class AppSettings {
   final bool pairedSymbolEnterJumpEnabled;
 
   /// 快捷输入栏右侧操作区左侧图标的动作标识
-  /// 取值见 QuickInputAction：keywordToggle、settings、findReplace、fullTextSearch、randomName
+  /// 取值见 QuickInputAction：none、keywordToggle、settings、findReplace、fullTextSearch、randomName
+  /// none 表示该位置不显示图标
   final String quickInputBarLeftAction;
 
   /// 快捷输入栏右侧操作区右侧图标的动作标识，取值同 [quickInputBarLeftAction]

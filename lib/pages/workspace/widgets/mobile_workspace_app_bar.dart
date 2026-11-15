@@ -218,6 +218,10 @@ class _MobileWorkspaceAppBarState extends State<MobileWorkspaceAppBar> {
     if (layout == null) return;
 
     // 卡片通过弹窗返回值回传所选动作，遮罩点击关闭时返回 null
+    // 弹窗卡片的 context 不在工作台 Provider 之下，故由操作栏读取标签页类型后透传，
+    // 供卡片决定章节专属动作是否可用
+    final bool isChapterTab =
+        context.read<WorkspaceProvider>().currentTab?.type == EditorTabType.chapter;
     setState(() => _isToolsCardOpen = true);
     final action = await showGeneralDialog<MobileToolAction>(
       context: context,
@@ -231,6 +235,7 @@ class _MobileWorkspaceAppBarState extends State<MobileWorkspaceAppBar> {
             top: layout.top,
             child: MobileToolsCard(
               onSelected: (selected) => Navigator.of(dialogContext).pop(selected),
+              isChapterTab: isChapterTab,
               maxHeight: layout.maxHeight,
             ),
           ),

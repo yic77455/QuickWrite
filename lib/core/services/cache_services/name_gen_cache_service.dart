@@ -96,6 +96,15 @@ class NameGenCacheService extends CacheService<NameGenCacheData> {
     ];
   }
 
+  /// 从磁盘重新加载全部词典
+  ///
+  /// 云同步会把其它设备的词典文件直接写进 dict 目录，不经过本服务的
+  /// [saveDictionary]，内存中的列表不会随之更新。界面在打开时或同步完成后
+  /// 调用本方法重新读盘，才能看到新增、修改与删除的词典。
+  Future<void> reloadDictionaries() async {
+    await _loadDictionaries();
+  }
+
   // ================= 反序列化实现 =================
 
   @override
