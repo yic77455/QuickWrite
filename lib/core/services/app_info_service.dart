@@ -24,7 +24,9 @@ class AppInfoService {
   /// 读取应用包信息
   Future<void> initialize() async {
     final info = await PackageInfo.fromPlatform();
-    _version = info.version;
-    _buildNumber = info.buildNumber;
+    // Linux 的实现依赖 data/flutter_assets/version.json，文件缺失时会返回空串；
+    // 此时保留默认值，避免界面出现空版本号
+    if (info.version.isNotEmpty) _version = info.version;
+    if (info.buildNumber.isNotEmpty) _buildNumber = info.buildNumber;
   }
 }

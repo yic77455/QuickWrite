@@ -43,6 +43,24 @@ jobs:
       - name: Build release bundle
         run: flutter build linux --release
 
+      - name: Inject version.json
+        run: |
+          set -euo pipefail
+          # package_info_plus 在 Linux 上读 data/flutter_assets/version.json 取版本号，
+          # Flutter 的 Linux 构建不生成该文件；缺失时版本号为空串，
+          # 会让「检查更新」把任何发布版本都判成新版本，这里按 pubspec 补上。
+          FULL_VERSION="$(awk '/^version:/ {print $2; exit}' pubspec.yaml | tr -d '"')"
+          APP_VERSION="${FULL_VERSION%%+*}"
+          BUILD_NUMBER="${FULL_VERSION#*+}"
+          if [ "${BUILD_NUMBER}" = "${FULL_VERSION}" ]; then BUILD_NUMBER="0"; fi
+
+          ASSET_DIR="build/linux/x64/release/bundle/data/flutter_assets"
+          mkdir -p "${ASSET_DIR}"
+          printf '{"app_name":"QuickWrite","package_name":"com.quickwrite.app","version":"%s","build_number":"%s"}\n' \
+            "${APP_VERSION}" "${BUILD_NUMBER}" > "${ASSET_DIR}/version.json"
+          echo "已写入版本信息："
+          cat "${ASSET_DIR}/version.json"
+
       - name: Package bundle
         run: |
           cd build/linux/x64/release/bundle

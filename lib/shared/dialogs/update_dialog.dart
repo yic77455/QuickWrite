@@ -82,6 +82,15 @@ class _UpdateDialogContentState extends State<_UpdateDialogContent> {
       _errorMessage = null;
     });
 
+    // 版本号读不到时不能拿空串去比较：任何发布版本都会被判定为「有新版本」
+    if (widget.currentVersion.isEmpty || widget.currentVersion == '0.0.0') {
+      setState(() {
+        _stage = _UpdateStage.failed;
+        _errorMessage = '无法读取当前版本号，请前往发布页手动查看最新版本。';
+      });
+      return;
+    }
+
     try {
       final result = await UpdateService.checkForUpdate(widget.currentVersion);
       if (!mounted) return;
@@ -171,9 +180,19 @@ class _UpdateDialogContentState extends State<_UpdateDialogContent> {
       return;
     }
 
-    final success = await UrlOpener.open(path);
+    final launched = await UrlOpener.open(path);
+
+    // Linux 上 xdg-open 依赖 .deb 的 MIME 关联，部分系统没有注册处理程序会直接失败；
+    // 此时退回到文件管理器，让用户双击安装包手动完成安装
+    if (!launched && PlatformCapabilities.isLinux) {
+      final revealed = await FileExplorer.revealAll([path]);
+      if (revealed && mounted) {
+        SnackBarService.show(context, '未能自动启动安装程序，已打开所在文件夹，请双击安装包完成安装');
+      }
+    }
+
     if (!mounted) return;
-    setState(() => _installerLaunched = success);
+    setState(() => _installerLaunched = launched);
   }
 
   /// 判断下载的文件是否为可直接运行的安装程序
@@ -431,7 +450,9 @@ class _UpdateDialogContentState extends State<_UpdateDialogContent> {
         const SizedBox(height: 10),
         Text(
           _installerLaunched
-              ? '已启动安装程序，请按提示完成安装。'
+              ? (PlatformCapabilities.isLinux
+                  ? '已启动安装程序，请在应用中心完成安装；安装后请重新启动「快码字」。'
+                  : '已启动安装程序，请按提示完成安装。')
               : isInstaller
                   ? (isAndroid
                       ? '安装包已下载完成，点击「立即安装」完成更新。'

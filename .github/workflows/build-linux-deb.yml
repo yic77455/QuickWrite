@@ -43,6 +43,28 @@ jobs:
       - name: Build release bundle
         run: flutter build linux --release
 
+      - name: Inject version.json
+        run: |
+          set -euo pipefail
+          # package_info_plus 在 Linux 上不是从包管理器读版本，而是读
+          # data/flutter_assets/version.json；Flutter 的 Linux 构建不会生成它，
+          # 插件本身也没有构建钩子。文件缺失时版本号是空字符串，
+          # 会让「检查更新」把任何发布版本都判成新版本，这里按 pubspec 补上。
+          FULL_VERSION="$(awk '/^version:/ {print $2; exit}' pubspec.yaml | tr -d '"')"
+          APP_VERSION="${FULL_VERSION%%+*}"
+          BUILD_NUMBER="${FULL_VERSION#*+}"
+          if [ "${BUILD_NUMBER}" = "${FULL_VERSION}" ]; then BUILD_NUMBER="0"; fi
+
+          ASSET_DIR="build/linux/x64/release/bundle/data/flutter_assets"
+          mkdir -p "${ASSET_DIR}"
+          printf '{"app_name":"QuickWrite","package_name":"com.quickwrite.app","version":"%s","build_number":"%s"}\n' \
+            "${APP_VERSION}" "${BUILD_NUMBER}" > "${ASSET_DIR}/version.json"
+          echo "已写入版本信息："
+          cat "${ASSET_DIR}/version.json"
+
+          # 打包步骤复用同一个版本号，避免两处各自解析产生偏差
+          echo "APP_VERSION=${APP_VERSION}" >> "$GITHUB_ENV"
+
       - name: Build .deb package
         run: |
           set -euo pipefail
@@ -54,13 +76,10 @@ jobs:
           PKG_ROOT="pkg"
           APPDIR="${PKG_ROOT}/opt/quickwrite"
 
-          # 版本号统一从 pubspec.yaml 读取，避免 workflow 里写死与代码脱节。
-          FULL_VERSION="$(awk '/^version:/ {print $2; exit}' pubspec.yaml | tr -d '"')"
-          APP_VERSION="${FULL_VERSION%%+*}"
-          BUILD_NUMBER="${FULL_VERSION#*+}"
-          if [ "${BUILD_NUMBER}" = "${FULL_VERSION}" ]; then BUILD_NUMBER=""; fi
+          # 版本号由上一步解析并写入 GITHUB_ENV，避免两处各自解析产生偏差
+          APP_VERSION="${APP_VERSION:?APP_VERSION 未设置，请检查 Inject version.json 步骤}"
           TODAY="$(date -u +%F)"
-          echo "应用版本 ${APP_VERSION}，构建号 ${BUILD_NUMBER:-无}，打包日期 ${TODAY}"
+          echo "应用版本 ${APP_VERSION}，打包日期 ${TODAY}"
 
           if [ ! -x "${BUNDLE}/${BIN_NAME}" ]; then
             echo "未找到 ${BUNDLE}/${BIN_NAME}，构建产物不完整" >&2
@@ -123,16 +142,23 @@ jobs:
             <id>${APP_ID}</id>
             <metadata_license>CC0-1.0</metadata_license>
             <project_license>GPL-3.0-only</project_license>
-            <name>快码字</name>
-            <summary>专注小说创作的本地写作工具</summary>
+            <name>QuickWrite</name>
+            <name xml:lang="zh_CN">快码字</name>
+            <summary>A local-first writing tool for novelists</summary>
+            <summary xml:lang="zh_CN">专注小说创作的本地写作工具</summary>
             <description>
-              <p>快码字是一款一款面向小说、网文、剧本作者开发的文字创作工具，界面干净，功能齐全，只为码字而生。</p>
+              <p>QuickWrite is a local-first writing tool for novelists, with chapter management, outline tables, typography presets and cloud sync.</p>
+              <p xml:lang="zh_CN">快码字是一款面向小说、网文、剧本作者开发的文字创作工具，界面干净，功能齐全，只为码字而生。</p>
             </description>
             <launchable type="desktop-id">${APP_ID}.desktop</launchable>
             <url type="homepage">https://github.com/yic77455/QuickWrite</url>
             <developer id="io.github.yic77455">
               <name>yic77455</name>
             </developer>
+            <icon type="stock">${APP_ID}</icon>
+            <categories>
+              <category>Office</category>
+            </categories>
             <content_rating type="oars-1.1"/>
             <releases>
               <release version="${APP_VERSION}" date="${TODAY}"/>
@@ -174,11 +200,16 @@ jobs:
             echo "Section: editors"
             echo "Priority: optional"
             echo "Homepage: https://github.com/yic77455/QuickWrite"
-            echo "Description: 快码字 —— 专注小说创作的本地写作工具"
-            echo " 快码字是一款面向小说创作者的本地写作工具，提供章节管理、大纲"
-            echo " 表格、排版样式与云端同步等功能，正文数据默认保存在本地。"
+            # control 里的描述保持 ASCII：软件中心在没有 AppStream 数据时
+            # 会回退展示这段文本，而该路径对非 ASCII 字符会转成 `?`。
+            # 中文名称与介绍由 metainfo 的 zh_CN 本地化字段提供。
+            echo "Description: A local-first writing tool for novelists"
+            echo " QuickWrite focuses on novel writing: chapter management, outline"
+            echo " tables, typography presets and cloud sync. Manuscripts are stored"
+            echo " locally by default."
             echo " ."
-            echo " 支持 WebDAV 与 S3 兼容存储的多端同步，以及导入自定义字体。"
+            echo " Multi-device sync works with WebDAV and S3-compatible storage, and"
+            echo " custom fonts can be imported."
           } > "${PKG_ROOT}/DEBIAN/control"
 
           # ---------- 8. 安装 / 卸载钩子 ----------
