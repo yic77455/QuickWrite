@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/constants/constants.dart';
 import 'package:quick_write/core/services/cache_services/window_cache_service.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:screen_retriever/screen_retriever.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -48,12 +49,23 @@ class WindowService {
 
     // 应用窗口配置并显示
     await windowManager.waitUntilReadyToShow(windowOptions, () async {
-      // 有缓存数据时，从缓存设置窗口位置
-      if (hasCacheData) {
+      // Wayland 下客户端无法决定窗口位置，恢复没有意义，直接跳过；
+      // Windows / macOS 沿用「显示前设置位置」的原有行为。
+      final bool restorePosition =
+          hasCacheData && !PlatformCapabilities.isLinuxWayland;
+      if (restorePosition && !PlatformCapabilities.isLinux) {
         await windowManager.setPosition(cache.mainWindowPosition);
       }
       await windowManager.show();
       await windowManager.focus();
+
+      // GTK 文档：多数窗口管理器会忽略「显示前」的位置请求，但会遵从
+      // 「窗口已显示后」的请求。Linux/X11 需等窗口真正映射后再设置，
+      // 缓存里的位置才真正生效。
+      if (restorePosition && PlatformCapabilities.isLinux) {
+        await Future.delayed(const Duration(milliseconds: 200));
+        await windowManager.setPosition(cache.mainWindowPosition);
+      }
 
       // 无缓存数据时，保存当前居中位置到缓存文件
       if (!hasCacheData) {
@@ -108,17 +120,19 @@ class WindowService {
     final position = await windowManager.getPosition();
 
     // 更新窗体设置缓存（主窗口和工作台窗口使用相同的初始位置，工作台稍微偏移）
+    // Wayland 下读到的位置恒为 0,0，不写入缓存以免污染默认值
+    final bool skipPosition = PlatformCapabilities.isLinuxWayland;
     await cache.updateMainWindow(
       width: size.width,
       height: size.height,
-      x: position.dx,
-      y: position.dy,
+      x: skipPosition ? null : position.dx,
+      y: skipPosition ? null : position.dy,
     );
     await cache.updateWorkspaceWindow(
       width: size.width,
       height: size.height,
-      x: position.dx + 30,
-      y: position.dy + 30,
+      x: skipPosition ? null : position.dx + 30,
+      y: skipPosition ? null : position.dy + 30,
     );
   }
 

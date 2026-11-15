@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:quick_write/core/models/app_settings.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
 import 'package:quick_write/core/services/settings_service.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/pages/home/settings/setting_widgets.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 
@@ -28,7 +29,10 @@ class WindowSection extends StatelessWidget {
     return SettingSectionCard(
       title: '窗口',
       children: [
-        _buildMultiWindowTile(context, settingsService),
+        // Linux 端暂不支持独立窗口工作台，隐藏该开关，
+        // 避免用户开启后走进不可用的多窗口流程。
+        if (!PlatformCapabilities.isLinux)
+          _buildMultiWindowTile(context, settingsService),
         _buildCloseActionTile(context, settingsService),
       ],
     );

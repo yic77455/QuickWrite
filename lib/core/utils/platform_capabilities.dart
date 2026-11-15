@@ -40,8 +40,21 @@ class PlatformCapabilities {
 
   /// 是否支持多窗口工作台
   ///
-  /// 依赖 desktop_multi_window，仅桌面端可用
-  static bool get supportsMultiWindow => isDesktop;
+  /// desktop_multi_window 的 Linux 原生层在销毁子窗口时会移除 FlView 并广播
+  /// 窗口变更，与 window_manager 的 delete-event 关闭拦截互相阻塞，实测会导致
+  /// 主窗口无响应；且每个子 engine 都要重跑一遍完整初始化，打开明显偏慢。
+  /// 因此 Linux 暂不开放多窗口，工作台统一在当前窗口内打开。
+  static bool get supportsMultiWindow => isWindows || isMacOS;
+
+  /// Linux 会话是否运行在 Wayland 下
+  ///
+  /// Wayland 不允许客户端自行定位窗口：gtk_window_move 无效，
+  /// gtk_window_get_position 恒返回 0,0，窗口位置只能由合成器决定。
+  /// 从终端启动时 XDG_SESSION_TYPE 可能缺失，故同时判断 WAYLAND_DISPLAY。
+  static bool get isLinuxWayland =>
+      isLinux &&
+      (Platform.environment['XDG_SESSION_TYPE'] == 'wayland' ||
+          Platform.environment['WAYLAND_DISPLAY'] != null);
 
   /// 是否支持系统托盘图标
   ///

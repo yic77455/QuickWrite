@@ -268,7 +268,12 @@ class SettingsService extends ChangeNotifier {
   }
   
   /// 获取是否在新窗口中打开工作台
-  bool get openWorkspaceInNewWindow => _settings.openWorkspaceInNewWindow;
+  ///
+  /// Linux 端暂不支持多窗口工作台，读取时恒为 false；配置值本身仍保留，
+  /// 便于该平台日后恢复能力后无需迁移数据。
+  bool get openWorkspaceInNewWindow => PlatformCapabilities.isLinux
+      ? false
+      : _settings.openWorkspaceInNewWindow;
   
   /// 更新是否在新窗口中打开工作台
   Future<bool> updateOpenWorkspaceInNewWindow(bool value) async {
@@ -279,7 +284,7 @@ class SettingsService extends ChangeNotifier {
   // ================= 窗口关闭行为设置相关 =================
 
   /// 是否处于多窗口模式（工作台在独立窗口中打开）
-  bool get isMultiWindowMode => _settings.openWorkspaceInNewWindow;
+  bool get isMultiWindowMode => openWorkspaceInNewWindow;
 
   /// 获取关闭主窗口行为（用户设置值，见 AppSettings.closeActionXxx）
   String get closeWindowAction => _settings.closeWindowAction;

@@ -20,6 +20,11 @@ class FontInfo {
 }
 
 class SystemFontParser {
+  /// 枚举系统字体目录下的字体文件
+  ///
+  /// 只列目录、不打开文件内容，供字体缓存计算「系统字体清单」签名使用。
+  static List<File> getSystemFontFiles() => _getSystemFontFiles();
+
   /// 获取当前系统所有字体的解析结果
   static Future<List<FontInfo>> getSystemFonts() async {
     List<File> fontFiles = _getSystemFontFiles();

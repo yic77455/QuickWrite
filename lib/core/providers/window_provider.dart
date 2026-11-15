@@ -303,6 +303,12 @@ class WindowProvider extends ChangeNotifier with WindowListener {
     final position = await windowManager.getPosition();
     final isMaximized = await windowManager.isMaximized();
 
+    // Wayland 下 GTK 读不到真实窗口位置（恒为 0,0），写入会覆盖缓存里
+    // 原本有效的值；这种会话只更新尺寸与最大化状态，位置交回合成器管理。
+    final bool skipPosition = PlatformCapabilities.isLinuxWayland;
+    final double? x = skipPosition ? null : position.dx;
+    final double? y = skipPosition ? null : position.dy;
+
     final cache = WindowCacheService.instance;
 
     // 根据窗口类型更新对应的缓存数据
@@ -310,16 +316,16 @@ class WindowProvider extends ChangeNotifier with WindowListener {
       await cache.updateMainWindow(
         width: size.width,
         height: size.height,
-        x: position.dx,
-        y: position.dy,
+        x: x,
+        y: y,
         isMaximized: isMaximized,
       );
     } else {
       await cache.updateWorkspaceWindow(
         width: size.width,
         height: size.height,
-        x: position.dx,
-        y: position.dy,
+        x: x,
+        y: y,
         isMaximized: isMaximized,
       );
     }

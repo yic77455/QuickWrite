@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:quick_write/core/services/app_paths.dart';
 import 'package:quick_write/core/utils/font_parser.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 
 /// 推荐字体条目
 ///
@@ -119,8 +121,8 @@ class FontService extends ChangeNotifier {
     _loadCompleter = Completer<void>();
     
     try {
-      // 加载系统字体
-      _systemFonts = await SystemFontParser.getSystemFonts();
+      // 加载系统字体（Linux 走缓存，避免每次启动重复解析几百个字体文件）
+      _systemFonts = await _loadSystemFonts();
       // 加载用户导入的字体，使已保存的自定义字体在启动后依然可用
       await loadUserFonts();
       _loadCompleter?.complete();
@@ -134,6 +136,71 @@ class FontService extends ChangeNotifier {
     }
   }
   
+  /// Linux 上系统字体数量较多（尤其装了 CJK 字体之后），逐个打开并解析字体头
+  /// 会明显拖慢启动。这里把解析结果按「系统字体文件路径清单」做签名缓存：
+  /// 字体没有增删时直接读缓存，省掉每次启动几百次文件 IO。
+  /// 其它平台保持原有的每次解析行为，不受影响。
+  Future<List<FontInfo>> _loadSystemFonts({bool forceRefresh = false}) async {
+    if (!PlatformCapabilities.isLinux) {
+      return SystemFontParser.getSystemFonts();
+    }
+
+    try {
+      final paths = SystemFontParser.getSystemFontFiles()
+          .map((file) => file.path)
+          .toList()
+        ..sort();
+      final cacheFile = File(
+        '${await AppPaths.instance.getCachePath()}'
+        '${Platform.pathSeparator}system_fonts.cache',
+      );
+
+      if (!forceRefresh && await cacheFile.exists()) {
+        final cached =
+            jsonDecode(await cacheFile.readAsString()) as Map<String, dynamic>;
+        final cachedPaths =
+            (cached['paths'] as List?)?.cast<String>() ?? <String>[];
+        final cachedFonts = cached['fonts'] as List?;
+        if (cachedFonts != null &&
+            cachedFonts.isNotEmpty &&
+            _samePaths(cachedPaths, paths)) {
+          return cachedFonts
+              .map((item) => FontInfo(
+                    fontFamily: item['family'] as String,
+                    displayName: item['name'] as String,
+                    filePath: item['path'] as String,
+                  ))
+              .toList();
+        }
+      }
+
+      final fonts = await SystemFontParser.getSystemFonts();
+      await cacheFile.writeAsString(jsonEncode({
+        'paths': paths,
+        'fonts': fonts
+            .map((font) => {
+                  'family': font.fontFamily,
+                  'name': font.displayName,
+                  'path': font.filePath,
+                })
+            .toList(),
+      }));
+      return fonts;
+    } catch (e) {
+      debugPrint('系统字体缓存不可用，回退到逐个解析: $e');
+      return SystemFontParser.getSystemFonts();
+    }
+  }
+
+  /// 比较两个已排序的路径清单是否一致
+  bool _samePaths(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
   /// 加载用户导入的字体
   ///
   /// 扫描用户字体目录，逐个解析并注册到字体引擎，
@@ -312,8 +379,8 @@ class FontService extends ChangeNotifier {
     _loadCompleter = Completer<void>();
     
     try {
-      // 重新加载系统字体
-      _systemFonts = await SystemFontParser.getSystemFonts();
+      // 手动刷新时强制重新解析并重建缓存
+      _systemFonts = await _loadSystemFonts(forceRefresh: true);
       _loadCompleter?.complete();
     } catch (e) {
       // 加载失败，保持原有列表
