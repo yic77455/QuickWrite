@@ -159,6 +159,28 @@ jobs:
             <categories>
               <category>Office</category>
             </categories>
+            <screenshots>
+              <screenshot type="default">
+                <caption>Bookshelf</caption>
+                <caption xml:lang="zh_CN">书架</caption>
+                <image type="source">https://raw.githubusercontent.com/yic77455/QuickWrite/main/docs/images/01-bookshelf.png</image>
+              </screenshot>
+              <screenshot>
+                <caption>Writing workspace</caption>
+                <caption xml:lang="zh_CN">写作工作台</caption>
+                <image type="source">https://raw.githubusercontent.com/yic77455/QuickWrite/main/docs/images/02-workspace.png</image>
+              </screenshot>
+              <screenshot>
+                <caption>Outline table</caption>
+                <caption xml:lang="zh_CN">大纲表格</caption>
+                <image type="source">https://raw.githubusercontent.com/yic77455/QuickWrite/main/docs/images/03-outline.png</image>
+              </screenshot>
+              <screenshot>
+                <caption>Writing statistics</caption>
+                <caption xml:lang="zh_CN">码字统计</caption>
+                <image type="source">https://raw.githubusercontent.com/yic77455/QuickWrite/main/docs/images/04-stats.png</image>
+              </screenshot>
+            </screenshots>
             <content_rating type="oars-1.1"/>
             <releases>
               <release version="${APP_VERSION}" date="${TODAY}"/>
@@ -222,6 +244,14 @@ jobs:
             fi
             if command -v gtk-update-icon-cache >/dev/null 2>&1; then
               gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor || true
+            fi
+            # 让刚装上的 AppStream 元数据立刻进入本地缓存。
+            # 不刷的话，软件中心要等系统下一次全局刷新才能识别这个组件，
+            # 期间用户搜不到应用、也看不到图标和介绍。
+            if command -v appstreamcli >/dev/null 2>&1; then
+              appstreamcli refresh --source=os >/dev/null 2>&1 \
+                || appstreamcli refresh >/dev/null 2>&1 \
+                || true
             fi
           fi
           exit 0
