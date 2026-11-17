@@ -12,9 +12,6 @@ class AppDelegate: FlutterAppDelegate {
   /// 应用退出通道，用于把系统终止请求转交 Dart 处理
   private var lifecycleChannel: FlutterMethodChannel?
 
-  /// 富文本剪贴板通道，用于读写 HTML 剪贴板格式
-  private var clipboardChannel: FlutterMethodChannel?
-
   /// Dart 是否已注册退出处理，未注册时直接放行系统退出
   private var isQuitHandlerReady = false
 
@@ -24,9 +21,17 @@ class AppDelegate: FlutterAppDelegate {
 
     if let controller = mainFlutterWindow?.contentViewController as? FlutterViewController {
       registerLifecycleChannel(with: controller.engine.binaryMessenger)
-      registerClipboardChannel(with: controller.engine.binaryMessenger)
     }
+    // 富文本剪贴板通道需要在每个 engine 上注册（主窗口 + 各子窗口），
+    // 故用静态方法，供 MainFlutterWindow 的子窗口回调复用。
+    AppDelegate.registerClipboardChannel(with: flutterViewControllerEngineMessenger())
     configureApplicationMenu()
+  }
+
+  /// 取主窗口 engine 的 binaryMessenger，供静态通道注册使用
+  private func flutterViewControllerEngineMessenger() -> FlutterBinaryMessenger? {
+    return (mainFlutterWindow?.contentViewController as? FlutterViewController)?
+      .engine.binaryMessenger
   }
 
   override func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -65,8 +70,13 @@ class AppDelegate: FlutterAppDelegate {
       return .terminateNow
     }
 
-    // 主窗口已关闭或隐藏时，退出流程已由窗口关闭逻辑完成，直接放行
-    let hasVisibleWindow = sender.windows.contains { $0 is MainFlutterWindow && $0.isVisible }
+    // 有可见窗口时把退出流程交给 Dart 逐个保存。
+    // 注意：工作台子窗口是 desktop_multi_window 创建的 CustomWindow，
+    // 并非 MainFlutterWindow，不能只判断 MainFlutterWindow 类型，
+    // 否则主窗口隐藏到托盘、子窗口仍可见时会误判为无窗口而跳过保存。
+    let hasVisibleWindow = sender.windows.contains { window in
+      window.isVisible && window.contentViewController is FlutterViewController
+    }
     guard hasVisibleWindow else {
       return .terminateNow
     }
@@ -144,12 +154,14 @@ class AppDelegate: FlutterAppDelegate {
 
   // ================= 剪贴板通道 =================
 
-  /// 注册富文本剪贴板通道
+  /// 注册富文本剪贴板通道（静态方法，主窗口与子窗口共用）
   ///
-  /// Dart 侧通过该通道读写剪贴板中的 HTML，用于大纲编辑器的富文本复制粘贴
-  private func registerClipboardChannel(with messenger: FlutterBinaryMessenger) {
+  /// Dart 侧通过该通道读写剪贴板中的 HTML，用于大纲编辑器的富文本复制粘贴。
+  /// MethodChannel 不跨 engine 共享，故每个子窗口都要单独注册。
+  static func registerClipboardChannel(with messenger: FlutterBinaryMessenger?) {
+    guard let messenger = messenger else { return }
     let channel = FlutterMethodChannel(
-      name: AppDelegate.clipboardChannelName,
+      name: clipboardChannelName,
       binaryMessenger: messenger
     )
     channel.setMethodCallHandler { call, result in
@@ -162,7 +174,6 @@ class AppDelegate: FlutterAppDelegate {
         result(FlutterMethodNotImplemented)
       }
     }
-    clipboardChannel = channel
   }
 
   /// 将纯文本与 HTML 同时写入剪贴板

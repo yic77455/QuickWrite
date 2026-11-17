@@ -1,0 +1,93 @@
+name: Build macOS
+
+# 手动触发：在 Actions 页面点 Run workflow 出包
+# 产出 universal 二进制（x86_64 + arm64），一个 DMG 同时支持 Intel 和 Apple Silicon
+# 注意：flutter build macos 不支持 --target-platform（那是 Android 的参数）；
+#       macOS 架构由 Xcode 工程决定，Release 默认构建 universal，故无需分架构构建。
+#       macos-13 / macos-14 已退役，当前 Apple Silicon runner 用 macos-26 / macos-15。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # Apple Silicon runner 上构建即可产出 universal（含 x86_64 + arm64）。
+    # 若要在 Intel runner 上构建，把 runs-on 改成 macos-26-intel，产物相同。
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.2'
+          channel: stable
+          cache: true
+
+      - name: Enable macOS desktop
+        run: flutter config --enable-macos-desktop
+
+      - name: Fetch packages
+        run: flutter pub get
+
+      # 生成 Isar 序列化代码（项目依赖 isar_generator + build_runner）
+      - name: Generate build_runner
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      # Release 构建默认产出 universal 二进制（arm64 + x86_64），
+      # 架构由 Xcode 工程的 ARCHS/EXCLUDED_ARCHS 决定，无需也无法用 --target-platform 指定。
+      - name: Build release app
+        run: flutter build macos --release
+
+      # macOS 构建：不签名、不公证。用户首次打开需右键 → 打开。
+      # flutter build macos 在无签名证书时默认产出 ad-hoc 签名的 .app，
+      # Gatekeeper 会拦但右键打开即可放行。
+      - name: Package .dmg
+        run: |
+          set -euo pipefail
+
+          APP_NAME="QuickWrite"
+          APP_PATH="build/macos/Build/Products/Release/${APP_NAME}.app"
+
+          if [ ! -d "${APP_PATH}" ]; then
+            echo "未找到 ${APP_PATH}" >&2
+            exit 1
+          fi
+
+          # 验证产物架构（应是 universal: x86_64 + arm64）
+          echo "=== 可执行文件架构 ==="
+          BINARY="${APP_PATH}/Contents/MacOS/${APP_NAME}"
+          file "${BINARY}"
+          lipo -info "${BINARY}" || true
+
+          # 用 hdiutil 创建 DMG（macOS 自带，无需额外依赖）
+          DMG_NAME="quickwrite-macos-universal.dmg"
+          STAGING_DIR="_dmg_staging"
+          rm -rf "${STAGING_DIR}"
+          mkdir -p "${STAGING_DIR}"
+          cp -R "${APP_PATH}" "${STAGING_DIR}/"
+          # 添加 /Applications 快捷方式，用户拖拽即装
+          ln -s /Applications "${STAGING_DIR}/Applications"
+
+          hdiutil create \
+            -volname "QuickWrite" \
+            -srcfolder "${STAGING_DIR}" \
+            -fs HFS+ \
+            -format UDZO \
+            -imagekey zlib-level=9 \
+            "${DMG_NAME}"
+
+          rm -rf "${STAGING_DIR}"
+          ls -lh "${DMG_NAME}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: quickwrite-macos-universal
+          path: quickwrite-macos-universal.dmg
+          if-no-files-found: error
+          retention-days: 30
