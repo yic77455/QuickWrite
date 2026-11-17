@@ -34,9 +34,10 @@ jobs:
       - name: Fetch packages
         run: flutter pub get
 
-      # 生成 Isar 序列化代码（项目依赖 isar_generator + build_runner）
-      - name: Generate build_runner
-        run: dart run build_runner build --delete-conflicting-outputs
+      # 注意：不要在这里跑 build_runner。项目的 9 个 Isar .g.dart 已提交到仓库，
+      # flutter build 会直接使用。而 build_runner 用的是 pubspec 锁的 analyzer 5.13.0
+      # （Dart 3.1 时代），无法解析源码里的 Null-Aware Elements 语法（?expr，Dart 3.8+），
+      # 会误报语法错误导致构建失败。Flutter SDK 内置的 frontend 版本正确，能正常编译。
 
       # Release 构建默认产出 universal 二进制（arm64 + x86_64），
       # 架构由 Xcode 工程的 ARCHS/EXCLUDED_ARCHS 决定，无需也无法用 --target-platform 指定。
