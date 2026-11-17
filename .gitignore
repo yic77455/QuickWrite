@@ -130,6 +130,8 @@ app.*.symbols
 *.idea/compiler.xml
 *.idea/libraries/
 *.xcworkspace
+!macos/Runner.xcworkspace/
+!macos/Runner.xcworkspace/contents.xcworkspacedata
 xcuserdata/
 *.xcodeproj/xcuserdata
 *.xcodeproj/project.xcworkspace
