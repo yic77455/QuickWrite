@@ -85,6 +85,75 @@ jobs:
           rm -rf "${STAGING_DIR}"
           ls -lh "${DMG_NAME}"
 
+      # 在真 Mac runner 上做冒烟测试：启动应用 + 抓日志 + 截图。
+      # GitHub 的 macOS runner 是真实 Apple 硬件，有 Metal，Flutter 界面能正常渲染；
+      # 这正是 VMware 黑苹果做不到的部分（虚拟显卡没有 MTLDevice 会白屏）。
+      # continue-on-error：截图环节出问题不应阻断 DMG 产出。
+      - name: Smoke test (launch & screenshot)
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+
+          APP_PATH="$PWD/build/macos/Build/Products/Release/QuickWrite.app"
+          BIN="${APP_PATH}/Contents/MacOS/QuickWrite"
+          LOG="$PWD/quickwrite-run.log"
+          SHOT="$PWD/quickwrite-screenshot.png"
+
+          if [ ! -x "$BIN" ]; then
+            echo "未找到可执行文件：$BIN"
+            exit 1
+          fi
+
+          # 直接运行二进制（而非 open -a），这样 stdout/stderr 能重定向到日志，
+          # 便于捕获 Metal / MissingPluginException / Unhandled Exception 等异常。
+          "$BIN" > "$LOG" 2>&1 &
+          APP_PID=$!
+          echo "已启动应用，pid=$APP_PID"
+
+          # 等待初始化：字体枚举、Isar 建库、窗口创建等
+          sleep 20
+
+          if kill -0 "$APP_PID" 2>/dev/null; then
+            echo "应用进程存活"
+          else
+            echo "::warning::应用进程在截图前已退出，可能启动失败"
+          fi
+
+          # 把应用带到前台，确保截到的是它的窗口
+          osascript -e 'tell application "QuickWrite" to activate' >/dev/null 2>&1 || true
+          sleep 2
+
+          echo "=== 显示器信息 ==="
+          system_profiler SPDisplaysDataType 2>/dev/null | grep -iE "resolution|UI Looks like" || true
+
+          # 截全屏（-x 静音）
+          screencapture -x -t png "$SHOT" || echo "::warning::截图命令失败"
+          ls -lh "$SHOT" 2>/dev/null || true
+
+          echo "=== 应用运行日志 ==="
+          cat "$LOG" 2>/dev/null || true
+
+          # 日志里出现这些关键字说明渲染/插件有问题
+          if grep -qiE "Could not acquire Metal|Unable to create FlutterView|Unhandled Exception|MissingPluginException" "$LOG" 2>/dev/null; then
+            echo "::warning::应用日志中发现异常关键字，请检查上面的日志与截图"
+          fi
+
+          # 收尾：退出应用，避免残留进程拖住 job
+          kill "$APP_PID" 2>/dev/null || true
+          osascript -e 'tell application "QuickWrite" to quit' >/dev/null 2>&1 || true
+          sleep 2
+
+      - name: Upload smoke test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quickwrite-macos-smoketest
+          path: |
+            quickwrite-screenshot.png
+            quickwrite-run.log
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
