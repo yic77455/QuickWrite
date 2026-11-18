@@ -1,0 +1,87 @@
+name: Build Android release
+
+# 手动触发可单独出包；workflow_call 供 release.yml 在打 tag 时统一调用。
+# 签名材料来自 GitHub Secrets，不进版本库；没有 Secrets 时直接失败，
+# 避免悄悄回退到 debug 签名（debug 签名的包无法给正式用户升级）。
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses > /dev/null
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.2'
+          channel: stable
+          cache: true
+
+      - name: Fetch packages
+        run: flutter pub get
+
+      - name: Restore release signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${KEYSTORE_BASE64:?缺少 Secret ANDROID_KEYSTORE_BASE64}"
+          : "${KEY_ALIAS:?缺少 Secret ANDROID_KEY_ALIAS}"
+          : "${KEY_PASSWORD:?缺少 Secret ANDROID_KEY_PASSWORD}"
+          : "${STORE_PASSWORD:?缺少 Secret ANDROID_STORE_PASSWORD}"
+
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/quickwrite.jks
+          test -s android/app/quickwrite.jks
+
+          # build.gradle.kts 从 android/key.properties 读签名配置；
+          # storeFile 在 app 模块里解析，所以写相对 android/app 的路径。
+          cat > android/key.properties <<EOF
+          storeFile=quickwrite.jks
+          storePassword=${STORE_PASSWORD}
+          keyAlias=${KEY_ALIAS}
+          keyPassword=${KEY_PASSWORD}
+          EOF
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Rename artifact
+        run: |
+          set -euo pipefail
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+          test -f "$APK"
+          FULL_VERSION="$(awk '/^version:/ {print $2; exit}' pubspec.yaml | tr -d '"')"
+          APP_VERSION="${FULL_VERSION%%+*}"
+          cp "$APK" "quick-write-${APP_VERSION}-android.apk"
+          ls -lh quick-write-*-android.apk
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: quick-write-android
+          path: quick-write-*-android.apk
+          if-no-files-found: error
+          retention-days: 30

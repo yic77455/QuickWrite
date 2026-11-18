@@ -1,12 +1,13 @@
 name: Build macOS
 
-# 手动触发：在 Actions 页面点 Run workflow 出包
+# 手动触发可单独出包；workflow_call 供 release.yml 在打 tag 时统一调用。
 # 产出 universal 二进制（x86_64 + arm64），一个 DMG 同时支持 Intel 和 Apple Silicon
 # 注意：flutter build macos 不支持 --target-platform（那是 Android 的参数）；
 #       macOS 架构由 Xcode 工程决定，Release 默认构建 universal，故无需分架构构建。
 #       macos-13 / macos-14 已退役，当前 Apple Silicon runner 用 macos-26 / macos-15。
 on:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -66,7 +67,10 @@ jobs:
           lipo -info "${BINARY}" || true
 
           # 用 hdiutil 创建 DMG（macOS 自带，无需额外依赖）
-          DMG_NAME="quickwrite-macos-universal.dmg"
+          # 文件名带版本号，便于用户和发布页区分不同版本
+          FULL_VERSION="$(awk '/^version:/ {print $2; exit}' pubspec.yaml | tr -d '"')"
+          APP_VERSION="${FULL_VERSION%%+*}"
+          DMG_NAME="quick-write-${APP_VERSION}-macos-universal.dmg"
           STAGING_DIR="_dmg_staging"
           rm -rf "${STAGING_DIR}"
           mkdir -p "${STAGING_DIR}"
@@ -157,7 +161,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: quickwrite-macos-universal
-          path: quickwrite-macos-universal.dmg
+          name: quick-write-macos-universal
+          path: quick-write-*-macos-universal.dmg
           if-no-files-found: error
           retention-days: 30

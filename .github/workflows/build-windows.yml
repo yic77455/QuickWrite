@@ -1,0 +1,84 @@
+name: Build Windows release
+
+# 手动触发可单独出包；workflow_call 供 release.yml 在打 tag 时统一调用。
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2025
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.2'
+          channel: stable
+          cache: true
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Fetch packages
+        run: flutter pub get
+
+      - name: Build release
+        run: flutter build windows --release
+
+      - name: Ensure Inno Setup is available
+        shell: pwsh
+        run: |
+          $candidates = @(
+            (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'),
+            (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe')
+          )
+          if (-not ($candidates | Where-Object { Test-Path $_ })) {
+            # GitHub 的 windows-2025 镜像通常已自带 Inno Setup 6；
+            # 镜像变更导致缺失时再用 Chocolatey 兜底安装。
+            choco install innosetup -y --no-progress
+          }
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $versionLine = Get-Content pubspec.yaml | Where-Object { $_ -match '^version:\s*\S+' } | Select-Object -First 1
+          if (-not $versionLine) { throw 'pubspec.yaml 缺少 version 字段' }
+          $fullVersion = ($versionLine -replace '^version:\s*', '').Trim()
+          $appVersion = ($fullVersion -split '\+')[0]
+
+          $runnerDir = Join-Path $env:GITHUB_WORKSPACE 'build\windows\x64\runner\Release'
+          if (-not (Test-Path (Join-Path $runnerDir 'QuickWrite.exe'))) {
+            throw "未找到 $runnerDir\QuickWrite.exe"
+          }
+
+          $outDir = Join-Path $env:GITHUB_WORKSPACE 'release-out'
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+
+          $isccCandidates = @(
+            (Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'),
+            (Join-Path $env:ProgramFiles 'Inno Setup 6\ISCC.exe')
+          )
+          $iscc = $isccCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw '未找到 Inno Setup 6 的 ISCC.exe' }
+
+          & $iscc "/dMyAppVersion=$appVersion" "/O$outDir" 'scripts\windows\setup.iss'
+          if ($LASTEXITCODE -ne 0) { throw "ISCC 退出码 $LASTEXITCODE" }
+
+          Get-ChildItem $outDir | ForEach-Object { Write-Host "已生成 $($_.Name) ($($_.Length) bytes)" }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: quick-write-windows-x64
+          path: release-out/quick-write-*-x64-setup.exe
+          if-no-files-found: error
+          retention-days: 30

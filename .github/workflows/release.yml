@@ -1,0 +1,154 @@
+name: Release QuickWrite
+
+# 打 v 开头的 tag 即触发发版；也支持在 Actions 页面手动指定已有 tag 重跑。
+# 产物先生成 GitHub 草稿 Release，人工确认文案后再 Publish；
+# Publish 事件会触发 sync-gitee-release.yml 把同一份 Release 同步到 Gitee。
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的 tag，例如 v1.2.9'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Check tag matches pubspec version
+        id: meta
+        env:
+          EVENT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ -n "${EVENT_TAG}" ]; then
+            TAG="${EVENT_TAG}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+
+          FULL_VERSION="$(awk '/^version:/ {print $2; exit}' pubspec.yaml | tr -d '"')"
+          APP_VERSION="${FULL_VERSION%%+*}"
+          TAG_VERSION="${TAG#v}"
+
+          if [ -z "${APP_VERSION}" ] || [ -z "${TAG_VERSION}" ]; then
+            echo "::error::无法解析版本号：pubspec=${FULL_VERSION}，tag=${TAG}"
+            exit 1
+          fi
+          if [ "${APP_VERSION}" != "${TAG_VERSION}" ]; then
+            echo "::error::tag ${TAG} 与 pubspec 版本 ${APP_VERSION} 不一致，请改 tag 或先更新 pubspec"
+            exit 1
+          fi
+
+          echo "version=${APP_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+  build-deb:
+    needs: validate
+    uses: ./.github/workflows/build-linux-deb.yml
+
+  build-macos:
+    needs: validate
+    uses: ./.github/workflows/build-macos.yml
+
+  build-windows:
+    needs: validate
+    uses: ./.github/workflows/build-windows.yml
+
+  build-android:
+    needs: validate
+    uses: ./.github/workflows/build-android.yml
+    secrets: inherit
+
+  publish:
+    needs: [validate, build-deb, build-macos, build-windows, build-android]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Prepare human-written release summary
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          SUMMARY=".github/release-summary.md"
+          if [ ! -f "${SUMMARY}" ]; then
+            echo "::error::缺少 ${SUMMARY}，请先创建发版摘要"
+            exit 1
+          fi
+
+          HEADER="$(head -n 1 "${SUMMARY}" | tr -d '[:space:]')"
+          EXPECTED="#${VERSION}"
+          if [ "${HEADER}" != "${EXPECTED}" ]; then
+            echo "::error::${SUMMARY} 首行必须是 ${EXPECTED}，当前是 ${HEADER}；发版前记得更新摘要"
+            exit 1
+          fi
+
+          # 第 1 行是机器校验用的版本号，第 2 行留空，正文从第 3 行开始。
+          # 正文里的 {{VERSION}} 由 CI 替换，避免下载链接里的版本号手写错。
+          tail -n +3 "${SUMMARY}" > release-prefix.md
+          if [ ! -s release-prefix.md ]; then
+            echo "::error::发版摘要正文不能为空"
+            exit 1
+          fi
+          sed -i "s/{{VERSION}}/${VERSION}/g" release-prefix.md
+          if grep -q '{{' release-prefix.md; then
+            echo "::error::发版摘要里有未替换的占位符，请检查 {{VERSION}}"
+            exit 1
+          fi
+          cat release-prefix.md
+
+      - name: Download all platform artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: quick-write-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify every platform has an installable asset
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+          for name in \
+            "quickwrite_${VERSION}_amd64.deb" \
+            "quick-write-${VERSION}-macos-universal.dmg" \
+            "quick-write-${VERSION}-x64-setup.exe" \
+            "quick-write-${VERSION}-android.apk"; do
+            if [ ! -s "release-assets/${name}" ]; then
+              echo "::error::缺少发布资产 ${name}"
+              exit 1
+            fi
+          done
+          echo "=== 发布资产 ==="
+          ls -lh release-assets
+
+      - name: Create draft GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.validate.outputs.tag }}
+          name: QuickWrite ${{ needs.validate.outputs.version }}
+          body_path: release-prefix.md
+          generate_release_notes: true
+          draft: true
+          files: release-assets/*
+          fail_on_unmatched_files: true

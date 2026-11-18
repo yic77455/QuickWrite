@@ -1,0 +1,78 @@
+name: Sync release to Gitee
+
+# GitHub 草稿 Release 被人工 Publish 后触发。Gitee 是客户端的优先更新源，
+# 两边必须同名同内容；这一步把 GitHub 上的 Release 正文与全部资产镜像过去。
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Download GitHub release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p assets
+          gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" --dir assets --clobber
+          ls -lh assets
+
+      - name: Create Gitee release and upload assets
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+          RELEASE_NAME: ${{ github.event.release.name }}
+          RELEASE_BODY: ${{ github.event.release.body }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GITEE_TOKEN:-}" ]; then
+            echo "::warning::未配置 Secret GITEE_TOKEN，跳过 Gitee 同步"
+            exit 0
+          fi
+
+          OWNER="yic77455"
+          REPO="quick-write"
+          API="https://gitee.com/api/v5/repos/${OWNER}/${REPO}"
+
+          printf '%s\n' "${RELEASE_BODY}" > release-body.md
+
+          CREATE_RESPONSE="$(curl -sS -X POST "${API}/releases" \
+            --data-urlencode "access_token=${GITEE_TOKEN}" \
+            --data-urlencode "tag_name=${TAG}" \
+            --data-urlencode "name=${RELEASE_NAME}" \
+            --data-urlencode "body@release-body.md" \
+            --data-urlencode "prerelease=false")"
+
+          RELEASE_ID="$(printf '%s' "${CREATE_RESPONSE}" | jq -r '.id // empty' 2>/dev/null || true)"
+
+          if [ -z "${RELEASE_ID}" ]; then
+            echo "Gitee 创建 Release 未返回 id，尝试查询同 tag 的已有 Release"
+            echo "${CREATE_RESPONSE}"
+            EXIST_RESPONSE="$(curl -sS "${API}/releases/tags/${TAG}?access_token=${GITEE_TOKEN}" || true)"
+            RELEASE_ID="$(printf '%s' "${EXIST_RESPONSE}" | jq -r '.id // empty' 2>/dev/null || true)"
+          fi
+
+          if [ -z "${RELEASE_ID}" ]; then
+            echo "::error::Gitee Release 创建失败"
+            exit 1
+          fi
+
+          echo "Gitee Release id=${RELEASE_ID}"
+
+          shopt -s nullglob
+          for asset in assets/*; do
+            echo "上传 $(basename "${asset}")"
+            curl -fsS -X POST \
+              "${API}/releases/${RELEASE_ID}/attach_files?access_token=${GITEE_TOKEN}" \
+              -F "file=@${asset}" > /dev/null
+          done
+
+          echo "Gitee 同步完成：https://gitee.com/${OWNER}/${REPO}/releases/tag/${TAG}"

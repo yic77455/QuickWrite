@@ -48,11 +48,11 @@ unlinked.ds
 unlinked_spec.ds
 
 # Android related
-**/android/**/gradle-wrapper.jar
+# gradlew / gradlew.bat / gradle-wrapper.jar 必须进版本库，否则 CI 干净 checkout
+# 后没有 Gradle wrapper，flutter build apk 会退化到系统 gradle 而失败。
+# key.properties 与 .jks 仍保持忽略，签名材料只走 GitHub Secrets。
 .gradle/
 **/android/captures/
-**/android/gradlew
-**/android/gradlew.bat
 **/android/local.properties
 **/android/**/GeneratedPluginRegistrant.java
 **/android/key.properties
