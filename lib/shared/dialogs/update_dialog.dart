@@ -5,6 +5,7 @@ import 'package:quick_write/core/utils/file_explorer.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/utils/url_opener.dart';
+import 'package:quick_write/shared/widgets/release_notes_view.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 
 /// 检查更新对话框
@@ -333,10 +334,7 @@ class _UpdateDialogContentState extends State<_UpdateDialogContent> {
               borderRadius: BorderRadius.circular(10),
             ),
             child: SingleChildScrollView(
-              child: Text(
-                result.releaseNotes,
-                style: context.bodySmall?.copyWith(height: 1.6),
-              ),
+              child: ReleaseNotesView(markdown: result.releaseNotes),
             ),
           ),
         ],
