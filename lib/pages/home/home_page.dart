@@ -146,7 +146,11 @@ class _DesktopHomeShell extends StatelessWidget {
           Expanded(
             child: Scaffold(
               // 标题栏放在内部 Scaffold 中，给侧边栏让出左侧空间
-              appBar: AppTitleBar(height: 40, actions: [_buildThemeToggle(context)]),
+              // macOS 上主题切换按钮隐藏：且标题栏右侧在 Mac 上不应出现冗余的自绘控件
+              appBar: AppTitleBar(
+                height: 40,
+                actions: [if (!PlatformCapabilities.isMacOS) _buildThemeToggle(context)],
+              ),
               // 根据选中索引，显示右侧内容
               body: _buildDesktopHomeContent(context),
             ),

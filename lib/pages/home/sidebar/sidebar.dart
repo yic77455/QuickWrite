@@ -16,6 +16,9 @@ import 'package:quick_write/shared/widgets/widgets.dart';
 class SidebarWidget extends StatelessWidget {
   const SidebarWidget({super.key});
 
+  /// macOS 上为窗口红绿灯让出的顶部高度（与桌面标题栏高度一致）
+  static const double _macTrafficLightInset = 40;
+
   @override
   Widget build(BuildContext context) {
     // 使用 context.watch 监听 SidebarProvider 和 HomeStateProvider 的变化
@@ -28,6 +31,17 @@ class SidebarWidget extends StatelessWidget {
       context,
       width: isExpanded ? 200 : 64, // 展开宽200，折叠宽64
       children: [
+        // macOS 窗口使用隐藏标题栏，红绿灯绘制在左上角：
+        // 这里只让侧栏顶部空出一条标题栏高度，LOGO 与导航图标整体下移到红绿灯下方，
+        // 右侧内容区保持原位，不受影响。
+        if (PlatformCapabilities.isMacOS)
+          SizedBox(
+            height: _macTrafficLightInset,
+            // 该空白同时作为窗口拖拽区（hidden title bar 下需要可拖动区域）
+            child: PlatformCapabilities.supportsNativeWindowControl
+                ? const DragToMoveArea(child: SizedBox.expand())
+                : const SizedBox.expand(),
+          ),
         Padding(
           padding: const EdgeInsets.only(top: 8, left: 8, right: 8),
           child: _buildLogo(context, sidebarProvider),
@@ -101,6 +115,9 @@ class SidebarWidget extends StatelessWidget {
 
   /// 桌面端 LOGO 区域：点击图标可展开/折叠侧边栏
   Widget _buildLogo(BuildContext context, HomeSidebarProvider sidebarProvider) {
+    // macOS 上侧栏固定展开，LOGO 不再承担折叠开关职责
+    final bool isMacOS = PlatformCapabilities.isMacOS;
+
     // LOGO 文字区域
     final Widget titleArea = _buildTitleArea(context);
 
@@ -112,8 +129,8 @@ class SidebarWidget extends StatelessWidget {
           // LOGO按钮区域（MouseRegion在外层，避免与InkWell嵌套冲突）
           MouseRegion(
             // 使用 Provider 的方法更新悬停状态，而不是 setState
-            onEnter: (_) => sidebarProvider.setLogoHovered(true),
-            onExit: (_) => sidebarProvider.setLogoHovered(false),
+            onEnter: isMacOS ? null : (_) => sidebarProvider.setLogoHovered(true),
+            onExit: isMacOS ? null : (_) => sidebarProvider.setLogoHovered(false),
             child: Material(
               color: Colors.transparent,
               shape: RoundedRectangleBorder(
@@ -121,20 +138,22 @@ class SidebarWidget extends StatelessWidget {
               ),
               clipBehavior: Clip.antiAlias,
               child: InkWell(
-                hoverColor: Theme.of(
-                  context,
-                ).colorScheme.primary.withValues(alpha: 0.1),
-                onTap: () {
-                  // 使用 Provider 的方法切换展开状态，而不是 setState
-                  sidebarProvider.toggleExpanded();
-                },
+                hoverColor: isMacOS
+                    ? Colors.transparent
+                    : Theme.of(context).colorScheme.primary.withValues(alpha: 0.1),
+                onTap: isMacOS
+                    ? null
+                    : () {
+                        // 使用 Provider 的方法切换展开状态，而不是 setState
+                        sidebarProvider.toggleExpanded();
+                      },
                 child: SizedBox(
                   width: 48,
                   height: 48,
                   // Center 提供松约束，避免图片被外层紧约束拉伸到 48
                   child: Center(
                     // 悬停时显示展开/折叠箭头，默认显示应用图标
-                    child: sidebarProvider.isLogoHovered
+                    child: (!isMacOS && sidebarProvider.isLogoHovered)
                         ? Icon(
                             sidebarProvider.isExpanded
                                 ? Icons.keyboard_double_arrow_left_rounded

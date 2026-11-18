@@ -29,9 +29,9 @@ class WindowSection extends StatelessWidget {
     return SettingSectionCard(
       title: '窗口',
       children: [
-        // Linux 端暂不支持独立窗口工作台，隐藏该开关，
+        // Linux / macOS 端暂不支持独立窗口工作台，隐藏该开关，
         // 避免用户开启后走进不可用的多窗口流程。
-        if (!PlatformCapabilities.isLinux)
+        if (!PlatformCapabilities.isLinux && !PlatformCapabilities.isMacOS)
           _buildMultiWindowTile(context, settingsService),
         _buildCloseActionTile(context, settingsService),
       ],

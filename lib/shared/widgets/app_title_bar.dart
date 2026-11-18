@@ -58,7 +58,14 @@ class _AppTitleBarState extends State<AppTitleBar> {
   ///
   /// 使用隐藏标题栏时，红、黄、绿三个按钮绘制在窗口左上角，
   /// 需要为它们预留空间，避免遮挡页面自身的左侧内容
-  static const double _macTrafficLightWidth = 78;
+  static const double _macTrafficLightWidth = 84;
+
+  /// macOS 上标题栏内容的垂直偏移
+  static const double _macTitleVerticalOffset = -4;
+
+  /// macOS 红绿灯与 LOGO 之间分隔线的位置与尺寸
+  static const double _macDividerLeft = _macTrafficLightWidth - 8;
+  static const double _macDividerHeight = 20;
 
   @override
   Widget build(BuildContext context) {
@@ -71,11 +78,41 @@ class _AppTitleBarState extends State<AppTitleBar> {
     final bool showCaptionButtons =
         !isMacOS && PlatformCapabilities.supportsNativeWindowControl;
 
-    // macOS 在左侧预留红绿灯按钮的空间，使页面自身的左侧内容显示在其右侧
+    // macOS 在左侧预留红绿灯按钮的空间，并把标题栏内容上移到与红绿灯对齐
+    final Widget baseLeading = Padding(
+      padding: const EdgeInsets.only(left: _macTrafficLightWidth),
+      child: Transform.translate(
+        offset: const Offset(0, _macTitleVerticalOffset),
+        child: widget.leading ?? const SizedBox.shrink(),
+      ),
+    );
+
+    // 分隔线只在标题栏确有内容时显示
+    final bool showMacDivider = widget.leading != null || widget.title != null;
+
+    // 分隔线用 Stack 绝对定位叠加，不占布局宽度
     final Widget? effectiveLeading = isMacOS
-        ? Padding(
-            padding: const EdgeInsets.only(left: _macTrafficLightWidth),
-            child: widget.leading ?? const SizedBox.shrink(),
+        ? Stack(
+            children: [
+              baseLeading,
+              if (showMacDivider)
+                Positioned(
+                  left: _macDividerLeft,
+                  top: 0,
+                  bottom: 0,
+                  width: 1,
+                  child: Transform.translate(
+                    offset: const Offset(0, _macTitleVerticalOffset),
+                    child: Center(
+                      child: Container(
+                        width: 1,
+                        height: _macDividerHeight,
+                        color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.6),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           )
         : widget.leading;
     final double? effectiveLeadingWidth = isMacOS
@@ -93,7 +130,15 @@ class _AppTitleBarState extends State<AppTitleBar> {
       leadingWidth: effectiveLeadingWidth,
       titleSpacing: widget.titleSpacing,
       title: widget.title != null
-          ? IgnorePointer(child: widget.title) // 忽略并穿透手势
+          ? IgnorePointer(
+              // macOS 上标题与红绿灯对齐：同样上移，保持与 leading 一致
+              child: isMacOS
+                  ? Transform.translate(
+                      offset: const Offset(0, _macTitleVerticalOffset),
+                      child: widget.title,
+                    )
+                  : widget.title,
+            ) // 忽略并穿透手势
           : null,
       centerTitle: widget.centerTitle ?? false, // 是否居中，桌面端标题通常靠左
       // 3. 右侧操作区：外部传入的 actions + 固定的窗口控制按钮
