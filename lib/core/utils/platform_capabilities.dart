@@ -38,15 +38,7 @@ class PlatformCapabilities {
 
   // ================= 平台能力 =================
 
-  /// 是否支持多窗口工作台
-  ///
-  /// 仅 Windows 开放。desktop_multi_window 的 Linux 原生层在销毁子窗口时会移除
-  /// FlView 并广播窗口变更，与 window_manager 的 delete-event 关闭拦截互相阻塞，
-  /// 实测会导致主窗口无响应；且每个子 engine 都要重跑一遍完整初始化，打开明显偏慢。
-  ///
-  /// macOS 端 desktop_multi_window 已踩过多个原生坑（子窗口插件未注册、Cmd+Q 退出
-  /// 误判、富文本剪贴板通道不跨 engine），
-  /// 为避免发布后不可控的 BUG，暂与 Linux 一样禁用多窗口，工作台统一在当前窗口内打开。
+  /// 是否支持多窗口工作台；仅 Windows 开放，Linux/macOS 暂禁用
   static bool get supportsMultiWindow => isWindows;
 
   /// Linux 会话是否运行在 Wayland 下

@@ -64,6 +64,9 @@ class TrayService with TrayListener {
   /// 为 true 时关闭拦截跳过关闭行为的询问，直接退出程序
   bool _exitRequested = false;
 
+  /// 离开工作台前的确认回调；返回 false 表示取消离开
+  Future<bool> Function()? onLeaveWorkspaceBeforeNavigate;
+
   // ================= 初始化与销毁 =================
 
   /// 启动托盘服务（仅主窗口调用一次）
@@ -208,6 +211,10 @@ class TrayService with TrayListener {
   /// 菜单栏入口可能在工作台等其他路由下触发，先回到主页再切换页面
   Future<void> _openHomePage(HomePageEnum page) async {
     if (appRouter.state.matchedLocation != '/') {
+      // 离开工作台前先确认，用户取消则中止
+      final canLeave = await onLeaveWorkspaceBeforeNavigate?.call() ?? true;
+      if (!canLeave) return;
+
       appRouter.go('/');
       // 等待主页挂载完成后再发出切换请求
       await WidgetsBinding.instance.endOfFrame;

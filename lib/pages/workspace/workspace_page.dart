@@ -7,6 +7,7 @@ import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/providers/window_provider.dart';
 import 'package:quick_write/core/services/cache_services/window_cache_service.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
+import 'package:quick_write/core/services/tray_service.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/tab_close_guard.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
@@ -159,6 +160,12 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
       // 设置主窗口请求关闭时的回调：主窗口退出时先请求本窗口确认，再关闭本窗口
       MultiWindowService.instance.onRequestClose = confirmCloseAndCleanup;
 
+      // 注册菜单栏入口的离开确认回调
+      TrayService.instance.onLeaveWorkspaceBeforeNavigate = () => _confirmBeforeLeaving(
+        title: '返回书架',
+        descriptionTemplate: '有 {n} 个标签页的修改尚未保存，是否在返回前保存？',
+      );
+
       // 设置从最大化恢复时的回调
       // 在窗口恢复前将边栏宽度调整到恢复后窗口的安全范围内，避免溢出
       _windowProvider!.onBeforeUnmaximize = () async {
@@ -230,6 +237,8 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
     _windowProvider?.onAfterMaximize = null;
     _windowProvider?.onAfterUnmaximize = null;
     MultiWindowService.instance.onRequestClose = null;
+    // 清空菜单栏入口的确认回调，避免持有失效 context
+    TrayService.instance.onLeaveWorkspaceBeforeNavigate = null;
     super.dispose();
   }
 
@@ -886,26 +895,35 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
     showWordCountDialog(context: context, result: result, chapterTitle: currentTab.title);
   }
 
+  /// 离开前确认未保存内容并保存光标与会话；返回 false 表示取消
+  Future<bool> _confirmBeforeLeaving({
+    required String title,
+    required String descriptionTemplate,
+  }) async {
+    if (!mounted) return false;
+    // 在 async gap 之前捕获 provider 引用，避免跨 async gap 使用 BuildContext
+    final provider = context.read<WorkspaceProvider>();
+    final shouldLeave = await TabCloseGuard.confirmCloseWindow(
+      context: context,
+      provider: provider,
+      title: title,
+      descriptionTemplate: descriptionTemplate,
+      saveText: '保存',
+    );
+    if (!shouldLeave) return false;
+    await provider.saveAllCursorPositions();
+    await provider.saveTabSession();
+    return true;
+  }
+
   /// 返回书架
   /// 返回前若存在未保存内容，弹窗让用户选择保存/不保存/取消
   Future<void> _handleBackToShelf() async {
-    // 在 async gap 之前捕获 provider 引用，避免跨 async gap 使用 BuildContext
-    final provider = context.read<WorkspaceProvider>();
-    // 返回书架前检查未保存内容，让用户选择保存/不保存/取消
-    final shouldReturn = await TabCloseGuard.confirmCloseWindow(
-      context: context,
-      provider: provider,
+    final shouldReturn = await _confirmBeforeLeaving(
       title: '返回书架',
       descriptionTemplate: '有 {n} 个标签页的修改尚未保存，是否在返回前保存？',
-      saveText: '保存',
     );
-    if (!shouldReturn) return;
-    // 保存所有打开标签页的光标位置到缓存
-    await provider.saveAllCursorPositions();
-    // 保存标签页会话，供下次打开作品时恢复
-    await provider.saveTabSession();
-    // 返回书架主界面
-    if (!mounted) return;
+    if (!shouldReturn || !mounted) return;
     // 移动端工作台以 push 方式打开，返回时弹出当前页面以播放反向切换动效；
     // 工作台为唯一页面时无页面可弹出，直接跳转到书架
     if (PlatformCapabilities.isMobile && context.canPop()) {

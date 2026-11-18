@@ -54,17 +54,14 @@ class AppTitleBar extends StatefulWidget implements PreferredSizeWidget {
 // 使用 Provider 管理窗口状态，不再需要混入 WindowListener
 // 窗口监听逻辑现在由 WindowProvider 统一管理
 class _AppTitleBarState extends State<AppTitleBar> {
-  /// macOS 系统红绿灯按钮占用的左侧宽度
-  ///
-  /// 使用隐藏标题栏时，红、黄、绿三个按钮绘制在窗口左上角，
-  /// 需要为它们预留空间，避免遮挡页面自身的左侧内容
+  /// macOS 红绿灯占用的左侧宽度
   static const double _macTrafficLightWidth = 84;
 
   /// macOS 上标题栏内容的垂直偏移
   static const double _macTitleVerticalOffset = -4;
 
   /// macOS 红绿灯与 LOGO 之间分隔线的位置与尺寸
-  static const double _macDividerLeft = _macTrafficLightWidth - 8;
+  static const double _macDividerLeft = _macTrafficLightWidth - 4;
   static const double _macDividerHeight = 20;
 
   @override

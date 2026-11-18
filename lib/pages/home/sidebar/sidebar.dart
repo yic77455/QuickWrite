@@ -31,13 +31,10 @@ class SidebarWidget extends StatelessWidget {
       context,
       width: isExpanded ? 200 : 64, // 展开宽200，折叠宽64
       children: [
-        // macOS 窗口使用隐藏标题栏，红绿灯绘制在左上角：
-        // 这里只让侧栏顶部空出一小段，LOGO 与导航图标整体下移到红绿灯下方，
-        // 右侧内容区保持原位，不受影响。
+        // macOS 顶部让出红绿灯空间，只下移侧栏内容
         if (PlatformCapabilities.isMacOS)
           SizedBox(
             height: _macTrafficLightInset,
-            // 该空白同时作为窗口拖拽区（hidden title bar 下需要可拖动区域）
             child: PlatformCapabilities.supportsNativeWindowControl
                 ? const DragToMoveArea(child: SizedBox.expand())
                 : const SizedBox.expand(),

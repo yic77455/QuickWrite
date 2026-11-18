@@ -267,10 +267,7 @@ class SettingsService extends ChangeNotifier {
     return updateSettings(newSettings);
   }
   
-  /// 获取是否在新窗口中打开工作台
-  ///
-  /// Linux / macOS 端暂不支持多窗口工作台，读取时恒为 false；配置值本身仍保留，
-  /// 便于这些平台日后恢复能力后无需迁移数据。
+  /// 是否在新窗口中打开工作台；Linux/macOS 恒为 false，配置值保留待日后恢复
   bool get openWorkspaceInNewWindow =>
       PlatformCapabilities.isLinux || PlatformCapabilities.isMacOS
           ? false

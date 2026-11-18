@@ -13,9 +13,7 @@ class HomeSidebarProvider extends ChangeNotifier {
   // 鼠标是否悬停在 LOGO 区域，默认为 false
   bool _isLogoHovered = false;
 
-  /// 构造函数，从缓存文件读取初始展开状态
-  ///
-  /// macOS 上强制展开：红绿灯绘制在窗口左上角，折叠态会被按钮压住；展开到 200px 后边界移出该区域。
+  /// 从缓存读取展开状态；macOS 上强制展开避开红绿灯
   HomeSidebarProvider()
     : _isExpanded = PlatformCapabilities.isMacOS || WindowCacheService.instance.homeSidebarExpanded;
 
@@ -25,9 +23,7 @@ class HomeSidebarProvider extends ChangeNotifier {
   // 获取 LOGO 悬停状态
   bool get isLogoHovered => _isLogoHovered;
 
-  // 切换侧边栏展开/收起状态
-  // 点击 LOGO 按钮时调用此方法
-  // macOS 上侧栏必须保持展开，直接返回（也不会走到写缓存的逻辑）
+  // 切换展开状态；macOS 固定展开
   void toggleExpanded() {
     if (PlatformCapabilities.isMacOS) return;
     _isExpanded = !_isExpanded;
@@ -35,9 +31,7 @@ class HomeSidebarProvider extends ChangeNotifier {
     notifyListeners();  // 通知监听者状态已改变
   }
 
-  // 设置侧边栏展开状态
-  // 用于直接控制侧边栏的展开/收起
-  // macOS 上侧栏必须保持展开，直接返回
+  // 设置展开状态；macOS 固定展开
   void setExpanded(bool expanded) {
     if (PlatformCapabilities.isMacOS) return;
     if (_isExpanded != expanded) {
