@@ -141,6 +141,9 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 焦点节点
   final FocusNode _focusNode = FocusNode();
 
+  /// 章节标题输入框的焦点节点
+  final FocusNode _titleFocusNode = FocusNode();
+
   /// 章节标题区域的测量键
   final GlobalKey _titleAreaKey = GlobalKey();
 
@@ -392,6 +395,7 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     _scrollGuard.dispose();
     widget.controller.removeListener(_onControllerChanged);
     _focusNode.removeListener(_onFocusChanged);
+    _titleFocusNode.dispose();
     SettingsService.instance.removeListener(_onSettingsChanged);
     _customHighlightService?.removeListener(_onSettingsChanged);
     _outlineKeywordService?.removeListener(_onSettingsChanged);
@@ -1632,9 +1636,10 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
       padding: EdgeInsets.only(top: settings.chapterTitleTopMargin + 16),
       child: ImeCursorFixerWrapper(
         controller: titleController,
-        focusNode: _focusNode,
+        focusNode: _titleFocusNode,
         child: TextField(
           controller: titleController,
+          focusNode: _titleFocusNode,
           decoration: const InputDecoration(
             filled: false,
             border: InputBorder.none,
