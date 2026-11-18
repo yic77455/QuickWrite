@@ -101,7 +101,8 @@ jobs:
           APP_PATH="$PWD/build/macos/Build/Products/Release/QuickWrite.app"
           BIN="${APP_PATH}/Contents/MacOS/QuickWrite"
           LOG="$PWD/quickwrite-run.log"
-          SHOT="$PWD/quickwrite-screenshot.png"
+          SHELF_SHOT="$PWD/quickwrite-screenshot.png"
+          WORKSPACE_SHOT="$PWD/quickwrite-workspace-screenshot.png"
 
           if [ ! -x "$BIN" ]; then
             echo "未找到可执行文件：$BIN"
@@ -110,12 +111,21 @@ jobs:
 
           # 直接运行二进制（而非 open -a），这样 stdout/stderr 能重定向到日志，
           # 便于捕获 Metal / MissingPluginException / Unhandled Exception 等异常。
+          #
+          # 分两次启动，截两张图：
+          # 1) 书架页：不设环境变量，正常启动（空书架）。
+          # 2) 工作台页：QUICKWRITE_SMOKE_TEST=1 触发 main.dart 的
+          #    _openWorkspaceForSmokeTest()，seed 一本书并进入工作台，
+          #    否则全新 runner 书架为空、截不到工作台窗口。
+
+          echo "===== 第一次启动：书架页 ====="
+          unset QUICKWRITE_SMOKE_TEST
           "$BIN" > "$LOG" 2>&1 &
           APP_PID=$!
           echo "已启动应用，pid=$APP_PID"
 
           # 等待初始化：字体枚举、Isar 建库、窗口创建等
-          sleep 20
+          sleep 25
 
           if kill -0 "$APP_PID" 2>/dev/null; then
             echo "应用进程存活"
@@ -130,11 +140,32 @@ jobs:
           echo "=== 显示器信息 ==="
           system_profiler SPDisplaysDataType 2>/dev/null | grep -iE "resolution|UI Looks like" || true
 
-          # 截全屏（-x 静音）
-          screencapture -x -t png "$SHOT" || echo "::warning::截图命令失败"
-          ls -lh "$SHOT" 2>/dev/null || true
+          # 截全屏（-x 静音）：书架页
+          screencapture -x -t png "$SHELF_SHOT" || echo "::warning::书架截图命令失败"
+          ls -lh "$SHELF_SHOT" 2>/dev/null || true
 
-          echo "=== 应用运行日志 ==="
+          # 收尾第一次启动，避免残留进程影响第二次
+          kill "$APP_PID" 2>/dev/null || true
+          osascript -e 'tell application "QuickWrite" to quit' >/dev/null 2>&1 || true
+          sleep 3
+
+          echo "===== 第二次启动：工作台页 ====="
+          export QUICKWRITE_SMOKE_TEST=1
+          "$BIN" > "$LOG" 2>&1 &
+          APP_PID=$!
+          echo "已启动应用，pid=$APP_PID"
+
+          # 额外留出 seed 数据 + 导航到工作台的时间
+          sleep 25
+
+          osascript -e 'tell application "QuickWrite" to activate' >/dev/null 2>&1 || true
+          sleep 2
+
+          # 截全屏：工作台页
+          screencapture -x -t png "$WORKSPACE_SHOT" || echo "::warning::工作台截图命令失败"
+          ls -lh "$WORKSPACE_SHOT" 2>/dev/null || true
+
+          echo "=== 应用运行日志（第二次启动） ==="
           cat "$LOG" 2>/dev/null || true
 
           # 日志里出现这些关键字说明渲染/插件有问题
@@ -154,6 +185,7 @@ jobs:
           name: quickwrite-macos-smoketest
           path: |
             quickwrite-screenshot.png
+            quickwrite-workspace-screenshot.png
             quickwrite-run.log
           if-no-files-found: warn
           retention-days: 30

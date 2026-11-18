@@ -16,8 +16,8 @@ import 'package:quick_write/shared/widgets/widgets.dart';
 class SidebarWidget extends StatelessWidget {
   const SidebarWidget({super.key});
 
-  /// macOS 上为窗口红绿灯让出的顶部高度（与桌面标题栏高度一致）
-  static const double _macTrafficLightInset = 40;
+  /// macOS 上为窗口红绿灯让出的顶部高度
+  static const double _macTrafficLightInset = 20;
 
   @override
   Widget build(BuildContext context) {
@@ -32,7 +32,7 @@ class SidebarWidget extends StatelessWidget {
       width: isExpanded ? 200 : 64, // 展开宽200，折叠宽64
       children: [
         // macOS 窗口使用隐藏标题栏，红绿灯绘制在左上角：
-        // 这里只让侧栏顶部空出一条标题栏高度，LOGO 与导航图标整体下移到红绿灯下方，
+        // 这里只让侧栏顶部空出一小段，LOGO 与导航图标整体下移到红绿灯下方，
         // 右侧内容区保持原位，不受影响。
         if (PlatformCapabilities.isMacOS)
           SizedBox(

@@ -154,6 +154,41 @@ void main(List<String> args) async {
 
   // 启动时按设置自动打开上一次编辑的作品（不阻塞首帧渲染）
   _autoOpenLastEditedWorkOnStartup();
+
+  // CI 冒烟测试专用：由环境变量触发，seed 一本书并直接进入工作台，
+  // 使 GitHub Actions 能截到真实原生窗口（含红绿灯/标题栏）。正常用户不会触发。
+  _openWorkspaceForSmokeTest();
+}
+
+/// CI 冒烟测试：seed 一本测试书并跳转到工作台
+///
+/// 仅在环境变量 QUICKWRITE_SMOKE_TEST=1 时生效（见 .github/workflows/build-macos.yml）。
+Future<void> _openWorkspaceForSmokeTest() async {
+  if (Platform.environment['QUICKWRITE_SMOKE_TEST'] != '1') return;
+
+  const smokeBookUuid = 'smoke-test-book';
+  await WidgetsBinding.instance.endOfFrame;
+
+  try {
+    final isar = await DatabaseService.instance.open();
+    final existing = await isar.bookModels.where().uuidEqualTo(smokeBookUuid).findFirst();
+    if (existing == null) {
+      await isar.writeTxn(() async {
+        await isar.bookModels.put(
+          BookModel()
+            ..uuid = smokeBookUuid
+            ..title = '冒烟测试作品'
+            ..latestChapter = '第一章 序章'
+            ..wordCount = 1234,
+        );
+      });
+    }
+    // 多窗口已在桌面端收窄为仅 Windows，macOS 上该跳转不会被路由重定向拦截，
+    // 直接在当前窗口进入工作台
+    appRouter.go('/workspace/$smokeBookUuid');
+  } catch (e) {
+    debugPrint('冒烟测试打开工作台失败: $e');
+  }
 }
 
 /// 启动时按设置自动打开上一次编辑的作品
