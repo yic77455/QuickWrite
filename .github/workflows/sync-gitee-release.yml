@@ -2,9 +2,16 @@ name: Sync release to Gitee
 
 # GitHub 草稿 Release 被人工 Publish 后触发。Gitee 是客户端的优先更新源，
 # 两边必须同名同内容；这一步把 GitHub 上的 Release 正文与全部资产镜像过去。
+# 同步失败时可用 workflow_dispatch 指定同一个 tag 手动补跑，无需重发版本。
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要同步的 Release tag，例如 v1.2.9'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -14,10 +21,40 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
+      # 两种触发方式的 tag 来源不同：自动事件从 release 对象取，手动触发从 input 取。
+      # 手动补跑时 release 对象为空，name/body 改用 gh API 现查，避免传空值覆盖 Gitee。
+      - name: Resolve release metadata
+        id: meta
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          TAG="${EVENT_TAG:-$INPUT_TAG}"
+          if [ -z "${TAG}" ]; then
+            echo "::error::未指定要同步的 tag"
+            exit 1
+          fi
+
+          NAME="${{ github.event.release.name }}"
+          BODY="${{ github.event.release.body }}"
+          if [ -z "${NAME}" ] || [ -z "${BODY}" ]; then
+            NAME="$(gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json name -q .name)"
+            BODY="$(gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json body -q .body)"
+          fi
+
+          printf '%s' "${BODY}" > release-body.md
+          {
+            echo "tag=${TAG}"
+            echo "name=${NAME}"
+          } >> "$GITHUB_OUTPUT"
+          echo "同步目标：${TAG} / ${NAME}"
+
       - name: Download GitHub release assets
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.event.release.tag_name }}
+          TAG: ${{ steps.meta.outputs.tag }}
         run: |
           set -euo pipefail
           mkdir -p assets
@@ -27,9 +64,8 @@ jobs:
       - name: Create Gitee release and upload assets
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          TAG: ${{ github.event.release.tag_name }}
-          RELEASE_NAME: ${{ github.event.release.name }}
-          RELEASE_BODY: ${{ github.event.release.body }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          RELEASE_NAME: ${{ steps.meta.outputs.name }}
         run: |
           set -euo pipefail
 
@@ -42,11 +78,11 @@ jobs:
           REPO="quick-write"
           API="https://gitee.com/api/v5/repos/${OWNER}/${REPO}"
 
-          printf '%s\n' "${RELEASE_BODY}" > release-body.md
-
+          # Gitee 创建 Release 强制要求 target_commitish，否则报 target_commitish is missing。
           CREATE_RESPONSE="$(curl -sS -X POST "${API}/releases" \
             --data-urlencode "access_token=${GITEE_TOKEN}" \
             --data-urlencode "tag_name=${TAG}" \
+            --data-urlencode "target_commitish=main" \
             --data-urlencode "name=${RELEASE_NAME}" \
             --data-urlencode "body@release-body.md" \
             --data-urlencode "prerelease=false")"
