@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/services/workspace/custom_highlight_service.dart';
 import 'package:quick_write/core/services/workspace/outline_keyword_service.dart';
+import 'package:quick_write/core/services/workspace/sensitive_word_service.dart';
 import 'package:quick_write/core/models/outline_keyword.dart';
 import 'package:quick_write/core/utils/color_utils.dart';
 import 'package:quick_write/core/utils/custom_highlight_regex.dart';
@@ -14,19 +15,26 @@ import 'package:re_editor/re_editor.dart';
 /// 作为编辑器的 [CodeLineSpanBuilder] 注入，在每一行渲染前生成 TextSpan：
 /// - 注入排版设置：CodeEditorStyle 提供字体、字号、行高、字间距与文字颜色，
 ///   加粗、斜体、下划线需要在此叠加到基础样式上
-/// - 注入高亮：对话高亮、自定义关键词高亮、大纲关键词高亮、查找匹配高亮
-///   统一解析为带优先级的范围后着色
+/// - 注入高亮：对话高亮、自定义关键词高亮、大纲关键词高亮、敏感词标红、
+///   查找匹配高亮统一解析为带优先级的范围后着色
 ///
 /// 范围解析在全文层面完成并缓存（含每行起始偏移），逐行渲染时按行切片，
 /// 避免对全文重复解析。文本、高亮配置或查找匹配变化后需调用 [update] 刷新缓存。
 class ReEditorSpanBuilder {
-  ReEditorSpanBuilder({this.customHighlightService, this.outlineKeywordService});
+  ReEditorSpanBuilder({
+    this.customHighlightService,
+    this.outlineKeywordService,
+    this.sensitiveWordService,
+  });
 
   /// 自定义关键词高亮服务（为 null 时不参与着色）
   final CustomHighlightService? customHighlightService;
 
   /// 大纲关键词服务（为 null 时不参与着色）
   final OutlineKeywordService? outlineKeywordService;
+
+  /// 敏感词服务（为 null 或标红开关关闭时不参与着色）
+  final SensitiveWordService? sensitiveWordService;
 
   /// 关键词修饰键是否按住（Windows/Linux 为 Ctrl，macOS 为 Command）
   ///
@@ -129,9 +137,16 @@ class ReEditorSpanBuilder {
       }
       if (end > start) {
         // 查找匹配以文字底色标识，其余高亮覆盖文字颜色并可按范围叠加字重
-        final TextStyle highlightStyle = range.background
+        TextStyle highlightStyle = range.background
             ? baseStyle.copyWith(backgroundColor: range.color)
             : baseStyle.copyWith(color: range.color, fontWeight: _resolveFontWeight(baseStyle, range.fontWeight));
+        // 范围自带装饰线时叠加到文字上（敏感词以删除线标识）
+        if (range.decoration != null) {
+          highlightStyle = highlightStyle.copyWith(
+            decoration: range.decoration,
+            decorationColor: range.decorationColor,
+          );
+        }
         final String? keyword = _outlineKeywordFor(range.start, range.end);
         if (keyword != null && onKeywordHover != null) {
           // 大纲关键词命中段包成悬停注解，指针进入时由 re_editor 回调
@@ -226,6 +241,17 @@ class ReEditorSpanBuilder {
       if (keywordService != null) {
         _addOutlineKeywordRanges(text, keywordService, ranges);
       }
+    }
+
+    // 敏感词标红（最高优先级，开启后始终覆盖其它着色）
+    // 标红关闭时不做任何词条匹配，码字过程中不产生额外开销
+    final SensitiveWordService? sensitiveService = sensitiveWordService;
+    if (sensitiveService != null && sensitiveService.highlightEnabled) {
+      ranges.addAll(HighlightRangeResolver.parseSensitiveWordRanges(
+        text,
+        sensitiveService.words,
+        Theme.of(context).colorScheme.error,
+      ));
     }
 
     // 查找匹配高亮
@@ -340,6 +366,14 @@ class ReEditorSpanBuilder {
           ..write(item.isRegex ? 'R' : 'L');
       }
     }
+
+    // 敏感词标红开关与词库版本共同决定是否参与高亮、是否需要重新解析词条
+    final SensitiveWordService? sensitiveService = sensitiveWordService;
+    buffer
+      ..write('|')
+      ..write(sensitiveService?.highlightEnabled ?? false)
+      ..write('|')
+      ..write(sensitiveService?.revision ?? -1);
     return buffer.toString();
   }
 }

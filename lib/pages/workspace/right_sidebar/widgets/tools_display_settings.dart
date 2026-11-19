@@ -2,13 +2,32 @@ import 'package:flutter/material.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 
+/// 工具面板可配置显示项的分组
+///
+/// 不同分组的显示项各自维护显示顺序，互不影响：
+/// - [function]：功能区（随机取名、敏感词检测）
+/// - [section]：信息区块（书籍信息、码字统计）
+enum ToolsSectionGroup {
+  /// 功能区
+  function,
+
+  /// 信息区块
+  section,
+}
+
 /// 工具面板可配置显示的区块标识
 enum ToolsSection {
+  /// 随机取名
+  nameGen('nameGen', '随机取名', Icons.casino_rounded, ToolsSectionGroup.function),
+
+  /// 敏感词检测
+  sensitiveWord('sensitiveWord', '敏感词检测', Icons.gpp_bad_outlined, ToolsSectionGroup.function),
+
   /// 书籍信息
-  bookInfo('bookInfo', '书籍信息', Icons.menu_book_rounded),
+  bookInfo('bookInfo', '书籍信息', Icons.menu_book_rounded, ToolsSectionGroup.section),
 
   /// 码字统计
-  stats('stats', '码字统计', Icons.insights_rounded);
+  stats('stats', '码字统计', Icons.insights_rounded, ToolsSectionGroup.section);
 
   /// 区块唯一标识（用于持久化）
   final String id;
@@ -19,7 +38,14 @@ enum ToolsSection {
   /// 区块图标
   final IconData icon;
 
-  const ToolsSection(this.id, this.label, this.icon);
+  /// 所属分组
+  final ToolsSectionGroup group;
+
+  const ToolsSection(this.id, this.label, this.icon, this.group);
+
+  /// 获取指定分组下的全部显示项（按枚举声明顺序）
+  static List<ToolsSection> ofGroup(ToolsSectionGroup group) =>
+      values.where((s) => s.group == group).toList();
 
   /// 根据 ID 解析对应区块，未知 ID 回退为书籍信息
   static ToolsSection fromId(String id) =>
@@ -29,23 +55,42 @@ enum ToolsSection {
 /// 工具面板显示设置面板
 ///
 /// 作为工具面板标题栏"显示设置"按钮的下拉菜单内容，
-/// 用于配置书籍信息、码字统计两个区块的显示开关与显示顺序。
-/// [sectionOrder] 为当前可见区块的 ID 顺序列表，变化时通过 [onOrderChanged]
-/// 回调通知父级，由父级负责持久化与重新渲染。
+/// 用于配置功能区（随机取名、敏感词检测）与信息区块（书籍信息、码字统计）的
+/// 显示开关与显示顺序。两个区域相互独立，可见项只能在各自区域内拖拽排序，
+/// 隐藏项排在可见项下方且不参与拖拽。
+/// [functionOrder]、[sectionOrder] 分别为两个区域当前可见项的 ID 顺序列表，
+/// 变化时通过对应回调通知父级，由父级负责持久化与重新渲染。
 class ToolsDisplaySettings extends StatelessWidget {
-  /// 当前可见区块的 ID 顺序列表
+  /// 功能区当前可见项的 ID 顺序列表
+  final List<String> functionOrder;
+
+  /// 信息区块当前可见项的 ID 顺序列表
   final List<String> sectionOrder;
 
-  /// 顺序/可见性变化回调
-  final ValueChanged<List<String>> onOrderChanged;
+  /// 功能区顺序/可见性变化回调
+  final ValueChanged<List<String>> onFunctionOrderChanged;
+
+  /// 信息区块顺序/可见性变化回调
+  final ValueChanged<List<String>> onSectionOrderChanged;
 
   /// 菜单内容固定宽度
-  static const double _panelWidth = 220.0;
+  static const double _panelWidth = 235.0;
+
+  /// 拖拽手柄宽度（图标 16 + 与区块图标之间的间距 4）
+  static const double _dragHandleWidth = 20.0;
+
+  /// 单个配置行的固定高度
+  ///
+  /// 拖拽列表需要有界高度，行高固定后即可按可见项数量算出列表高度，
+  /// 避免在弹出菜单中触发列表视口的内联尺寸测量
+  static const double _rowHeight = 36.0;
 
   const ToolsDisplaySettings({
     super.key,
+    required this.functionOrder,
     required this.sectionOrder,
-    required this.onOrderChanged,
+    required this.onFunctionOrderChanged,
+    required this.onSectionOrderChanged,
   });
 
   @override
@@ -54,7 +99,8 @@ class ToolsDisplaySettings extends StatelessWidget {
 
     return Container(
       width: _panelWidth,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      // 左侧留白收窄，使拖拽手柄更贴近卡片左边缘
+      padding: const EdgeInsets.fromLTRB(10, 10, 12, 10),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -70,10 +116,22 @@ class ToolsDisplaySettings extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           _buildDivider(colorScheme),
-          // 各区块配置行
-          for (int i = 0; i < ToolsSection.values.length; i++) ...[
-            _buildSectionRow(context, ToolsSection.values[i]),
-          ],
+          // 功能区配置项
+          _buildGroupList(
+            context,
+            ToolsSectionGroup.function,
+            functionOrder,
+            onFunctionOrderChanged,
+          ),
+          // 两个区域之间的淡入淡出分隔线
+          _buildGroupDivider(colorScheme),
+          // 信息区块配置项
+          _buildGroupList(
+            context,
+            ToolsSectionGroup.section,
+            sectionOrder,
+            onSectionOrderChanged,
+          ),
         ],
       ),
     );
@@ -88,23 +146,144 @@ class ToolsDisplaySettings extends StatelessWidget {
     );
   }
 
-  /// 构建单个区块配置行
+  /// 构建两个区域之间的分隔线
   ///
-  /// 左侧为区块图标与名称，右侧为上移/下移按钮与显示开关。
-  /// 不可见区块的移动按钮禁用，开关控制其是否在显示列表中。
-  Widget _buildSectionRow(BuildContext context, ToolsSection section) {
-    final colorScheme = Theme.of(context).colorScheme;
-    final isVisible = sectionOrder.contains(section.id);
-    // 该区块在可见列表中的位置（-1 表示不可见）
-    final visibleIndex = sectionOrder.indexOf(section.id);
-    final canMoveUp = visibleIndex > 0;
-    final canMoveDown = visibleIndex >= 0 && visibleIndex < sectionOrder.length - 1;
-
+  /// 不占满面板宽度，两端渐隐，用于区分功能区与信息区块
+  Widget _buildGroupDivider(ColorScheme colorScheme) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Center(
+        child: FractionallySizedBox(
+          widthFactor: 0.9,
+          child: Container(
+            height: 1,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(1),
+              gradient: LinearGradient(
+                colors: [
+                  colorScheme.outlineVariant.withValues(alpha: 0),
+                  colorScheme.outlineVariant.withValues(alpha: 0.55),
+                  colorScheme.outlineVariant.withValues(alpha: 0),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 构建单个分组的配置列表
+  ///
+  /// 可见项按 [order] 顺序渲染并支持拖拽排序；
+  /// 隐藏项排列在可见项下方，不参与拖拽
+  Widget _buildGroupList(
+    BuildContext context,
+    ToolsSectionGroup group,
+    List<String> order,
+    ValueChanged<List<String>> onChanged,
+  ) {
+    // 按顺序列表解析出本分组的可见项
+    final visibleSections =
+        order.map(ToolsSection.fromId).where((s) => s.group == group).toList();
+    // 本分组中未开启显示的项
+    final hiddenSections =
+        ToolsSection.ofGroup(group).where((s) => !order.contains(s.id)).toList();
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // 可见项组成的有界高度拖拽列表（高度按固定行高计算）
+        if (visibleSections.isNotEmpty)
+          SizedBox(
+            height: visibleSections.length * _rowHeight,
+            child: ReorderableListView.builder(
+              // 不接管父级 PrimaryScrollController，避免与外层菜单的滚动视图冲突
+              primary: false,
+              physics: const NeverScrollableScrollPhysics(),
+              buildDefaultDragHandles: false,
+              itemCount: visibleSections.length,
+              onReorder: (oldIndex, newIndex) =>
+                  _reorderVisible(oldIndex, newIndex, order, onChanged),
+              proxyDecorator: (child, index, animation) {
+                // 拖拽中的项目抬升并添加圆角底色
+                return AnimatedBuilder(
+                  animation: animation,
+                  builder: (context, child) {
+                    final elevation =
+                        1 + Curves.easeInOut.transform(animation.value) * 6;
+                    return Material(
+                      elevation: elevation,
+                      color: Theme.of(context).colorScheme.surfaceContainerHigh,
+                      borderRadius: BorderRadius.circular(6),
+                      child: child,
+                    );
+                  },
+                  child: child,
+                );
+              },
+              itemBuilder: (context, index) => _buildSectionRow(
+                context,
+                visibleSections[index],
+                order,
+                onChanged,
+                dragIndex: index,
+              ),
+            ),
+          ),
+        for (final section in hiddenSections)
+          _buildSectionRow(context, section, order, onChanged),
+      ],
+    );
+  }
+
+  /// 构建单个显示项配置行
+  ///
+  /// 左侧为拖拽手柄（仅可见项可拖拽），中间为图标与名称，右侧为显示开关。
+  /// 隐藏项置灰且不参与拖拽，开关控制其是否在对应区域的显示列表中。
+  Widget _buildSectionRow(
+    BuildContext context,
+    ToolsSection section,
+    List<String> order,
+    ValueChanged<List<String>> onChanged, {
+    int? dragIndex,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isVisible = order.contains(section.id);
+
+    return SizedBox(
+      key: ValueKey(section.id),
+      height: _rowHeight,
       child: Row(
         children: [
-          Icon(section.icon, size: 16, color: colorScheme.onSurfaceVariant),
+          // 拖拽手柄；隐藏项留出等宽占位以保持对齐
+          if (dragIndex != null)
+            ReorderableDragStartListener(
+              index: dragIndex,
+              child: MouseRegion(
+                cursor: SystemMouseCursors.grab,
+                child: SizedBox(
+                  width: _dragHandleWidth,
+                  // 图标靠左对齐，贴向卡片左边缘
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Icon(
+                      Icons.drag_indicator,
+                      size: 16,
+                      color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                    ),
+                  ),
+                ),
+              ),
+            )
+          else
+            const SizedBox(width: _dragHandleWidth),
+          // 开启显示时图标以主色高亮，关闭时保持常规色
+          Icon(
+            section.icon,
+            size: 16,
+            color: isVisible ? colorScheme.primary : colorScheme.onSurfaceVariant,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -115,76 +294,50 @@ class ToolsDisplaySettings extends StatelessWidget {
               ),
             ),
           ),
-          // 上移按钮
-          _buildMoveButton(
-            context,
-            icon: Icons.keyboard_arrow_up_rounded,
-            enabled: canMoveUp,
-            onTap: () => _move(section, -1),
-          ),
-          // 下移按钮
-          _buildMoveButton(
-            context,
-            icon: Icons.keyboard_arrow_down_rounded,
-            enabled: canMoveDown,
-            onTap: () => _move(section, 1),
-          ),
           const SizedBox(width: 2),
           // 显示开关
           QwSwitch(
             value: isVisible,
-            onChanged: (v) => _toggle(section, v),
+            onChanged: (v) => _toggle(section, v, order, onChanged),
           ),
         ],
       ),
     );
   }
 
-  /// 构建上下移动按钮
-  Widget _buildMoveButton(
-    BuildContext context, {
-    required IconData icon,
-    required bool enabled,
-    required VoidCallback onTap,
-  }) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return IconButton(
-      icon: Icon(icon),
-      iconSize: 16,
-      padding: EdgeInsets.zero,
-      constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
-      color: enabled
-          ? colorScheme.onSurfaceVariant
-          : colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
-      onPressed: enabled ? onTap : null,
-    );
+  /// 处理分组内的拖拽排序
+  ///
+  /// 只在 [order]（当前分组的可见项顺序）内部调整位置，
+  /// 拖拽项不会进入其他分组，隐藏项也不参与排序
+  void _reorderVisible(
+    int oldIndex,
+    int newIndex,
+    List<String> order,
+    ValueChanged<List<String>> onChanged,
+  ) {
+    // onReorder 的 newIndex 表示"插入到该位置之前"，向下拖动时需先补偿一位
+    if (oldIndex < newIndex) newIndex -= 1;
+    final newOrder = List<String>.from(order);
+    final id = newOrder.removeAt(oldIndex);
+    newOrder.insert(newIndex, id);
+    onChanged(newOrder);
   }
 
-  /// 切换区块可见性
+  /// 切换显示项可见性
   ///
-  /// 开启时将区块 ID 加入顺序列表末尾，关闭时从列表移除
-  void _toggle(ToolsSection section, bool visible) {
-    final order = List<String>.from(sectionOrder);
+  /// 开启时将该 ID 加入对应区域顺序列表末尾，关闭时从列表移除
+  void _toggle(
+    ToolsSection section,
+    bool visible,
+    List<String> order,
+    ValueChanged<List<String>> onChanged,
+  ) {
+    final newOrder = List<String>.from(order);
     if (visible) {
-      if (!order.contains(section.id)) order.add(section.id);
+      if (!newOrder.contains(section.id)) newOrder.add(section.id);
     } else {
-      order.remove(section.id);
+      newOrder.remove(section.id);
     }
-    onOrderChanged(order);
-  }
-
-  /// 移动区块顺序
-  ///
-  /// [direction] 为 -1 上移，1 下移；通过交换相邻位置实现
-  void _move(ToolsSection section, int direction) {
-    final order = List<String>.from(sectionOrder);
-    final index = order.indexOf(section.id);
-    if (index < 0) return;
-    final target = index + direction;
-    if (target < 0 || target >= order.length) return;
-    final tmp = order[index];
-    order[index] = order[target];
-    order[target] = tmp;
-    onOrderChanged(order);
+    onChanged(newOrder);
   }
 }

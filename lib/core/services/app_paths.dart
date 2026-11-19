@@ -41,6 +41,11 @@ class AppPaths {
   /// 各自读写自己的配置文件可避免互相污染
   static const String mobileConfigFileName = 'settings.mobile.json';
 
+  /// 敏感词词库文件名
+  ///
+  /// 词库为所有书籍共用的全局数据，直接存放在应用根目录下
+  static const String sensitiveWordFileName = 'sensitive_words.json';
+
   /// 数据库文件名
   static const String _databaseName = 'quick_write_db';
 
@@ -160,6 +165,15 @@ class AppPaths {
 
   /// 当前平台使用的配置文件名
   String get configFileName => PlatformCapabilities.isMobile ? mobileConfigFileName : desktopConfigFileName;
+
+  /// 敏感词词库文件完整路径
+  ///
+  /// 例如：C:\Users\用户名\Documents\QuickWrite\sensitive_words.json
+  /// 词库不归属于某本书，所有书籍共用同一份词库
+  String get sensitiveWordFilePath {
+    _assertInitialized();
+    return '$_appRootPath${Platform.pathSeparator}$sensitiveWordFileName';
+  }
 
   /// 应用名称
   String get appName => _appName;

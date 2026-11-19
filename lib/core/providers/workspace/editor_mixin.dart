@@ -870,6 +870,143 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
     });
   }
 
+  // ================= 敏感词检测 =================
+
+  /// 扫描全部章节，列出含有敏感词的章节与命中行
+  ///
+  /// [words] 为当前词库；每个章节读取一次正文，按行收集命中，
+  /// 结果顺序与章节顺序一致，便于用户按目录顺序逐章检查。
+  Future<List<SensitiveWordScanResult>> scanSensitiveWords(List<String> words) async {
+    if (words.isEmpty || _currentBook == null) return const [];
+
+    final results = <SensitiveWordScanResult>[];
+    for (final chapter in _chapters) {
+      try {
+        final String content = await readChapterContent(chapter);
+        final result = _matchSensitiveWordContent(content, words, chapter);
+        if (result != null) results.add(result);
+      } catch (e) {
+        debugPrint('敏感词检测读取章节失败: ${chapter.title}, $e');
+      }
+    }
+    return results;
+  }
+
+  /// 在单个章节内容中收集敏感词命中行
+  ///
+  /// 无命中时返回 null；行偏移量与编辑器文本保持一致，供跳转定位使用。
+  SensitiveWordScanResult? _matchSensitiveWordContent(
+    String content,
+    List<String> words,
+    ChapterModel chapter,
+  ) {
+    if (content.isEmpty) return null;
+
+    final matchLines = <GlobalSearchMatchLine>[];
+    final lines = content.split('\n');
+    int lineStartOffset = 0;
+
+    for (int lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+      final line = lines[lineIndex];
+      final matchCount = _countSensitiveWordsInLine(line, words);
+      if (matchCount > 0) {
+        matchLines.add(GlobalSearchMatchLine(
+          lineNumber: lineIndex + 1,
+          lineContent: line,
+          matchCount: matchCount,
+          startOffset: lineStartOffset,
+        ));
+      }
+      lineStartOffset += line.length + 1;
+    }
+
+    if (matchLines.isEmpty) return null;
+
+    return SensitiveWordScanResult(
+      chapterUuid: chapter.uuid,
+      title: chapter.title,
+      groupName: getVolumeName(chapter.volumeUuid),
+      totalMatches: matchLines.fold<int>(0, (sum, m) => sum + m.matchCount),
+      matchLines: matchLines,
+    );
+  }
+
+  /// 统计一行文本中的敏感词命中次数（不区分大小写）
+  int _countSensitiveWordsInLine(String line, List<String> words) {
+    if (line.isEmpty) return 0;
+    final lowerLine = line.toLowerCase();
+    int total = 0;
+    for (final word in words) {
+      final keyword = word.toLowerCase();
+      if (keyword.isEmpty) continue;
+      int start = 0;
+      while (true) {
+        final index = lowerLine.indexOf(keyword, start);
+        if (index == -1) break;
+        total++;
+        start = index + keyword.length;
+      }
+    }
+    return total;
+  }
+
+  /// 跳转到敏感词检测结果：打开章节并选中命中的敏感词
+  Future<void> navigateToSensitiveWordResult(
+    SensitiveWordScanResult result,
+    GlobalSearchMatchLine matchLine,
+    List<String> words,
+  ) async {
+    final existingIndex =
+        _openedTabs.indexWhere((t) => t.id == result.chapterUuid);
+
+    if (existingIndex != -1) {
+      _currentTabIndex = existingIndex;
+    } else {
+      // 目标章节已被删除时不跳转
+      final chapter =
+          _chapters.where((c) => c.uuid == result.chapterUuid).firstOrNull;
+      if (chapter == null) return;
+      await _openSearchResultTab(EditorTab(
+        id: chapter.uuid,
+        title: chapter.title,
+        type: EditorTabType.chapter,
+        isPreview: true,
+      ));
+    }
+
+    _locateSensitiveWordInTab(result.chapterUuid, matchLine, words);
+    notifyListeners();
+  }
+
+  /// 在已打开的章节标签页中选中指定行内的第一个敏感词
+  void _locateSensitiveWordInTab(
+    String chapterUuid,
+    GlobalSearchMatchLine matchLine,
+    List<String> words,
+  ) {
+    final tab = _openedTabs.where((t) => t.id == chapterUuid).firstOrNull;
+    if (tab == null) return;
+
+    final text = _searchableTextOf(tab);
+    final controller = tab.textController;
+    if (text == null || controller == null) return;
+
+    final match = SearchQueryParser.findFirstMatch(
+      text,
+      words,
+      start: matchLine.startOffset,
+    );
+    final lineEnd = matchLine.startOffset + matchLine.lineContent.length;
+    if (match == null || match.start >= lineEnd) return;
+
+    controller.selection = CodeLineSelectionUtils.selectionFromFlat(
+      text,
+      match.start,
+      match.start + match.length,
+    );
+    _scrollToSelectionWhenReady(tab, 10);
+  }
+
   // ================= 大纲关键词跳转 =================
 
   /// 跳转到大纲关键词绑定的节点

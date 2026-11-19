@@ -11,6 +11,7 @@ import 'package:quick_write/core/utils/paragraph_formatter.dart';
 import 'package:quick_write/pages/workspace/editor/novel_editor.dart';
 import 'package:quick_write/pages/workspace/name_gen/name_generator_dialog_mobile.dart';
 import 'package:quick_write/pages/workspace/right_sidebar/widgets/writing_stats_section.dart';
+import 'package:quick_write/pages/workspace/sensitive_word/sensitive_word_check_dialog.dart';
 import 'package:quick_write/shared/dialogs/export_dialog.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 
@@ -32,6 +33,8 @@ enum MobileToolAction {
   copyChapter,
   /// 随机取名
   randomName,
+  /// 敏感词检测
+  sensitiveWordCheck,
   /// 布局设置
   layout,
   /// 排版设置
@@ -75,6 +78,7 @@ class MobileToolsCard extends StatelessWidget {
       _ToolEntry(MobileToolAction.writingStats, Icons.insights_rounded, '码字统计'),
       _ToolEntry(MobileToolAction.copyChapter, Icons.copy_all_rounded, '复制本章', chapterOnly: true),
       _ToolEntry(MobileToolAction.randomName, Icons.casino_rounded, '随机取名'),
+      _ToolEntry(MobileToolAction.sensitiveWordCheck, Icons.gpp_bad_outlined, '敏感词检测'),
     ]),
     // 各类设置面板入口
     _ToolSection('设置', [
@@ -350,6 +354,10 @@ Future<void> handleMobileToolAction(BuildContext context, MobileToolAction actio
     case MobileToolAction.randomName:
       // 打开随机取名弹窗
       showMobileNameGeneratorDialog(context: context);
+      break;
+    case MobileToolAction.sensitiveWordCheck:
+      // 打开敏感词检测弹窗
+      showMobileSensitiveWordCheckDialog(context: context, provider: provider);
       break;
     case MobileToolAction.layout:
       // 打开布局设置面板

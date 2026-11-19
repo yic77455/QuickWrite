@@ -116,6 +116,7 @@ class _EditorContainerState extends State<EditorContainer> {
       final spanBuilder = ReEditorSpanBuilder(
         customHighlightService: workspaceProvider.customHighlightService,
         outlineKeywordService: workspaceProvider.outlineKeywordService,
+        sensitiveWordService: workspaceProvider.sensitiveWordService,
       );
       currentTab.spanBuilder = spanBuilder;
       currentTab.textController = CodeLineEditingController(

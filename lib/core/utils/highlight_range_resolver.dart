@@ -25,6 +25,14 @@ class HighlightRange {
   /// 叠加到文字上的字重（null 表示沿用编辑器基础字重）
   final FontWeight? fontWeight;
 
+  /// 叠加到文字上的装饰线（null 表示沿用编辑器基础样式）
+  ///
+  /// 敏感词标红使用删除线标识，其它高亮类型不设置该字段。
+  final TextDecoration? decoration;
+
+  /// 装饰线颜色（null 表示跟随文字颜色）
+  final Color? decorationColor;
+
   const HighlightRange(
     this.start,
     this.end,
@@ -32,6 +40,8 @@ class HighlightRange {
     this.priority, {
     this.background = false,
     this.fontWeight,
+    this.decoration,
+    this.decorationColor,
   });
 
   @override
@@ -61,6 +71,9 @@ class HighlightRangeResolver {
 
   /// 当前选中查找匹配的高亮优先级（最高）
   static const int currentFindMatchPriority = 4;
+
+  /// 敏感词高亮优先级（高于查找匹配，始终以标红呈现）
+  static const int sensitiveWordPriority = 5;
 
   /// 中文引号对定义
   ///
@@ -161,6 +174,45 @@ class HighlightRangeResolver {
     return ranges;
   }
 
+  /// 解析文本中所有敏感词的出现范围
+  ///
+  /// 匹配不区分大小写，长词优先：同一段文字被多个词命中时由长词着色，
+  /// 结果统一使用标红与删除线呈现，并采用最高优先级覆盖其它着色。
+  static List<HighlightRange> parseSensitiveWordRanges(
+    String text,
+    List<String> words,
+    Color color,
+  ) {
+    if (words.isEmpty || text.isEmpty) return const [];
+
+    final String lowerText = text.toLowerCase();
+    // 按长度降序匹配，保证长词优先着色
+    final List<String> sorted = [
+      for (final word in words)
+        if (word.isNotEmpty) word.toLowerCase(),
+    ]..sort((a, b) => b.length.compareTo(a.length));
+
+    final List<HighlightRange> ranges = [];
+    for (final word in sorted) {
+      int searchStart = 0;
+      while (searchStart <= lowerText.length - word.length) {
+        final int index = lowerText.indexOf(word, searchStart);
+        if (index == -1) break;
+        ranges.add(HighlightRange(
+          index,
+          index + word.length,
+          color,
+          sensitiveWordPriority,
+          fontWeight: FontWeight.w600,
+          decoration: TextDecoration.lineThrough,
+          decorationColor: color,
+        ));
+        searchStart = index + word.length;
+      }
+    }
+    return ranges;
+  }
+
   /// 合并带颜色的范围，处理重叠区域（高优先级覆盖低优先级）
   ///
   /// 使用扫描线算法：以所有范围的边界点为切分点，将文本切成不重叠的小段，
@@ -193,17 +245,26 @@ class HighlightRangeResolver {
       }
       if (best == null) continue;
 
-      // 与上一段颜色、呈现方式、字重相同且连续时合并为一段
+      // 与上一段颜色、呈现方式、字重、装饰线相同且连续时合并为一段
       if (result.isNotEmpty &&
           result.last.color == best.color &&
           result.last.background == best.background &&
           result.last.fontWeight == best.fontWeight &&
+          result.last.decoration == best.decoration &&
+          result.last.decorationColor == best.decorationColor &&
           result.last.end == segStart) {
         result[result.length - 1] = HighlightRange(result.last.start, segEnd,
-            best.color, best.priority, background: best.background, fontWeight: best.fontWeight);
+            best.color, best.priority,
+            background: best.background,
+            fontWeight: best.fontWeight,
+            decoration: best.decoration,
+            decorationColor: best.decorationColor);
       } else {
         result.add(HighlightRange(segStart, segEnd, best.color, best.priority,
-            background: best.background, fontWeight: best.fontWeight));
+            background: best.background,
+            fontWeight: best.fontWeight,
+            decoration: best.decoration,
+            decorationColor: best.decorationColor));
       }
     }
     return result;

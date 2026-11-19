@@ -13,6 +13,7 @@ import 'package:quick_write/core/services/cache_services/misc_cache_service.dart
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/services/workspace/custom_highlight_service.dart';
 import 'package:quick_write/core/services/workspace/outline_keyword_service.dart';
+import 'package:quick_write/core/services/workspace/sensitive_word_service.dart';
 import 'package:quick_write/core/utils/chinese_word_segmenter.dart';
 import 'package:quick_write/core/utils/clean_scroll.dart';
 import 'package:quick_write/core/utils/clipboard_state_cache.dart';
@@ -165,6 +166,9 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
 
   /// 大纲关键词服务引用（用于监听索引变化触发重绘）
   OutlineKeywordService? _outlineKeywordService;
+
+  /// 敏感词服务引用（用于监听词库与标红开关变化触发重绘）
+  SensitiveWordService? _sensitiveWordService;
 
   /// 关键词交互修饰键是否按住
   ///
@@ -383,6 +387,14 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
       _outlineKeywordService = newKeywordService;
       _outlineKeywordService!.addListener(_onSettingsChanged);
     }
+
+    // 监听敏感词词库与标红开关变化（切换后立即刷新正文标红）
+    final SensitiveWordService newSensitiveService = context.read<WorkspaceProvider>().sensitiveWordService;
+    if (!identical(newSensitiveService, _sensitiveWordService)) {
+      _sensitiveWordService?.removeListener(_onSettingsChanged);
+      _sensitiveWordService = newSensitiveService;
+      _sensitiveWordService!.addListener(_onSettingsChanged);
+    }
   }
 
   @override
@@ -399,6 +411,7 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     SettingsService.instance.removeListener(_onSettingsChanged);
     _customHighlightService?.removeListener(_onSettingsChanged);
     _outlineKeywordService?.removeListener(_onSettingsChanged);
+    _sensitiveWordService?.removeListener(_onSettingsChanged);
     _scrollController.dispose();
     _codeScrollController.dispose();
     _focusNode.dispose();

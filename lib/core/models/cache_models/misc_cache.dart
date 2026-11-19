@@ -19,6 +19,15 @@ class MiscCacheData {
   /// 设定列表是否倒序排列
   final bool isSettingReversed;
 
+  /// 工具面板功能区显示顺序
+  ///
+  /// 列表按显示顺序存储"可见"的功能工具 ID（仅包含开启显示的工具）：
+  /// - 'nameGen'：随机取名
+  /// - 'sensitiveWord'：敏感词检测
+  /// 隐藏某工具即从列表移除，显示则加入；调整顺序即重排列表。
+  /// 该区域与书籍信息、码字统计区域相互独立，顺序互不影响
+  final List<String> toolsFunctionOrder;
+
   /// 工具面板区块显示顺序
   ///
   /// 列表按显示顺序存储"可见"的区块 ID（仅包含开启显示的区块）：
@@ -32,6 +41,11 @@ class MiscCacheData {
   /// 开启后正文常驻关键词高亮，点按关键词可弹出预览卡片
   final bool keywordHighlightEnabled;
 
+  /// 正文敏感词标红开关是否开启
+  ///
+  /// 开启后正文中的敏感词会立即标红，关闭后仅保留敏感词检测弹窗的扫描结果
+  final bool sensitiveWordHighlightEnabled;
+
   /// 书籍展开状态映射
   ///
   /// Key: 书籍 UUID
@@ -42,8 +56,10 @@ class MiscCacheData {
     this.selectedGroupId = '',
     this.isChapterReversed = false,
     this.isSettingReversed = false,
+    this.toolsFunctionOrder = const ['nameGen', 'sensitiveWord'],
     this.toolsSectionOrder = const ['bookInfo', 'stats'],
     this.keywordHighlightEnabled = false,
+    this.sensitiveWordHighlightEnabled = true,
     this.books = const {},
   });
 
@@ -61,11 +77,17 @@ class MiscCacheData {
       selectedGroupId: json['selectedGroupId'] as String? ?? '',
       isChapterReversed: json['isChapterReversed'] as bool? ?? false,
       isSettingReversed: json['isSettingReversed'] as bool? ?? false,
+      toolsFunctionOrder: (json['toolsFunctionOrder'] as List<dynamic>?)
+              ?.map((e) => e as String)
+              .toList() ??
+          const ['nameGen', 'sensitiveWord'],
       toolsSectionOrder: (json['toolsSectionOrder'] as List<dynamic>?)
               ?.map((e) => e as String)
               .toList() ??
           const ['bookInfo', 'stats'],
       keywordHighlightEnabled: json['keywordHighlightEnabled'] as bool? ?? false,
+      sensitiveWordHighlightEnabled:
+          json['sensitiveWordHighlightEnabled'] as bool? ?? true,
       books: books,
     );
   }
@@ -76,8 +98,10 @@ class MiscCacheData {
       'selectedGroupId': selectedGroupId,
       'isChapterReversed': isChapterReversed,
       'isSettingReversed': isSettingReversed,
+      'toolsFunctionOrder': toolsFunctionOrder,
       'toolsSectionOrder': toolsSectionOrder,
       'keywordHighlightEnabled': keywordHighlightEnabled,
+      'sensitiveWordHighlightEnabled': sensitiveWordHighlightEnabled,
       'books': books.map((key, value) => MapEntry(key, value.toJson())),
     };
   }
@@ -87,16 +111,21 @@ class MiscCacheData {
     String? selectedGroupId,
     bool? isChapterReversed,
     bool? isSettingReversed,
+    List<String>? toolsFunctionOrder,
     List<String>? toolsSectionOrder,
     bool? keywordHighlightEnabled,
+    bool? sensitiveWordHighlightEnabled,
     Map<String, BookGroupExpandCache>? books,
   }) {
     return MiscCacheData(
       selectedGroupId: selectedGroupId ?? this.selectedGroupId,
       isChapterReversed: isChapterReversed ?? this.isChapterReversed,
       isSettingReversed: isSettingReversed ?? this.isSettingReversed,
+      toolsFunctionOrder: toolsFunctionOrder ?? this.toolsFunctionOrder,
       toolsSectionOrder: toolsSectionOrder ?? this.toolsSectionOrder,
       keywordHighlightEnabled: keywordHighlightEnabled ?? this.keywordHighlightEnabled,
+      sensitiveWordHighlightEnabled:
+          sensitiveWordHighlightEnabled ?? this.sensitiveWordHighlightEnabled,
       books: books ?? this.books,
     );
   }

@@ -10,6 +10,7 @@ import 'package:quick_write/core/services/cloud_sync/chapter_archive.dart';
 import 'package:quick_write/core/services/cloud_sync/sync_models.dart';
 import 'package:quick_write/core/services/workspace/book_folder_service.dart';
 import 'package:quick_write/core/services/workspace/custom_highlight_service.dart';
+import 'package:quick_write/core/services/workspace/sensitive_word_service.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/relative_path_utils.dart';
 
@@ -144,6 +145,7 @@ class WorkspaceIndex {
 /// 索引范围包括：
 /// - 书籍的章节正文（归档包模式下按每 [kChapterChunkSize] 章合并，其余情况逐章）
 /// - 书籍的设定项正文、伴生文件与备注图片、封面、自定义高亮配置
+/// - 全局敏感词词库
 /// - 用户自定义的取名词典
 /// - 用户自定义主题
 /// - 应用配置文件
@@ -214,6 +216,15 @@ class WorkspaceIndexer {
       plainPaths: plainPaths,
       key: isMobile ? _mobileAppSettingsKey : _desktopAppSettingsKey,
       localPath: isMobile ? AppPaths.instance.mobileConfigFilePath : AppPaths.instance.desktopConfigFilePath,
+    );
+
+    // 敏感词词库：全局共用，与书籍无关，因此作为应用级文件同步
+    await _collectPlainFile(
+      baselines: baselines,
+      files: files,
+      plainPaths: plainPaths,
+      key: kSensitiveWordSyncKey,
+      localPath: AppPaths.instance.sensitiveWordFilePath,
     );
 
     return WorkspaceIndex(

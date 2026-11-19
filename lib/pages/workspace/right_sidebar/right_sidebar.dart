@@ -43,7 +43,11 @@ class _RightSidebarState extends State<RightSidebar>
   // 首次直接跳到目标值以跳过动画，避免工作台初始化时动画与数据加载竞争导致卡顿
   bool _isFirstSync = true;
 
-  // 工具面板可见区块的显示顺序列表（元素为 ToolsSection 的 id）
+  // 工具面板功能区可见项的显示顺序列表（元素为 ToolsSection 的 id）
+  // 由标题栏"显示设置"下拉菜单配置，并传给 ToolsPanel 渲染
+  List<String> _toolsFunctionOrder = const ['nameGen', 'sensitiveWord'];
+
+  // 工具面板信息区块的显示顺序列表（元素为 ToolsSection 的 id）
   // 由标题栏"显示设置"下拉菜单配置，并传给 ToolsPanel 渲染
   List<String> _toolsSectionOrder = const ['bookInfo', 'stats'];
 
@@ -68,6 +72,7 @@ class _RightSidebarState extends State<RightSidebar>
       parent: _expandController,
       curve: Curves.easeInOut,
     );
+    _toolsFunctionOrder = MiscCacheService.instance.getToolsFunctionOrder();
     _toolsSectionOrder = MiscCacheService.instance.getToolsSectionOrder();
   }
 
@@ -322,14 +327,15 @@ class _RightSidebarState extends State<RightSidebar>
 
   /// 构建显示设置按钮及其下拉菜单
   ///
-  /// 点击图标按钮展开 [ToolsDisplaySettings] 菜单，配置书籍信息与码字统计
-  /// 两个区块的显示开关及顺序。
+  /// 点击图标按钮展开 [ToolsDisplaySettings] 菜单，配置功能区与信息区块
+  /// 的显示开关及各自区域内的顺序。
   Widget _buildDisplaySettingsButton(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
     return MenuAnchor(
       controller: _displaySettingsMenuController,
-      alignmentOffset: const Offset(-192, 6),
+      // 向左偏移使菜单右边缘贴齐按钮，偏移量随菜单宽度同步调整
+      alignmentOffset: const Offset(-210, 6),
       // 移动端为触摸操作：菜单外点击仅关闭菜单，不触发下层组件的点击，避免误触
       consumeOutsideTap: PlatformCapabilities.isMobile,
       style: MenuStyle(
@@ -345,8 +351,10 @@ class _RightSidebarState extends State<RightSidebar>
       ),
       menuChildren: [
         ToolsDisplaySettings(
+          functionOrder: _toolsFunctionOrder,
           sectionOrder: _toolsSectionOrder,
-          onOrderChanged: _onToolsSectionOrderChanged,
+          onFunctionOrderChanged: _onToolsFunctionOrderChanged,
+          onSectionOrderChanged: _onToolsSectionOrderChanged,
         ),
       ],
       builder: (context, controller, child) {
@@ -383,7 +391,17 @@ class _RightSidebarState extends State<RightSidebar>
     );
   }
 
-  /// 显示设置变化回调
+  /// 功能区显示设置变化回调
+  ///
+  /// 更新本地顺序状态以即时重渲染工具面板，并持久化到缓存
+  void _onToolsFunctionOrderChanged(List<String> order) {
+    setState(() {
+      _toolsFunctionOrder = order;
+    });
+    MiscCacheService.instance.saveToolsFunctionOrder(order);
+  }
+
+  /// 信息区块显示设置变化回调
   ///
   /// 更新本地顺序状态以即时重渲染工具面板，并持久化到缓存
   void _onToolsSectionOrderChanged(List<String> order) {
@@ -439,8 +457,11 @@ class _RightSidebarState extends State<RightSidebar>
         // 历史版本面板：查看、删除和恢复章节备份
         return const HistoryPanel();
       case RightSidebarType.tools:
-        // 工具面板：随机取名等快捷工具和按配置顺序展示的可见区块
-        return ToolsPanel(sectionOrder: _toolsSectionOrder);
+        // 工具面板：功能区工具和按配置顺序展示的可见区块
+        return ToolsPanel(
+          functionOrder: _toolsFunctionOrder,
+          sectionOrder: _toolsSectionOrder,
+        );
     }
   }
 

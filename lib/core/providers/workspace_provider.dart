@@ -33,6 +33,7 @@ import 'package:quick_write/core/services/workspace/custom_highlight_service.dar
 import 'package:quick_write/core/services/workspace/outline_companion_store.dart';
 import 'package:quick_write/core/services/workspace/outline_keyword_service.dart';
 import 'package:quick_write/core/services/workspace/outline_note_service.dart';
+import 'package:quick_write/core/services/workspace/sensitive_word_service.dart';
 import 'package:quick_write/core/services/workspace/volume_migration_service.dart';
 import 'package:quick_write/core/utils/code_line_selection_utils.dart';
 import 'package:quick_write/core/utils/find_replace_target.dart';
@@ -131,6 +132,9 @@ class WorkspaceProvider extends WorkspaceStateBase
 
   /// 获取大纲关键词服务
   OutlineKeywordService get outlineKeywordService => _outlineKeywordService;
+
+  /// 获取敏感词服务（全局单例，词库为所有书籍共用）
+  SensitiveWordService get sensitiveWordService => SensitiveWordService.instance;
 
   // ================= 初始化方法 =================
 
@@ -720,6 +724,35 @@ class GlobalSearchResult {
     required this.title,
     required this.groupName,
     required this.isOutline,
+    required this.totalMatches,
+    required this.matchLines,
+  });
+}
+
+/// 敏感词检测结果（按章节分组）
+///
+/// 一个结果对应一个含有敏感词的章节，匹配行复用全文搜索的行结构，
+/// 使结果列表与跳转定位共用同一套行偏移量。
+class SensitiveWordScanResult {
+  /// 章节 UUID
+  final String chapterUuid;
+
+  /// 章节标题
+  final String title;
+
+  /// 章节所属分卷名
+  final String groupName;
+
+  /// 该章节中的敏感词命中总数
+  final int totalMatches;
+
+  /// 命中行列表
+  final List<GlobalSearchMatchLine> matchLines;
+
+  const SensitiveWordScanResult({
+    required this.chapterUuid,
+    required this.title,
+    required this.groupName,
     required this.totalMatches,
     required this.matchLines,
   });

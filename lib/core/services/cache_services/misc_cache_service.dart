@@ -12,8 +12,9 @@ import 'package:quick_write/core/services/cache_services/cache_service.dart';
 /// - 每本书的未分卷组、未分组设定组折叠状态
 /// - 新建章节、设定时分卷或分组选择记忆
 /// - 章节、设定列表是否倒序排列
-/// - 工具面板区块显示顺序
+/// - 工具面板功能区与区块显示顺序
 /// - 移动端正文关键词预览开关状态
+/// - 正文敏感词标红开关状态
 class MiscCacheService extends CacheService<MiscCacheData> {
   // ================= 单例模式 =================
 
@@ -164,6 +165,19 @@ class MiscCacheService extends CacheService<MiscCacheData> {
 
   // ================= 工具面板显示设置 =================
 
+  /// 获取工具面板功能区显示顺序（仅包含可见工具）
+  ///
+  /// 列表按显示顺序存储开启显示的工具 ID，默认为 ['nameGen', 'sensitiveWord']
+  List<String> getToolsFunctionOrder() {
+    return _data.toolsFunctionOrder.toList();
+  }
+
+  /// 保存工具面板功能区显示顺序
+  Future<bool> saveToolsFunctionOrder(List<String> order) async {
+    _data = _data.copyWith(toolsFunctionOrder: order);
+    return await save(_data);
+  }
+
   /// 获取工具面板区块显示顺序（仅包含可见区块）
   ///
   /// 列表按显示顺序存储开启显示的区块 ID，默认为 ['bookInfo', 'stats']
@@ -187,6 +201,19 @@ class MiscCacheService extends CacheService<MiscCacheData> {
   /// 保存移动端正文关键词预览开关状态
   Future<bool> saveKeywordHighlightEnabled(bool enabled) async {
     _data = _data.copyWith(keywordHighlightEnabled: enabled);
+    return await save(_data);
+  }
+
+  // ================= 正文敏感词标红开关 =================
+
+  /// 获取正文敏感词标红开关是否开启
+  bool isSensitiveWordHighlightEnabled() {
+    return _data.sensitiveWordHighlightEnabled;
+  }
+
+  /// 保存正文敏感词标红开关状态
+  Future<bool> saveSensitiveWordHighlightEnabled(bool enabled) async {
+    _data = _data.copyWith(sensitiveWordHighlightEnabled: enabled);
     return await save(_data);
   }
 
