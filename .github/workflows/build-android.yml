@@ -25,10 +25,11 @@ jobs:
           java-version: '17'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Accept Android SDK licenses
-        run: yes | sdkmanager --licenses > /dev/null
+        uses: android-actions/setup-android@v4
+        with:
+          # v3 会尝试安装 Google 已下线的 tools 包而崩；v4 默认只装 platform-tools。
+          # 许可证由 action 内部接受，无需再加 yes | sdkmanager --licenses。
+          packages: 'platform-tools'
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2

@@ -40,7 +40,9 @@ VersionInfoDescription={#MyAppName} Setup
 VersionInfoCopyright=Copyright (C) 2026 {#MyAppPublisher}
 
 [Languages]
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+; 中文语言文件随仓库提供（MessagesFile 相对脚本目录解析），
+; 不依赖 runner 上的 Inno Setup 是否附带 Languages\ChineseSimplified.isl
+Name: "chinesesimplified"; MessagesFile: "ChineseSimplified.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
