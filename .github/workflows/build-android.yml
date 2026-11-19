@@ -67,7 +67,8 @@ jobs:
           EOF
 
       - name: Build release APK
-        run: flutter build apk --release
+        # 只打 arm64：当前设备几乎全是 64 位，带 armv7 会让包体积翻倍。
+        run: flutter build apk --release --target-platform android-arm64
 
       - name: Rename artifact
         run: |
