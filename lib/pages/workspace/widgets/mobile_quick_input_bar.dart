@@ -248,6 +248,8 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
 
     final colorScheme = Theme.of(context).colorScheme;
     final visibleActions = _visibleActions();
+    // 按键列表支持用户自定义，每次构建时读取当前生效的符号表
+    final symbols = SettingsService.instance.quickInputSymbols;
 
     // 整栏纳入编辑器的点击区域组：编辑区在点击自身区域之外时会主动失焦收起输入法，
     // 快捷栏必须归属同一区域组，否则一碰就会收起键盘
@@ -270,9 +272,9 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
                 child: ListView.builder(
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.only(left: _keyListLeftPadding, right: 4),
-                  itemCount: PunctuationSymbols.quickInputKeys.length,
+                  itemCount: symbols.length,
                   itemBuilder: (context, index) {
-                    final symbol = PunctuationSymbols.quickInputKeys[index];
+                    final symbol = symbols[index];
                     return PunctuationKeyButton(symbol: symbol, onTap: () => _handleSymbolTap(symbol));
                   },
                 ),

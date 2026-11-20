@@ -246,6 +246,12 @@ class AppSettings {
   /// 快捷输入栏右侧操作区右侧图标的动作标识，取值同 [quickInputBarLeftAction]
   final String quickInputBarRightAction;
 
+  /// 快捷输入栏的自定义符号列表（文本格式，一行一个符号）
+  ///
+  /// 写法与源码一致：符号用单引号包裹，成对符号在逗号后追加
+  /// `closing: '结束符号'`。null 表示使用内置默认符号列表
+  final String? quickInputSymbolsText;
+
   // ================= 字数浮窗设置（移动端）=================
 
   /// 是否启用字数浮窗
@@ -375,6 +381,7 @@ class AppSettings {
     this.pairedSymbolEnterJumpEnabled = false, // 是否开启成对符号回车跳出
     this.quickInputBarLeftAction = 'keywordToggle', // 快捷输入栏右侧操作区左侧图标
     this.quickInputBarRightAction = 'settings', // 快捷输入栏右侧操作区右侧图标
+    this.quickInputSymbolsText, // 快捷输入栏自定义符号列表（null 表示使用默认列表）
     // 字数浮窗设置（移动端）
     this.wordCountFloatingEnabled = false, // 是否启用字数浮窗
     this.wordCountFloatingPosition = 'topRight', // 字数浮窗显示位置（默认右上）
@@ -498,6 +505,7 @@ class AppSettings {
       pairedSymbolEnterJumpEnabled: autoBackupJson['pairedSymbolEnterJumpEnabled'] as bool? ?? defaults.pairedSymbolEnterJumpEnabled,
       quickInputBarLeftAction: autoBackupJson['quickInputBarLeftAction'] as String? ?? defaults.quickInputBarLeftAction,
       quickInputBarRightAction: autoBackupJson['quickInputBarRightAction'] as String? ?? defaults.quickInputBarRightAction,
+      quickInputSymbolsText: autoBackupJson['quickInputSymbolsText'] as String?,
 
       // 字数浮窗设置（编辑器）
       wordCountFloatingEnabled: wordCountFloatingJson['enabled'] as bool? ?? defaults.wordCountFloatingEnabled,
@@ -616,6 +624,7 @@ class AppSettings {
           'pairedSymbolEnterJumpEnabled': pairedSymbolEnterJumpEnabled,
           'quickInputBarLeftAction': quickInputBarLeftAction,
           'quickInputBarRightAction': quickInputBarRightAction,
+          'quickInputSymbolsText': quickInputSymbolsText,
         },
         // 字数浮窗设置（移动端）
         'wordCountFloating': {
@@ -719,6 +728,8 @@ class AppSettings {
     // 快捷输入栏右侧操作区图标
     String? quickInputBarLeftAction,
     String? quickInputBarRightAction,
+    // 快捷输入栏自定义符号列表（传入 null 表示恢复默认列表）
+    Object? quickInputSymbolsText = _unset,
     // 字数浮窗设置（移动端）
     bool? wordCountFloatingEnabled,
     String? wordCountFloatingPosition,
@@ -805,6 +816,8 @@ class AppSettings {
       // 快捷输入栏右侧操作区图标
       quickInputBarLeftAction: quickInputBarLeftAction ?? this.quickInputBarLeftAction,
       quickInputBarRightAction: quickInputBarRightAction ?? this.quickInputBarRightAction,
+      // 快捷输入栏自定义符号列表
+      quickInputSymbolsText: quickInputSymbolsText == _unset ? this.quickInputSymbolsText : quickInputSymbolsText as String?,
       // 字数浮窗设置（移动端）
       wordCountFloatingEnabled: wordCountFloatingEnabled ?? this.wordCountFloatingEnabled,
       wordCountFloatingPosition: wordCountFloatingPosition ?? this.wordCountFloatingPosition,
@@ -926,6 +939,7 @@ class AppSettings {
            // 快捷输入栏右侧操作区图标
            other.quickInputBarLeftAction == quickInputBarLeftAction &&
            other.quickInputBarRightAction == quickInputBarRightAction &&
+           other.quickInputSymbolsText == quickInputSymbolsText &&
            // 字数浮窗设置（移动端）
            other.wordCountFloatingEnabled == wordCountFloatingEnabled &&
            other.wordCountFloatingPosition == wordCountFloatingPosition &&
@@ -1029,6 +1043,7 @@ class AppSettings {
         pairedSymbolEnterJumpEnabled,
         quickInputBarLeftAction,
         quickInputBarRightAction,
+        quickInputSymbolsText,
         wordCountFloatingEnabled,
         wordCountFloatingPosition,
         wordCountFloatingSpeedEnabled,

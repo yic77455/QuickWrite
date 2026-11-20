@@ -5,7 +5,6 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/constants/constants.dart';
-import 'package:quick_write/core/constants/punctuation_symbols.dart';
 import 'package:quick_write/core/models/outline_keyword.dart';
 import 'package:quick_write/core/providers/window_provider.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
@@ -105,11 +104,12 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
 
   /// 正文标点的成对符号表
   ///
-  /// 由标点符号表推导，与快捷输入栏的按键共用同一数据源。
-  static final List<CodeSymbolPair> _punctuationPairs = [
-    for (final symbol in PunctuationSymbols.quickInputKeys)
-      if (symbol.isPairStart) CodeSymbolPair(symbol.symbol, symbol.closing!),
-  ];
+  /// 由快捷输入栏当前的符号表推导，自动补全与快捷输入共用同一数据源，
+  /// 用户自定义符号后随设置变化即时生效。
+  static List<CodeSymbolPair> get _punctuationPairs => [
+        for (final symbol in SettingsService.instance.quickInputSymbols)
+          if (symbol.isPairStart) CodeSymbolPair(symbol.symbol, symbol.closing!),
+      ];
 
   /// 程序化文本改写的抑制深度
   ///

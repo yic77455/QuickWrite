@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
+import 'package:quick_write/core/constants/punctuation_symbols.dart';
 import 'package:quick_write/core/constants/quick_input_action.dart';
 import 'package:quick_write/core/models/app_settings.dart';
 import 'package:quick_write/core/theme/custom_theme.dart';
@@ -62,6 +63,10 @@ class SettingsService extends ChangeNotifier {
   /// 已保存的自定义主题列表
   /// 主题定义独立存放于主题目录下的 JSON 文件，不再随 settings.json 保存
   List<CustomTheme> _customThemes = const [];
+
+  /// 解析后的快捷输入栏符号列表
+  /// 设置变化时重新解析，避免每次读取按键时重复解析文本
+  List<PunctuationSymbol> _quickInputSymbols = PunctuationSymbols.quickInputKeys;
   
   /// 配置文件完整路径
   String? _configFilePath;
@@ -111,6 +116,7 @@ class SettingsService extends ChangeNotifier {
       
       // 加载配置文件
       await _loadSettings();
+      _syncQuickInputSymbols();
       
       // 加载自定义主题（独立存放于主题目录）
       _customThemes = await _themeStore.loadAll();
@@ -196,6 +202,11 @@ class SettingsService extends ChangeNotifier {
       debugPrint('保存配置文件失败: $e');
       return false;
     }
+  }
+
+  /// 根据当前设置重新解析快捷输入栏符号列表
+  void _syncQuickInputSymbols() {
+    _quickInputSymbols = PunctuationSymbols.parseSymbolList(_settings.quickInputSymbolsText);
   }
 
   // ================= 主题设置相关 =================
@@ -664,6 +675,16 @@ class SettingsService extends ChangeNotifier {
         fallback: QuickInputAction.defaultRight,
       );
 
+  /// 获取快捷输入栏当前的符号列表
+  /// 用户未自定义或自定义文本中无有效符号时，为内置默认列表
+  List<PunctuationSymbol> get quickInputSymbols => _quickInputSymbols;
+
+  /// 获取快捷输入栏符号列表的可编辑文本
+  /// 用户未自定义时返回内置默认列表格式化后的文本
+  String get quickInputSymbolsText =>
+      _settings.quickInputSymbolsText ??
+      PunctuationSymbols.formatSymbolList(PunctuationSymbols.quickInputKeys);
+
   /// 获取字数浮窗是否启用
   /// 移动端专属功能，桌面端始终返回关闭
   bool get wordCountFloatingEnabled =>
@@ -907,6 +928,17 @@ class SettingsService extends ChangeNotifier {
     return updateSettings(newSettings);
   }
 
+  /// 更新快捷输入栏符号列表
+  ///
+  /// [value] 为可编辑文本；传入 null 或空白文本表示恢复内置默认列表
+  Future<bool> updateQuickInputSymbolsText(String? value) async {
+    final String? text = value?.trim();
+    final newSettings = _settings.copyWith(
+      quickInputSymbolsText: (text == null || text.isEmpty) ? null : text,
+    );
+    return updateSettings(newSettings);
+  }
+
   /// 更新字数浮窗开关
   Future<bool> updateWordCountFloatingEnabled(bool value) async {
     final newSettings = _settings.copyWith(wordCountFloatingEnabled: value);
@@ -1026,6 +1058,7 @@ class SettingsService extends ChangeNotifier {
       pairedSymbolEnterJumpEnabled: AppSettings.defaults.pairedSymbolEnterJumpEnabled,
       quickInputBarLeftAction: AppSettings.defaults.quickInputBarLeftAction,
       quickInputBarRightAction: AppSettings.defaults.quickInputBarRightAction,
+      quickInputSymbolsText: AppSettings.defaults.quickInputSymbolsText,
       wordCountFloatingEnabled: AppSettings.defaults.wordCountFloatingEnabled,
       wordCountFloatingPosition: AppSettings.defaults.wordCountFloatingPosition,
       wordCountFloatingSpeedEnabled: AppSettings.defaults.wordCountFloatingSpeedEnabled,
@@ -1058,6 +1091,7 @@ class SettingsService extends ChangeNotifier {
     }
 
     _settings = newSettings;
+    _syncQuickInputSymbols();
 
     if (debounce) {
       // 防抖模式：立即通知监听器以更新 UI，延迟写入文件以避免频繁 IO
@@ -1105,6 +1139,7 @@ class SettingsService extends ChangeNotifier {
   /// 重置所有设置为默认值
   Future<bool> resetToDefault() async {
     _settings = _platformDefaults;
+    _syncQuickInputSymbols();
     final success = await _saveSettings();
     
     if (success) {
@@ -1150,6 +1185,7 @@ class SettingsService extends ChangeNotifier {
       final content = await sourceFile.readAsString();
       final jsonMap = json.decode(content) as Map<String, dynamic>;
       _settings = AppSettings.fromJson(jsonMap);
+      _syncQuickInputSymbols();
       
       await _saveSettings();
       notifyListeners();

@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/constants/material_icons.dart';
-import 'package:quick_write/core/constants/punctuation_symbols.dart';
 import 'package:quick_write/core/models/outline_table.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
+import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/text_style_range.dart';
 import 'package:quick_write/pages/workspace/editor/outline_editor.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_color_palette.dart';
@@ -634,16 +634,19 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
 
   /// 构建快捷输入面板
   ///
-  /// 提供常用标点符号，成对符号按设置自动补全。
+  /// 提供常用标点符号，成对符号按设置自动补全；符号表支持用户自定义。
   Widget _buildQuickInputPanel(BuildContext context, OutlineEditorState state) {
+    // 读取当前生效的符号表，用户修改后展开面板即按新列表显示
+    final symbols = SettingsService.instance.quickInputSymbols;
+
     return _buildPanelContainer(
       context,
       ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.only(left: _iconListLeftPadding, right: 4),
-        itemCount: PunctuationSymbols.quickInputKeys.length,
+        itemCount: symbols.length,
         itemBuilder: (context, index) {
-          final symbol = PunctuationSymbols.quickInputKeys[index];
+          final symbol = symbols[index];
           return PunctuationKeyButton(
             symbol: symbol,
             onTap: () => _runAction(() => state.insertQuickSymbol(symbol)),

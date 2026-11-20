@@ -1,4 +1,3 @@
-import 'package:quick_write/core/constants/punctuation_symbols.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:re_editor/re_editor.dart';
 
@@ -17,19 +16,6 @@ class ReEditorIndentPolicy {
 
   /// 段落首行缩进使用的两个全角空格
   static const String indent = '\u3000\u3000';
-
-  /// 成对符号的起始符号到结束符号的映射
-  ///
-  /// 取自标点符号表，与快捷输入栏、标点自动补全共用同一份成对符号数据
-  static final Map<String, String> _closingSymbols = {
-    for (final symbol in PunctuationSymbols.quickInputKeys)
-      if (symbol.isPairStart) symbol.symbol: symbol.closing!,
-  };
-
-  /// 成对符号的结束符号到起始符号的映射
-  static final Map<String, String> _openingSymbols = {
-    for (final entry in _closingSymbols.entries) entry.value: entry.key,
-  };
 
   /// 被操作的编辑控制器
   final CodeLineEditingController controller;
@@ -69,6 +55,16 @@ class ReEditorIndentPolicy {
   bool _jumpOverClosingSymbolIfNeeded() {
     if (!SettingsService.instance.pairedSymbolEnterJumpEnabled) return false;
 
+    // 成对符号取自快捷输入栏当前的符号表，随用户自定义即时生效
+    final Map<String, String> closingSymbols = {
+      for (final symbol in SettingsService.instance.quickInputSymbols)
+        if (symbol.isPairStart) symbol.symbol: symbol.closing!,
+    };
+    // 结束符号到起始符号的反向映射，用于识别已闭合的符号
+    final Map<String, String> openingSymbols = {
+      for (final entry in closingSymbols.entries) entry.value: entry.key,
+    };
+
     final CodeLineSelection selection = controller.selection;
     if (!selection.isCollapsed) return false;
 
@@ -79,11 +75,11 @@ class ReEditorIndentPolicy {
     final List<String> pending = [];
     for (int i = 0; i < offset; i++) {
       final String char = line[i];
-      if (_closingSymbols.containsKey(char)) {
+      if (closingSymbols.containsKey(char)) {
         pending.add(char);
-      } else if (_openingSymbols.containsKey(char) &&
+      } else if (openingSymbols.containsKey(char) &&
           pending.isNotEmpty &&
-          _closingSymbols[pending.last] == char) {
+          closingSymbols[pending.last] == char) {
         pending.removeLast();
       }
     }
@@ -93,11 +89,11 @@ class ReEditorIndentPolicy {
     final int depth = pending.length;
     for (int i = offset; i < line.length; i++) {
       final String char = line[i];
-      if (_closingSymbols.containsKey(char)) {
+      if (closingSymbols.containsKey(char)) {
         pending.add(char);
-      } else if (_openingSymbols.containsKey(char) &&
+      } else if (openingSymbols.containsKey(char) &&
           pending.isNotEmpty &&
-          _closingSymbols[pending.last] == char) {
+          closingSymbols[pending.last] == char) {
         pending.removeLast();
         // 回到光标所在的层级，说明已到达这对符号的结束处
         if (pending.length == depth - 1) {

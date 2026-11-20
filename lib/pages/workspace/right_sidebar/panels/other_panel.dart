@@ -6,6 +6,7 @@ import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/shared/widgets/qw_dropdown.dart';
 import '../widgets/right_sidebar_widgets.dart';
+import '../widgets/quick_input_symbols_dialog.dart';
 import '../widgets/shortcut_dialog.dart';
 
 /// 其他设置面板的区块范围
@@ -353,7 +354,8 @@ class _OtherPanelState extends State<OtherPanel> {
   /// 构建快捷输入设置区块（移动端专属）
   ///
   /// 管理键盘上方的快捷输入栏、标点自动补全与成对符号回车跳出，
-  /// 并支持自定义快捷输入栏右侧操作区两个图标的种类与左右顺序（可选「无」隐藏）
+  /// 并支持自定义快捷输入栏右侧操作区两个图标的种类与左右顺序（可选「无」隐藏），
+  /// 以及编辑快捷输入栏显示的符号列表
   Widget _buildQuickInputSection(
     BuildContext context,
     bool quickInputBarEnabled,
@@ -362,6 +364,8 @@ class _OtherPanelState extends State<OtherPanel> {
     QuickInputAction leftAction,
     QuickInputAction rightAction,
   ) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return SettingsSection(
       title: '快捷输入',
       icon: Icons.bolt_outlined,
@@ -375,7 +379,7 @@ class _OtherPanelState extends State<OtherPanel> {
             setState(() {});
           },
         ),
-        // 图标配置仅在快捷输入栏开启后可调
+        // 图标配置与符号列表仅在快捷输入栏开启后可调
         if (quickInputBarEnabled) ...[
           _buildDropdownSettingItem(
             context,
@@ -398,6 +402,14 @@ class _OtherPanelState extends State<OtherPanel> {
               isLeft: false,
               action: QuickInputAction.fromId(value, fallback: rightAction),
             ),
+          ),
+          // 符号列表编辑入口
+          InkWellSettingItem(
+            icon: Icons.text_fields_outlined,
+            label: '符号列表',
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 15),
+            trailing: Icon(Icons.chevron_right_rounded, size: 18, color: colorScheme.onSurfaceVariant),
+            onTap: () => showQuickInputSymbolsDialog(context: context),
           ),
         ],
         SwitchSettingItem(
