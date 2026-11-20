@@ -264,6 +264,18 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 在布局阶段消费，使滚动修正与当帧渲染一并生效，不出现先渲染再滚动的二次跳动。
   bool _pendingBottomAlignment = false;
 
+  /// 待对齐末行是否由新增逻辑行（换行键）引起
+  ///
+  /// 新增逻辑行时末行位置必然下移，可直接对齐；
+  /// 否则需在布局阶段确认末行因自动换行变高后才对齐。
+  bool _pendingLineAdded = false;
+
+  /// 本次输入前末行已排版的高度
+  ///
+  /// 自动换行会让末行变高，布局阶段据此判断本次输入是否使末行换行；
+  /// 新增逻辑行会改变行数，末行高度不再可比，此时不记录。
+  double? _previousLastLineHeight;
+
   /// 内容载入后待定位光标的标记
   ///
   /// 由 [revealCursorAfterLoad] 置位，在内容排版完成的布局阶段消费，
@@ -947,6 +959,8 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
 
     // 仅移动光标时行数据引用不变，此时不视为内容变化
     if (identical(value.codeLines, _lastCodeLines)) return;
+    // 记录变化前的逻辑行数，用于判断本次输入是否新增了逻辑行
+    final int previousLineCount = _lastCodeLines?.length ?? value.codeLines.length;
     _lastCodeLines = value.codeLines;
 
     // 同步刷新高亮解析缓存
@@ -963,7 +977,9 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     final int currentLength = widget.controller.text.length;
     final bool isTextGrown = currentLength > _previousTextLength;
     _previousTextLength = currentLength;
-    if (isTextGrown) _keepBottomPaddingVisible();
+    if (isTextGrown) {
+      _keepBottomPaddingVisible(isLineAdded: value.codeLines.length > previousLineCount);
+    }
 
     final NovelEditType type = _pendingEditType ?? NovelEditType.keyboard;
     _pendingEditType = null;
@@ -972,15 +988,27 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
 
   /// 标记末行需要在布局阶段对齐底边距
   ///
-  /// 光标位于最后一行时，内容增长会把最后一行向下推挤甚至顶出视口；
-  /// 置位后由布局阶段把滚动位置调整到「末行底部 + 底边距 与视口底部对齐」处，
-  /// 使最后一行在视口中的位置保持稳定。
-  void _keepBottomPaddingVisible() {
+  /// 光标位于最后一行时，只有本次输入新增逻辑行（换行键）或使末行自动换行，
+  /// 末行才会向下移动；仅局部文字增多、排版未发生变化时不应移动视口。
+  /// 自动换行取决于排版结果，需在布局阶段确认，故此处记录输入前末行已排版的高度。
+  void _keepBottomPaddingVisible({required bool isLineAdded}) {
     if (widget.controller.selection.extentIndex < widget.controller.codeLines.length - 1) {
       return;
     }
 
-    _pendingBottomAlignment = true;
+    // 新增逻辑行时末行必然下移，可直接对齐，无需再确认换行
+    if (isLineAdded) {
+      _pendingLineAdded = true;
+      _pendingBottomAlignment = true;
+      return;
+    }
+
+    // 已确认新增逻辑行的待对齐不受本次输入影响
+    if (_pendingLineAdded) return;
+
+    _previousLastLineHeight =
+        _codeScrollController.contentHeightOfLine(widget.controller.codeLines.length - 1);
+    _pendingBottomAlignment = _previousLastLineHeight != null;
   }
 
   /// 焦点变化时触发
@@ -1014,7 +1042,17 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     }
     if (_pendingBottomAlignment) {
       _pendingBottomAlignment = false;
-      if (_alignLastLineWithBottomPadding(position, minExt, maxExt)) {
+      final bool lineAdded = _pendingLineAdded;
+      _pendingLineAdded = false;
+      final double? previousHeight = _previousLastLineHeight;
+      _previousLastLineHeight = null;
+      // 新增逻辑行可直接对齐；否则需末行因自动换行变高，说明本次输入让末行下移
+      final double? currentHeight = lineAdded
+          ? null
+          : _codeScrollController.contentHeightOfLine(widget.controller.codeLines.length - 1);
+      final bool shouldAlign = lineAdded ||
+          (previousHeight != null && currentHeight != null && currentHeight > previousHeight + 0.5);
+      if (shouldAlign && _alignLastLineWithBottomPadding(position, minExt, maxExt)) {
         corrected = true;
       }
     }
@@ -1526,7 +1564,7 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
 
   /// 编辑器区域内容：纸张 + 标题 + 编辑器
   ///
-  /// 纸张宽度按模式约束（纸张模式为 A4 宽并居中，非纸张模式贴合上级容器），
+  /// 纸张宽度按模式约束（纸张模式为 A4 宽且相对整个窗口居中，非纸张模式贴合上级容器），
   /// 高度由标题与正文内容撑开；编辑器另设最小高度以撑满视口，
   /// 纸张模式下纸张容器再保证至少为一页 A4 高。
   /// 纸张背景占满纸张宽度；纸张模式下纸张容器再补偿左右各 16 像素，
@@ -1545,6 +1583,18 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     final bool showTitle = widget.chapterTitleController != null && settings.showChapterTitle;
     // 纸张宽度：纸张模式恒为 A4 宽，非纸张模式贴合上级容器（即视口宽度）
     final double paperWidth = pageViewEnabled ? GlobalConstants.a4Width : constraints.maxWidth;
+    // 纸张相对整个窗口居中所需的横向偏移：编辑区夹在左右边栏之间，
+    // 两侧边栏宽度不等时纸张需反向平移，抵消编辑区中心与窗口中心的偏差
+    final double paperCenterOffset = pageViewEnabled
+        ? context.select<WorkspaceProvider, double>((provider) => provider.paperCenterOffset)
+        : 0.0;
+    // 纸张两侧可自由分配的空白宽度
+    final double paperFreeWidth = constraints.maxWidth - paperWidth;
+    // 纸张的水平对齐系数：把偏移量按空白宽度换算为 -1（贴左）至 1（贴右）的比例，
+    // 0 为居中；宽度不足以容纳纸张时不做偏移
+    final double paperAlignmentX = paperFreeWidth <= 0
+        ? 0.0
+        : (paperCenterOffset * 2 / paperFreeWidth).clamp(-1.0, 1.0).toDouble();
     // 纸张容器的左右补偿：仅纸张模式生效
     final double paperCompensation = pageViewEnabled ? _paperHorizontalCompensation : 0.0;
     // 左右页边距：百分比 × 纸张宽度
@@ -1584,7 +1634,9 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
       child: SingleChildScrollView(
         controller: _scrollController,
         padding: EdgeInsets.only(top: scrollTopPadding, bottom: paperGap),
-        child: Center(
+        // 纸张横向按对齐系数偏移，使其相对整个窗口居中
+        child: Align(
+          alignment: Alignment(paperAlignmentX, 0),
           child: ConstrainedBox(
             constraints: BoxConstraints(
               maxWidth: pageViewEnabled ? GlobalConstants.a4Width : double.infinity,

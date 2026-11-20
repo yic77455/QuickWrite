@@ -127,6 +127,18 @@ class WorkspaceProvider extends WorkspaceStateBase
   /// 编辑区是否处于全屏模式
   bool get isEditorFullscreen => _isEditorFullscreen;
 
+  /// 纸张相对整个窗口水平居中所需的横向偏移量（像素）
+  ///
+  /// 编辑区夹在左右边栏之间，两侧边栏宽度不等时编辑区中心会偏离窗口中心，
+  /// 纸张需沿偏差的反方向平移才能相对整个窗口居中。正值表示向右平移。
+  /// 移动端与编辑区全屏时都没有侧边栏参与布局，无需偏移。
+  double get paperCenterOffset {
+    if (PlatformCapabilities.isMobile || _isEditorFullscreen) return 0.0;
+    final double leftWidth = _isLeftSidebarExpanded ? _leftSidebarWidth : 0.0;
+    final double rightWidth = _isRightSidebarExpanded ? _rightSidebarWidth : 0.0;
+    return (rightWidth - leftWidth) / 2;
+  }
+
   /// 获取自定义高亮服务
   CustomHighlightService get customHighlightService => _customHighlightService;
 

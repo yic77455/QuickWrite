@@ -33,6 +33,12 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
   /// 当前匹配索引（在 _findMatches 中的位置，-1 表示无选中匹配）
   int _currentMatchIndex = -1;
 
+  /// 查找起点（相对于文档全文的偏移量）
+  ///
+  /// 打开查找替换栏时记录编辑器光标位置，输入查找词后优先从该位置
+  /// 向后定位首个匹配项，而不是每次都被拉回文件开头。
+  int? _findAnchorOffset;
+
   // ================= 全文搜索状态 =================
 
   /// 全文搜索关键词
@@ -180,6 +186,15 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
     notifyWordCountUpdated();
   }
 
+  /// 记录当前编辑器的光标位置作为查找起点
+  ///
+  /// 无可用选区时清空起点，后续匹配将回退到从文档开头查找。
+  void _captureFindAnchor() {
+    final selection = _currentFindReplaceTarget?.selection;
+    _findAnchorOffset =
+        selection != null && selection.isValid ? selection.extentOffset : null;
+  }
+
   /// 打开查找替换栏
   /// [initialText] 初始查找文本（可选，如选中文字后打开）
   /// [showReplace] 是否展开替换区域（Ctrl+H 时为 true）
@@ -191,6 +206,9 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
     _showReplace = showReplace;
 
     final target = _currentFindReplaceTarget;
+
+    // 记录打开面板时的光标位置，作为优先匹配的起点
+    _captureFindAnchor();
 
     // 如果没有显式传入初始文本，尝试从编辑器选中区域获取
     String? searchText = initialText;
@@ -225,6 +243,12 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
       _performFind();
     }
 
+    // 已有查找词但尚未定位到匹配项时，从查找起点向后选中最近的匹配
+    if (_currentMatchIndex < 0 && _findMatches.isNotEmpty) {
+      _currentMatchIndex = _findFirstMatchIndexFromAnchor();
+      _selectCurrentMatch();
+    }
+
     notifyListeners();
   }
 
@@ -232,6 +256,7 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
   void closeFindReplace() {
     _isFindReplaceVisible = false;
     _clearFindMatches();
+    _findAnchorOffset = null;
     // 关闭后将焦点归还给编辑器
     requestEditorFocus();
     notifyListeners();
@@ -245,6 +270,8 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
   void refreshFindIfVisible({bool resetIndex = false}) {
     if (!_isFindReplaceVisible || _findText.isEmpty) return;
     if (resetIndex) {
+      // 标签页切换或内容重新加载后，以当前光标位置重新确定查找起点
+      _captureFindAnchor();
       _performFind();
     } else {
       _rebuildMatches();
@@ -263,11 +290,16 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
 
   /// 更新查找文本并执行搜索
   void updateFindText(String text) {
+    // 从空文本开始输入时，以当前光标位置作为查找起点
+    if (_findText.isEmpty && text.isNotEmpty) {
+      _captureFindAnchor();
+    }
+
     _findText = text;
     _performFind();
-    // 查找输入框内容变化时自动定位到第一个匹配项
+    // 优先从查找起点向后选中最近的匹配项，避免每次都回到文件开头
     if (_findMatches.isNotEmpty) {
-      _currentMatchIndex = 0;
+      _currentMatchIndex = _findFirstMatchIndexFromAnchor();
       _selectCurrentMatch();
     }
     notifyListeners();
@@ -289,6 +321,23 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
   void setShowReplace(bool value) {
     _showReplace = value;
     notifyListeners();
+  }
+
+  /// 根据查找起点，找到应优先选中的匹配项索引
+  ///
+  /// 返回包含查找起点或位于其后的第一个匹配的索引；
+  /// 查找起点在所有匹配之后时循环回第一个。
+  int _findFirstMatchIndexFromAnchor() {
+    final anchor = _findAnchorOffset;
+    if (anchor == null) return 0;
+
+    for (int i = 0; i < _findMatches.length; i++) {
+      if (_findMatches[i].end > anchor) {
+        return i;
+      }
+    }
+    // 查找起点在所有匹配之后，循环回第一个
+    return 0;
   }
 
   /// 根据当前光标位置，找到最近的匹配项索引

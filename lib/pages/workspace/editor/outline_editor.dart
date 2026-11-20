@@ -7944,6 +7944,10 @@ class OutlineEditorState extends State<OutlineEditor>
                             child: _buildEditorScrollView(
                               constraints: constraints,
                               pageViewMode: settings.outlinePageViewMode,
+                              // 纸张相对整个窗口居中所需的横向偏移量
+                              paperCenterOffset: context.select<WorkspaceProvider, double>(
+                                (provider) => provider.paperCenterOffset,
+                              ),
                               colorScheme: colorScheme,
                               paperColor: editorBackgroundColor,
                               displayRows: displayRows,
@@ -8183,10 +8187,12 @@ class OutlineEditorState extends State<OutlineEditor>
   /// 节点列表使用 [SliverList] 懒加载，只构建视口及其预取范围内的节点瓦片，
   /// 避免节点数量较多时一次性构建全部节点带来的移动端卡顿。
   /// 水平边距在纸张模式下相对于 A4 宽度计算（作为纸张内边距），其他模式相对于编辑器宽度计算；
-  /// 桌面端作为滚动容器内边距，移动端则由节点行内容承担，使行尾竖条始终贴到编辑区右边缘
+  /// 桌面端作为滚动容器内边距，移动端则由节点行内容承担，使行尾竖条始终贴到编辑区右边缘。
+  /// [paperCenterOffset] 为纸张相对整个窗口居中所需的横向偏移量，仅纸张模式使用
   Widget _buildEditorScrollView({
     required BoxConstraints constraints,
     required String pageViewMode,
+    required double paperCenterOffset,
     required ColorScheme colorScheme,
     required Color paperColor,
     required List<_OutlineDisplayRow> displayRows,
@@ -8213,6 +8219,12 @@ class OutlineEditorState extends State<OutlineEditor>
     // 纸张模式与移动端在整个视口宽度内居中，桌面端非纸张模式先施加左右边距再居中
     final double viewportCenterRaw = (constraints.maxWidth - GlobalConstants.a4Width) / 2;
     final double viewportCenterInset = viewportCenterRaw > 0 ? viewportCenterRaw : 0.0;
+    // 纸张相对整个窗口居中所需的横向偏移：编辑区夹在左右边栏之间，
+    // 两侧边栏宽度不等时纸张需反向平移，抵消编辑区中心与窗口中心的偏差；
+    // 偏移量不超过居中内缩量，使纸张始终保持 A4 宽
+    final double paperCenterShift = isPaperMode
+        ? paperCenterOffset.clamp(-viewportCenterInset, viewportCenterInset).toDouble()
+        : 0.0;
     final double paddedCenterRaw = (constraints.maxWidth - 2 * horizontalPadding - GlobalConstants.a4Width) / 2;
     final double paddedCenterInset = paddedCenterRaw > 0 ? paddedCenterRaw : 0.0;
 
@@ -8304,14 +8316,18 @@ class OutlineEditorState extends State<OutlineEditor>
 
     final List<Widget> slivers;
     if (isPaperMode) {
-      // 纸张模式：纸张按 A4 宽度居中，水平/上下边距作为纸张内边距；
+      // 纸张模式：纸张按 A4 宽度相对整个窗口居中，水平/上下边距作为纸张内边距；
       // 滚动容器只保留查找替换浮窗的顶边距、纸张顶边距（防止顶部阴影被遮挡）与底部快捷键提示高度；
       // 内容不足 A4 高度时在其后补足空白，使纸张始终保持 A4 尺寸
       slivers = [
         SliverPadding(
           padding: EdgeInsets.only(top: widget.extraTopPadding + 10.0, bottom: bottomHintHeight),
           sliver: SliverPadding(
-            padding: EdgeInsets.symmetric(horizontal: viewportCenterInset),
+            // 居中内缩量上叠加相对窗口的平移量，纸张宽度不变，故左增右减
+            padding: EdgeInsets.only(
+              left: viewportCenterInset + paperCenterShift,
+              right: viewportCenterInset - paperCenterShift,
+            ),
             sliver: DecoratedSliver(
               decoration: BoxDecoration(
                 color: paperColor,

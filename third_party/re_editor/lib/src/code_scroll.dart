@@ -31,6 +31,14 @@ class CodeScrollController {
     return _render?.contentBottomOfLine(index);
   }
 
+  /// 指定逻辑行的高度
+  ///
+  /// 正文自动换行时一个逻辑行会排成多个视觉行，返回值包含该行全部视觉行的高度；
+  /// 供外部判断本次输入是否使末行发生自动换行。
+  double? contentHeightOfLine(int index) {
+    return _render?.contentHeightOfLine(index);
+  }
+
   /// 指定位置所在可见行顶部在外部滚动内容坐标系中的偏移
   ///
   /// 供外层滚动容器在 Layout 阶段定位光标所在行使用；
