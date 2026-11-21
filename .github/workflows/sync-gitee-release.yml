@@ -29,6 +29,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EVENT_TAG: ${{ github.event.release.tag_name }}
           INPUT_TAG: ${{ inputs.tag }}
+          # Release 名称与正文含反引号等特殊字符，经环境变量传入，
+          # 避免被内联进脚本后由 shell 当作命令执行
+          EVENT_NAME: ${{ github.event.release.name }}
+          EVENT_BODY: ${{ github.event.release.body }}
         run: |
           set -euo pipefail
           TAG="${EVENT_TAG:-$INPUT_TAG}"
@@ -37,8 +41,8 @@ jobs:
             exit 1
           fi
 
-          NAME="${{ github.event.release.name }}"
-          BODY="${{ github.event.release.body }}"
+          NAME="${EVENT_NAME:-}"
+          BODY="${EVENT_BODY:-}"
           if [ -z "${NAME}" ] || [ -z "${BODY}" ]; then
             NAME="$(gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json name -q .name)"
             BODY="$(gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" --json body -q .body)"
