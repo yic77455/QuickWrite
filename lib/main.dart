@@ -86,7 +86,7 @@ void main(List<String> args) async {
   // 初始化全局敏感词服务（加载共用词库与标红开关）
   await SensitiveWordService.instance.initialize();
   
-  // 初始化随机取名缓存服务（用于存储取名词典、收藏与生成历史）
+  // 初始化随机取名缓存服务（用于存储词典选中、生成参数与生成历史）
   await NameGenCacheService.instance.initialize();
 
   // 初始化工作台会话缓存服务（用于恢复上次退出时打开的标签页）

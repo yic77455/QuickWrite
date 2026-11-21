@@ -96,6 +96,12 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
   /// 自定义后缀输入控制器
   final TextEditingController _suffixController = TextEditingController();
 
+  /// 每次生成数量输入控制器
+  final TextEditingController _countController = TextEditingController();
+
+  /// 每次生成数量输入框焦点节点
+  final FocusNode _countFocusNode = FocusNode();
+
   /// 当前类别
   NameCategory _category = NameCategory.person;
 
@@ -121,11 +127,12 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
   void initState() {
     super.initState();
     // 尚未保存过参数时采用移动端默认生成数量
-    _options = _normalizeOptions(
-      _cache.getSavedOptions() ?? const NameGenOptions(batchCount: _mobileDefaultBatchCount),
-    );
+    _options = _cache.getSavedOptions() ??
+        const NameGenOptions(batchCount: _mobileDefaultBatchCount);
     _surnameController.text = _options.customSurname;
     _suffixController.text = _options.customSuffix;
+    _countController.text = '${_options.batchCount}';
+    _countFocusNode.addListener(_onCountFocusChanged);
     _reloadDictionaries();
     _reloadHistory();
     // 打开弹窗时立即生成一次结果
@@ -142,17 +149,10 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
     _syncService.removeListener(_onCloudSyncChanged);
     _surnameController.dispose();
     _suffixController.dispose();
+    _countController.dispose();
+    _countFocusNode.removeListener(_onCountFocusChanged);
+    _countFocusNode.dispose();
     super.dispose();
-  }
-
-  /// 规范化历史缓存中的生成参数
-  ///
-  /// 生成数量取值不在当前候选范围内时回退为默认值。
-  NameGenOptions _normalizeOptions(NameGenOptions options) {
-    if (NameGenOptions.batchCountOptions.contains(options.batchCount)) {
-      return options;
-    }
-    return options.copyWith(batchCount: _mobileDefaultBatchCount);
   }
 
   // ================= 数据读取 =================
@@ -377,6 +377,35 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
     setState(() => _options = options);
   }
 
+  /// 生成数量输入处理
+  ///
+  /// 输入为空或小于下限时保留上一次的有效数量；超过上限时立即收敛为
+  /// 上限值，使输入框显示的数量与实际生成数量始终一致。
+  void _onCountChanged(String text) {
+    final count = int.tryParse(text);
+    if (count == null || count < NameGenOptions.minBatchCount) return;
+
+    final clamped = NameGenOptions.clampBatchCount(count);
+    if (clamped != count) _setCountInput(clamped);
+    _onOptionsChanged(_options.copyWith(batchCount: clamped));
+  }
+
+  /// 将数量输入框的文字设置为指定数量，并把光标移到末尾
+  void _setCountInput(int count) {
+    final text = '$count';
+    _countController.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+  }
+
+  /// 数量输入框失去焦点时恢复为当前生效的数量
+  void _onCountFocusChanged() {
+    if (!_countFocusNode.hasFocus) {
+      _countController.text = '${_options.batchCount}';
+    }
+  }
+
   // ================= 构建 =================
 
   @override
@@ -490,7 +519,7 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
                 onChanged: (value) => _onOptionsChanged(_options.copyWith(customSurname: value)),
               ),
             ),
-            right: _buildOptionItem(label: '数量', control: _buildCountDropdown()),
+            right: _buildOptionItem(label: '数量', control: _buildCountField()),
           ),
         ];
 
@@ -509,7 +538,7 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
           ),
           const SizedBox(height: 12),
           _buildOptionRow(
-            left: _buildOptionItem(label: '数量', control: _buildCountDropdown()),
+            left: _buildOptionItem(label: '数量', control: _buildCountField()),
             right: const SizedBox.shrink(),
           ),
         ];
@@ -517,7 +546,7 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
       case NameCategory.other:
         return [
           _buildOptionRow(
-            left: _buildOptionItem(label: '数量', control: _buildCountDropdown()),
+            left: _buildOptionItem(label: '数量', control: _buildCountField()),
             right: const SizedBox.shrink(),
           ),
         ];
@@ -595,16 +624,22 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
     );
   }
 
-  /// 构建生成数量下拉框
-  Widget _buildCountDropdown() {
-    return CustomDropdown(
-      width: double.infinity,
-      height: _controlHeight,
-      value: '${_options.batchCount}',
-      items: NameGenOptions.batchCountOptions
-          .map((count) => DropdownItem(displayText: '$count', value: '$count'))
-          .toList(),
-      onChanged: (value) => _onOptionsChanged(_options.copyWith(batchCount: int.parse(value))),
+  /// 构建生成数量输入框
+  ///
+  /// 仅接受数字，样式与其它参数输入框一致；失去焦点时恢复为当前生效的数量。
+  Widget _buildCountField() {
+    return _buildTextControl(
+      controller: _countController,
+      focusNode: _countFocusNode,
+      hintText: '${_options.batchCount}',
+      keyboardType: TextInputType.number,
+      inputFormatters: [
+        FilteringTextInputFormatter.digitsOnly,
+        LengthLimitingTextInputFormatter(
+          '${NameGenOptions.maxBatchCount}'.length,
+        ),
+      ],
+      onChanged: _onCountChanged,
     );
   }
 
@@ -616,12 +651,18 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
     required TextEditingController controller,
     required String hintText,
     required ValueChanged<String> onChanged,
+    FocusNode? focusNode,
+    TextInputType? keyboardType,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     final colorScheme = Theme.of(context).colorScheme;
     return SizedBox(
       height: _controlHeight,
       child: TextField(
         controller: controller,
+        focusNode: focusNode,
+        keyboardType: keyboardType,
+        inputFormatters: inputFormatters,
         onChanged: onChanged,
         onTapOutside: (_) => _unfocus(),
         // 输入框填满固定高度的容器，文字在其中垂直居中

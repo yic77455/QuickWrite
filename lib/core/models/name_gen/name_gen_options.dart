@@ -31,11 +31,18 @@ enum PersonGender {
 /// 记录最后一次使用的生成配置，供下次打开弹窗时恢复。
 /// 各类别共用同一份参数，各自使用与自己相关的字段。
 class NameGenOptions {
-  /// 每次生成数量的可选值
-  static const List<int> batchCountOptions = [20, 50, 100, 200];
+  /// 每次生成数量的最小值
+  static const int minBatchCount = 1;
+
+  /// 每次生成数量的最大值
+  static const int maxBatchCount = 200;
 
   /// 每次生成数量的默认值
   static const int defaultBatchCount = 100;
+
+  /// 将生成数量限制在允许范围内
+  static int clampBatchCount(int count) =>
+      count.clamp(minBatchCount, maxBatchCount);
 
   /// 人名：性别取向
   final PersonGender gender;
@@ -72,7 +79,7 @@ class NameGenOptions {
       givenLength: json['givenLength'] as int? ?? 0,
       customSuffix: json['customSuffix'] as String? ?? '',
       stemLength: json['stemLength'] as int? ?? 0,
-      batchCount: json['batchCount'] as int? ?? defaultBatchCount,
+      batchCount: clampBatchCount(json['batchCount'] as int? ?? defaultBatchCount),
     );
   }
 
