@@ -15,7 +15,7 @@ abstract class ImportFolderSource {
   /// 界面展示的位置说明
   String get displayLocation;
 
-  /// 列出待导入的章节文件，按章节标题自然排序
+  /// 列出待导入的章节文件，按分卷卷标与章节标题排序
   Future<List<ImportFileEntry>> listFiles();
 }
 
@@ -97,7 +97,7 @@ class LocalFolderSource implements ImportFolderSource {
       }
     }
 
-    entries.sort((a, b) => _naturalCompare(a.chapterTitle, b.chapterTitle));
+    _sortEntries(entries);
     return entries;
   }
 
@@ -148,7 +148,7 @@ class SafFolderSource implements ImportFolderSource {
             ))
         .toList();
 
-    entries.sort((a, b) => _naturalCompare(a.chapterTitle, b.chapterTitle));
+    _sortEntries(entries);
     return entries;
   }
 }
@@ -159,6 +159,169 @@ bool _isImportableFile(String fileName) {
 
   final extension = fileName.split('.').last.toLowerCase();
   return extension == 'txt' || extension == 'docx';
+}
+
+/// 按分卷顺序整理待导入文件
+///
+/// 先按分卷卷标排序分卷，再在每个分卷内按章节标题自然排序；
+/// 未归属分卷的文件固定排在所有分卷之后。
+void _sortEntries(List<ImportFileEntry> entries) {
+  entries.sort((a, b) {
+    final aHasVolume = a.volumeName.isNotEmpty;
+    final bHasVolume = b.volumeName.isNotEmpty;
+
+    // 未分卷的文件统一排在分卷文件之后
+    if (aHasVolume != bHasVolume) {
+      return aHasVolume ? -1 : 1;
+    }
+
+    // 不同分卷之间先比较分卷顺序
+    if (aHasVolume && a.volumeName != b.volumeName) {
+      final volumeOrder = _compareVolumeNames(a.volumeName, b.volumeName);
+      if (volumeOrder != 0) return volumeOrder;
+    }
+
+    // 同一分卷内按章节标题自然排序
+    return _naturalCompare(a.chapterTitle, b.chapterTitle);
+  });
+}
+
+/// 比较两个分卷名的先后顺序
+///
+/// 双方都识别出卷标时按卷标序号比较；只有一方识别出卷标时，
+/// 有卷标的分卷排在前面；都无法识别时按分卷名自然排序。
+int _compareVolumeNames(String a, String b) {
+  final aOrder = _parseVolumeOrder(a);
+  final bOrder = _parseVolumeOrder(b);
+
+  if (aOrder != null && bOrder != null) {
+    final result = aOrder.compareTo(bOrder);
+    if (result != 0) return result;
+  } else if (aOrder != null) {
+    return -1;
+  } else if (bOrder != null) {
+    return 1;
+  }
+
+  return _naturalCompare(a, b);
+}
+
+/// 卷标中可出现的数字字符（阿拉伯数字与中文数字）
+const String _volumeNumberChars = r'[零〇两一二三四五六七八九十百千万亿壹贰叁肆伍陆柒捌玖拾佰仟\d]+';
+
+/// 匹配「第X卷」「第X部」等卷标（可出现在分卷名任意位置）
+final RegExp _volumePrefixedPattern =
+    RegExp('第\\s*($_volumeNumberChars)\\s*[卷部册集篇幕]');
+
+/// 匹配「卷X」「卷之X」等卷标
+final RegExp _volumeSuffixedPattern =
+    RegExp('[卷部册集篇幕]\\s*之?\\s*($_volumeNumberChars)');
+
+/// 匹配「Vol. X」「Volume X」「Book X」「Part X」等卷标
+final RegExp _volumeEnglishPattern =
+    RegExp(r'(?:vol(?:ume)?|book|part)\.?\s*(\d+)', caseSensitive: false);
+
+/// 匹配以数字开头的卷标，如「01」「1卷」「01 番外」
+final RegExp _volumeLeadingNumberPattern =
+    RegExp('^($_volumeNumberChars)(?:[卷部册集篇幕]|\$|[\\s._、．:：\\-])');
+
+/// 解析分卷名中的卷标序号
+///
+/// 支持的格式示例：第一卷、第2部、卷三、卷之四、Vol. 5、Book 6、
+/// 01、1卷、01 番外。返回 null 表示未识别到卷标。
+int? _parseVolumeOrder(String volumeName) {
+  final name = volumeName.trim();
+  if (name.isEmpty) return null;
+
+  final prefixed = _volumePrefixedPattern.firstMatch(name);
+  if (prefixed != null) {
+    return _parseVolumeNumber(prefixed.group(1)!);
+  }
+
+  final suffixed = _volumeSuffixedPattern.firstMatch(name);
+  if (suffixed != null) {
+    return _parseVolumeNumber(suffixed.group(1)!);
+  }
+
+  final english = _volumeEnglishPattern.firstMatch(name);
+  if (english != null) {
+    return int.tryParse(english.group(1)!);
+  }
+
+  final leading = _volumeLeadingNumberPattern.firstMatch(name);
+  if (leading != null) {
+    return _parseVolumeNumber(leading.group(1)!);
+  }
+
+  return null;
+}
+
+/// 中文数字字符对应的数值
+const Map<String, int> _chineseDigitValues = {
+  '零': 0, '〇': 0,
+  '一': 1, '壹': 1, '二': 2, '两': 2, '贰': 2,
+  '三': 3, '叁': 3, '四': 4, '肆': 4,
+  '五': 5, '伍': 5, '六': 6, '陆': 6,
+  '七': 7, '柒': 7, '八': 8, '捌': 8,
+  '九': 9, '玖': 9,
+};
+
+/// 中文位置制单位对应的数值
+const Map<String, int> _chineseUnitValues = {
+  '十': 10, '拾': 10,
+  '百': 100, '佰': 100,
+  '千': 1000, '仟': 1000,
+  '万': 10000,
+  '亿': 100000000,
+};
+
+/// 把卷标中的数字片段转换为整数
+///
+/// 阿拉伯数字直接转换；中文数字按位置制解析（如「十一」→ 11），
+/// 全部由数字字符组成时按逐位制解析（如「一二」→ 12）。
+int? _parseVolumeNumber(String raw) {
+  final text = raw.trim();
+  if (text.isEmpty) return null;
+
+  final arabic = int.tryParse(text);
+  if (arabic != null) return arabic;
+
+  // 全为数字字符时逐位拼接，避免多位数被当成单个数字
+  final allDigits = text.split('').every(_chineseDigitValues.containsKey);
+  if (allDigits) {
+    int value = 0;
+    for (final char in text.split('')) {
+      value = value * 10 + _chineseDigitValues[char]!;
+    }
+    return value;
+  }
+
+  int total = 0;
+  int digit = 0;
+  bool hasDigit = false;
+
+  for (final char in text.split('')) {
+    final unit = _chineseUnitValues[char];
+    if (unit != null) {
+      // 万、亿按段累计，十、百、千按当前数字换算
+      if (unit >= 10000) {
+        total = (total + digit) * unit;
+      } else {
+        total += (digit == 0 ? 1 : digit) * unit;
+      }
+      digit = 0;
+      hasDigit = true;
+      continue;
+    }
+
+    final value = _chineseDigitValues[char];
+    if (value == null) return null;
+    digit = value;
+    hasDigit = true;
+  }
+
+  total += digit;
+  return hasDigit ? total : null;
 }
 
 /// 自然排序比较（优先比较文件名中的第一个数字）
