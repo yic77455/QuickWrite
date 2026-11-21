@@ -89,6 +89,8 @@
 2. 首次启动若被 Gatekeeper 拦截，请在「应用程序」中右键点击「快码字」选择「打开」，或前往「系统设置 → 隐私与安全性」允许该应用运行。
 3. 首次启动后可在「主界面 → 云同步」中配置 WebDAV 或 S3 服务器地址进行数据同步。
 
+> macOS 版本目前仍处于测试阶段，使用中遇到问题请及时在 Issues 中反馈。
+
 ### Linux
 
 1. 下载 `quick-write-1.x.x-linux-amd64.deb`，适用于 amd64 / x86_64 架构的 Debian、Ubuntu 等发行版。
@@ -96,7 +98,7 @@
 3. 卸载执行 `sudo apt remove quickwrite`，书稿与设置不会被删除；如需连同配置一起彻底清除，执行 `sudo apt purge quickwrite`。
 4. 首次启动后可在「主界面 → 云同步」中配置 WebDAV 或 S3 服务器地址进行数据同步。
 
-> macOS 与 Linux 版本目前仍处于测试阶段，使用中遇到问题欢迎在 Issues 中反馈。
+> Linux 版本目前仍处于测试阶段，使用中遇到问题请及时在 Issues 中反馈。
 
 ### Android
 
