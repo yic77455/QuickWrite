@@ -1541,6 +1541,8 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
         thumbVisibility: settings.scrollbarAlwaysVisible ? true : null,
         thickness: editorScrollbarThickness,
         radius: Radius.circular(editorScrollbarThickness / 2),
+        // 移动端默认把滚动条当作纯指示器，显式开启拖动交互
+        interactive: PlatformCapabilities.isMobile ? true : null,
         child: ScrollConfiguration(
           // 屏蔽滚动视图自带滚动条与边界光效，滚动条统一由外层绘制
           behavior: CleanEditorScrollBehavior(),
