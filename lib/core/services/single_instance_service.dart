@@ -1,5 +1,4 @@
 import 'dart:ffi';
-
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:quick_write/core/constants/constants.dart';

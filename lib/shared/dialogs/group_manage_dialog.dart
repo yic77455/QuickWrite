@@ -47,19 +47,11 @@ class _GroupManageContentState extends State<_GroupManageContent> {
         buildDefaultDragHandles: false,
         itemCount: groups.length,
         onReorder: (oldIndex, newIndex) => _onReorder(groups, oldIndex, newIndex),
+        // 默认代理会给整个条目（含条目之间预留的间距）铺一层底色，
+        // 这里改用透明 Material 仅提供绘制环境，避免拖动时多出一块背景
         proxyDecorator: (child, index, animation) {
-          return AnimatedBuilder(
-            animation: animation,
-            builder: (context, child) {
-              final animValue = Curves.easeInOut.transform(animation.value);
-              final elevation = 1 + animValue * 8;
-              return Material(
-                elevation: elevation,
-                color: Theme.of(context).colorScheme.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(12),
-                child: child,
-              );
-            },
+          return Material(
+            type: MaterialType.transparency,
             child: child,
           );
         },

@@ -383,6 +383,14 @@ class _OtherPanelState extends State<OtherPanel> {
         ),
         // 图标配置与符号列表仅在快捷输入栏开启后可调
         if (quickInputBarEnabled) ...[
+          // 符号列表编辑入口
+          InkWellSettingItem(
+            icon: Icons.text_fields_outlined,
+            label: '符号列表',
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 15),
+            trailing: Icon(Icons.chevron_right_rounded, size: 18, color: colorScheme.onSurfaceVariant),
+            onTap: () => showQuickInputSymbolsDialog(context: context),
+          ),
           _buildDropdownSettingItem(
             context,
             icon: leftAction.icon,
@@ -404,14 +412,6 @@ class _OtherPanelState extends State<OtherPanel> {
               isLeft: false,
               action: QuickInputAction.fromId(value, fallback: rightAction),
             ),
-          ),
-          // 符号列表编辑入口
-          InkWellSettingItem(
-            icon: Icons.text_fields_outlined,
-            label: '符号列表',
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 15),
-            trailing: Icon(Icons.chevron_right_rounded, size: 18, color: colorScheme.onSurfaceVariant),
-            onTap: () => showQuickInputSymbolsDialog(context: context),
           ),
         ],
         SwitchSettingItem(

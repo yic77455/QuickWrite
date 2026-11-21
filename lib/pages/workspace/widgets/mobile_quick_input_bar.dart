@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/constants/punctuation_symbols.dart';
 import 'package:quick_write/core/constants/quick_input_action.dart';
+import 'package:quick_write/core/models/quick_phrase.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/pages/workspace/editor/novel_editor.dart';
 import 'package:quick_write/pages/workspace/name_gen/name_generator_dialog_mobile.dart';
 import 'package:quick_write/pages/workspace/widgets/punctuation_key_button.dart';
+import 'package:quick_write/pages/workspace/widgets/quick_phrase_manager_dialog.dart';
+import 'package:quick_write/pages/workspace/widgets/quick_phrase_popup.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 import 'package:re_editor/re_editor.dart';
 
@@ -15,6 +18,8 @@ import 'package:re_editor/re_editor.dart';
 /// 软键盘弹出时贴在键盘上方，提供常用标点符号的快捷输入；
 /// 右端提供两个可自定义的快捷操作按钮（可设为「无」隐藏），
 /// 默认分别为关键词高亮开关与其他设置入口。
+/// 选择「快捷短语」动作后，点击图标即在其上方弹出短语浮层，
+/// 点击短语将完整内容键入编辑器，浮层底部提供短语编辑入口。
 class MobileQuickInputBar extends StatefulWidget {
   const MobileQuickInputBar({super.key});
 
@@ -28,6 +33,12 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
 
   /// 标点按键列表左侧留白，避免首个按键紧贴屏幕边缘不便点按
   static const double _keyListLeftPadding = 8;
+
+  /// 快捷短语图标的定位键，用于计算浮层锚点位置
+  final GlobalKey _phraseButtonKey = GlobalKey();
+
+  /// 快捷短语浮层的 Overlay 条目，null 表示浮层未显示
+  OverlayEntry? _phrasePopupEntry;
 
   /// 软键盘高度，大于 0 表示键盘正在显示
   double _keyboardHeight = 0;
@@ -62,6 +73,7 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
 
   @override
   void dispose() {
+    _removePhrasePopup();
     WidgetsBinding.instance.removeObserver(this);
     FocusManager.instance.removeListener(_onFocusChanged);
     SettingsService.instance.removeListener(_onSettingsChanged);
@@ -77,12 +89,23 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
 
   /// 焦点变化时重新判断显隐
   void _onFocusChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    // 输入焦点离开编辑器时浮层失去锚点意义，一并关闭
+    if (!(_currentEditorState()?.hasEditorFocus ?? false)) {
+      _closePhrasePopup();
+    }
+    setState(() {});
   }
 
   /// 设置变化时重新判断显隐
   void _onSettingsChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    // 快捷短语入口被移除后，浮层不再有对应图标，直接关闭
+    if (_phrasePopupEntry != null &&
+        !_visibleActions().contains(QuickInputAction.quickPhrase)) {
+      _closePhrasePopup();
+    }
+    setState(() {});
   }
 
   /// 同步软键盘高度
@@ -98,8 +121,12 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
     // 因此只在高度归零时解除，避免快捷栏在屏幕底部反复闪现
     if (height <= 0) {
       _keyboardRetracting = false;
+      // 键盘完全收起后快捷栏随之隐藏，短语浮层一并关闭
+      _closePhrasePopup();
     } else if (height < _keyboardHeight) {
       _keyboardRetracting = true;
+      // 键盘开始收起时立即关闭浮层，避免浮层悬留在空处
+      _closePhrasePopup();
     }
     _keyboardHeight = height;
     // 仅在显隐状态真正变化时重建，键盘动画期间的连续高度变化被合并掉
@@ -168,6 +195,66 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
     showMobileNameGeneratorDialog(context: context);
   }
 
+  /// 切换快捷短语浮层的显隐
+  void _togglePhrasePopup() {
+    if (_phrasePopupEntry != null) {
+      _closePhrasePopup();
+    } else {
+      _openPhrasePopup();
+    }
+  }
+
+  /// 在图标上方打开快捷短语浮层
+  void _openPhrasePopup() {
+    // 以图标自身的屏幕矩形作为浮层锚点，使浮层从图标位置向上弹出
+    final RenderBox? buttonBox =
+        _phraseButtonKey.currentContext?.findRenderObject() as RenderBox?;
+    if (buttonBox == null) return;
+
+    final Rect anchorRect = buttonBox.localToGlobal(Offset.zero) & buttonBox.size;
+    final OverlayEntry entry = OverlayEntry(
+      builder: (overlayContext) => QuickPhrasePopup(
+        anchorRect: anchorRect,
+        phrases: SettingsService.instance.quickPhrases,
+        onSelect: _handlePhraseTap,
+        onEdit: _handleManagePhrases,
+        onDismiss: _closePhrasePopup,
+      ),
+    );
+
+    _phrasePopupEntry = entry;
+    Overlay.of(context, rootOverlay: true).insert(entry);
+    setState(() {});
+  }
+
+  /// 关闭快捷短语浮层并刷新图标选中态
+  void _closePhrasePopup() {
+    if (_phrasePopupEntry == null) return;
+    _removePhrasePopup();
+    if (mounted) setState(() {});
+  }
+
+  /// 移除快捷短语浮层，不触发重建
+  void _removePhrasePopup() {
+    _phrasePopupEntry?.remove();
+    _phrasePopupEntry = null;
+  }
+
+  /// 在当前光标处键入快捷短语
+  void _handlePhraseTap(QuickPhrase phrase) {
+    final state = _currentEditorState();
+    if (state != null) state.insertText(phrase.content);
+    _closePhrasePopup();
+  }
+
+  /// 打开快捷短语管理弹窗
+  void _handleManagePhrases() {
+    _closePhrasePopup();
+    // 先收起输入法，避免键盘遮挡弹窗
+    FocusManager.instance.primaryFocus?.unfocus();
+    showQuickPhraseManagerDialog(context: context);
+  }
+
   /// 右侧操作区实际需要渲染的动作
   ///
   /// 「无」不占位、不渲染。标点按键列表是 Expanded，剩余按钮始终贴着整栏右端，
@@ -221,6 +308,16 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
         return _buildSmallActionButton(action, icon, _handleFullTextSearchTap);
       case QuickInputAction.randomName:
         return _buildSmallActionButton(action, icon, _handleRandomNameTap);
+      case QuickInputAction.quickPhrase:
+        return ToggleToolButton(
+          key: _phraseButtonKey,
+          icon: icon,
+          tooltip: action.label,
+          isSelected: _phrasePopupEntry != null,
+          size: 44,
+          iconSize: 20,
+          onChanged: (_) => _togglePhrasePopup(),
+        );
     }
   }
 
@@ -258,43 +355,54 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
       behavior: HitTestBehavior.opaque,
       // 整栏不参与焦点争夺，避免点击时输入法收起
       child: ExcludeFocus(
-        child: Container(
-          height: _barHeight,
-          margin: const EdgeInsets.fromLTRB(2, 0, 2, 2),
-          decoration: BoxDecoration(
-            color: colorScheme.surface,
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: Row(
-            children: [
-              // 标点符号按键（数量较多，横向滚动显示）
-              Expanded(
-                child: ListView.builder(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.only(left: _keyListLeftPadding, right: 4),
-                  itemCount: symbols.length,
-                  itemBuilder: (context, index) {
-                    final symbol = symbols[index];
-                    return PunctuationKeyButton(symbol: symbol, onTap: () => _handleSymbolTap(symbol));
-                  },
-                ),
-              ),
+        child: _buildMainBar(context, colorScheme, symbols, editorState, visibleActions),
+      ),
+    );
+  }
 
-              // 与右侧操作区之间的分隔线，上下留白避免顶满整栏；
-              // 两个图标都设为「无」时一并隐藏，标点按键占满整栏
-              if (visibleActions.isNotEmpty)
-                Container(
-                  width: 1,
-                  height: _barHeight - 16,
-                  margin: const EdgeInsets.symmetric(horizontal: 4),
-                  color: colorScheme.outlineVariant,
-                ),
-
-              // 右侧操作区：最多两个快捷操作图标，种类与顺序由设置决定
-              ..._buildRightActions(editorState, visibleActions),
-            ],
+  /// 构建快捷输入主栏（标点按键与右侧操作区）
+  Widget _buildMainBar(
+    BuildContext context,
+    ColorScheme colorScheme,
+    List<PunctuationSymbol> symbols,
+    NovelEditorState editorState,
+    List<QuickInputAction> visibleActions,
+  ) {
+    return Container(
+      height: _barHeight,
+      margin: const EdgeInsets.fromLTRB(2, 0, 2, 2),
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        children: [
+          // 标点符号按键（数量较多，横向滚动显示）
+          Expanded(
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.only(left: _keyListLeftPadding, right: 4),
+              itemCount: symbols.length,
+              itemBuilder: (context, index) {
+                final symbol = symbols[index];
+                return PunctuationKeyButton(symbol: symbol, onTap: () => _handleSymbolTap(symbol));
+              },
+            ),
           ),
-        ),
+
+          // 与右侧操作区之间的分隔线，上下留白避免顶满整栏；
+          // 两个图标都设为「无」时一并隐藏，标点按键占满整栏
+          if (visibleActions.isNotEmpty)
+            Container(
+              width: 1,
+              height: _barHeight - 16,
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              color: colorScheme.outlineVariant,
+            ),
+
+          // 右侧操作区：最多两个快捷操作图标，种类与顺序由设置决定
+          ..._buildRightActions(editorState, visibleActions),
+        ],
       ),
     );
   }

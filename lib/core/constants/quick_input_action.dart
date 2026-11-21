@@ -9,6 +9,9 @@ enum QuickInputAction {
   /// 不显示图标（该位置留空，快捷输入栏中不渲染对应按钮）
   none('none', null, '无'),
 
+  /// 快捷短语
+  quickPhrase('quickPhrase', Icons.quickreply_outlined, '快捷短语'),
+
   /// 关键词高亮开关
   keywordToggle('keywordToggle', Icons.sell_outlined, '关键词高亮'),
 
@@ -22,7 +25,7 @@ enum QuickInputAction {
   fullTextSearch('fullTextSearch', Icons.search_rounded, '全文搜索'),
 
   /// 随机取名
-  randomName('randomName', Icons.casino_rounded, '随机取名');
+  randomName('randomName', Icons.casino_outlined, '随机取名');
 
   /// 持久化到配置文件的标识
   final String id;
@@ -39,7 +42,7 @@ enum QuickInputAction {
   bool get isNone => this == QuickInputAction.none;
 
   /// 默认显示在左侧的动作
-  static const QuickInputAction defaultLeft = QuickInputAction.keywordToggle;
+  static const QuickInputAction defaultLeft = QuickInputAction.quickPhrase;
 
   /// 默认显示在右侧的动作
   static const QuickInputAction defaultRight = QuickInputAction.settings;

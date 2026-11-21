@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/constants/word_count_floating_mode.dart';
+import 'package:quick_write/core/models/quick_phrase.dart';
 
 /// 应用全局设置模型类
 /// 
@@ -240,7 +242,7 @@ class AppSettings {
   final bool pairedSymbolEnterJumpEnabled;
 
   /// 快捷输入栏右侧操作区左侧图标的动作标识
-  /// 取值见 QuickInputAction：none、keywordToggle、settings、findReplace、fullTextSearch、randomName
+  /// 取值见 QuickInputAction：none、quickPhrase、keywordToggle、settings、findReplace、fullTextSearch、randomName
   /// none 表示该位置不显示图标
   final String quickInputBarLeftAction;
 
@@ -252,6 +254,11 @@ class AppSettings {
   /// 写法与源码一致：符号用单引号包裹，成对符号在逗号后追加
   /// `closing: '结束符号'`。null 表示使用内置默认符号列表
   final String? quickInputSymbolsText;
+
+  /// 快捷短语列表（移动端）
+  ///
+  /// 每条短语包含点击后键入正文的内容与列表中的显示文本
+  final List<QuickPhrase> quickPhrases;
 
   // ================= 字数浮窗设置（移动端）=================
 
@@ -383,9 +390,10 @@ class AppSettings {
     this.quickInputBarEnabled = true, // 是否显示快捷输入栏（移动端）
     this.punctuationAutoCompleteEnabled = true, // 是否开启标点符号自动补全（移动端）
     this.pairedSymbolEnterJumpEnabled = false, // 是否开启成对符号回车跳出
-    this.quickInputBarLeftAction = 'keywordToggle', // 快捷输入栏右侧操作区左侧图标
+    this.quickInputBarLeftAction = 'quickPhrase', // 快捷输入栏右侧操作区左侧图标
     this.quickInputBarRightAction = 'settings', // 快捷输入栏右侧操作区右侧图标
     this.quickInputSymbolsText, // 快捷输入栏自定义符号列表（null 表示使用默认列表）
+    this.quickPhrases = const [], // 快捷短语列表（移动端）
     // 字数浮窗设置（移动端）
     this.wordCountFloatingEnabled = false, // 是否启用字数浮窗
     this.wordCountFloatingPosition = 'topRight', // 字数浮窗显示位置（默认右上）
@@ -511,6 +519,7 @@ class AppSettings {
       quickInputBarLeftAction: autoBackupJson['quickInputBarLeftAction'] as String? ?? defaults.quickInputBarLeftAction,
       quickInputBarRightAction: autoBackupJson['quickInputBarRightAction'] as String? ?? defaults.quickInputBarRightAction,
       quickInputSymbolsText: autoBackupJson['quickInputSymbolsText'] as String?,
+      quickPhrases: _parseQuickPhrases(autoBackupJson['quickPhrases']),
 
       // 字数浮窗设置（编辑器）
       wordCountFloatingEnabled: wordCountFloatingJson['enabled'] as bool? ?? defaults.wordCountFloatingEnabled,
@@ -523,6 +532,18 @@ class AppSettings {
       statsIncludeSettingWords: writingStatsJson['includeSettingWords'] as bool? ?? defaults.statsIncludeSettingWords,
       statsIdleThresholdSeconds: writingStatsJson['idleThresholdSeconds'] as int? ?? defaults.statsIdleThresholdSeconds,
     );
+  }
+
+  /// 解析快捷短语列表
+  ///
+  /// 配置文件中该字段缺失或格式异常时返回空列表，忽略无法识别及内容为空的条目
+  static List<QuickPhrase> _parseQuickPhrases(Object? raw) {
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map((item) => QuickPhrase.fromJson(Map<String, dynamic>.from(item)))
+        .where((phrase) => phrase.content.isNotEmpty)
+        .toList(growable: false);
   }
 
   /// 将 AppSettings 实例转换为 JSON Map
@@ -631,6 +652,7 @@ class AppSettings {
           'quickInputBarLeftAction': quickInputBarLeftAction,
           'quickInputBarRightAction': quickInputBarRightAction,
           'quickInputSymbolsText': quickInputSymbolsText,
+          'quickPhrases': quickPhrases.map((phrase) => phrase.toJson()).toList(growable: false),
         },
         // 字数浮窗设置（移动端）
         'wordCountFloating': {
@@ -737,6 +759,8 @@ class AppSettings {
     String? quickInputBarRightAction,
     // 快捷输入栏自定义符号列表（传入 null 表示恢复默认列表）
     Object? quickInputSymbolsText = _unset,
+    // 快捷短语列表（移动端）
+    List<QuickPhrase>? quickPhrases,
     // 字数浮窗设置（移动端）
     bool? wordCountFloatingEnabled,
     String? wordCountFloatingPosition,
@@ -826,6 +850,8 @@ class AppSettings {
       quickInputBarRightAction: quickInputBarRightAction ?? this.quickInputBarRightAction,
       // 快捷输入栏自定义符号列表
       quickInputSymbolsText: quickInputSymbolsText == _unset ? this.quickInputSymbolsText : quickInputSymbolsText as String?,
+      // 快捷短语列表
+      quickPhrases: quickPhrases ?? this.quickPhrases,
       // 字数浮窗设置（移动端）
       wordCountFloatingEnabled: wordCountFloatingEnabled ?? this.wordCountFloatingEnabled,
       wordCountFloatingPosition: wordCountFloatingPosition ?? this.wordCountFloatingPosition,
@@ -949,6 +975,8 @@ class AppSettings {
            other.quickInputBarLeftAction == quickInputBarLeftAction &&
            other.quickInputBarRightAction == quickInputBarRightAction &&
            other.quickInputSymbolsText == quickInputSymbolsText &&
+           // 快捷短语列表
+           listEquals(other.quickPhrases, quickPhrases) &&
            // 字数浮窗设置（移动端）
            other.wordCountFloatingEnabled == wordCountFloatingEnabled &&
            other.wordCountFloatingPosition == wordCountFloatingPosition &&
@@ -1054,6 +1082,7 @@ class AppSettings {
         quickInputBarLeftAction,
         quickInputBarRightAction,
         quickInputSymbolsText,
+        Object.hashAll(quickPhrases),
         wordCountFloatingEnabled,
         wordCountFloatingPosition,
         wordCountFloatingSpeedEnabled,

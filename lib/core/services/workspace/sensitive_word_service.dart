@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:quick_write/core/services/app_paths.dart';
 import 'package:quick_write/core/services/cache_services/misc_cache_service.dart';

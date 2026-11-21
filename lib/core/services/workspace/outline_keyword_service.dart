@@ -1,5 +1,4 @@
 import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import 'package:quick_write/core/models/outline_keyword.dart';
 import 'package:quick_write/core/models/outline_note.dart';
