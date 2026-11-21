@@ -1,10 +1,12 @@
 package com.quickwrite.app
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.provider.DocumentsContract
 import android.provider.Settings
 import android.text.Html
 import android.text.Spanned
@@ -13,6 +15,7 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import kotlin.concurrent.thread
 
 /**
  * 应用入口 Activity，同时承载移动端所需的部分系统原生能力。
@@ -25,7 +28,13 @@ class MainActivity : FlutterActivity() {
     companion object {
         /** 与 Dart 侧约定的通道名称 */
         private const val CHANNEL_NAME = "com.quickwrite.app/native"
+
+        /** 选择书籍文件夹的请求码 */
+        private const val REQUEST_CODE_PICK_BOOK_FOLDER = 4101
     }
+
+    /** 等待系统文件夹选择器返回结果的回调 */
+    private var pendingFolderPickResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -50,6 +59,12 @@ class MainActivity : FlutterActivity() {
                             call.argument("html"),
                         )
                     )
+                    // 选择书籍文件夹，返回目录树 URI
+                    "pickBookFolder" -> pickBookFolder(result)
+                    // 列出授权目录下的章节文件
+                    "listChapterFiles" -> listChapterFiles(call.argument("treeUri"), result)
+                    // 读取授权文件的字节内容
+                    "readFileBytes" -> readFileBytes(call.argument("uri"), result)
                     else -> result.notImplemented()
                 }
             }
@@ -124,6 +139,210 @@ class MainActivity : FlutterActivity() {
             false
         }
     }
+
+    // ================= 文件夹导入（SAF） =================
+
+    /**
+     * 拉起系统文件夹选择器。
+     *
+     * 安卓 11 起应用无法直接枚举共享存储中的任意目录，只能通过 SAF 获得
+     * content:// 授权。这里返回目录树 URI，后续按 URI 列目录、按 URI 读取文件。
+     */
+    private fun pickBookFolder(result: MethodChannel.Result) {
+        if (pendingFolderPickResult != null) {
+            result.error("picker_busy", "已有正在进行的文件夹选择", null)
+            return
+        }
+
+        pendingFolderPickResult = result
+        try {
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                addFlags(
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                )
+            }
+            startActivityForResult(intent, REQUEST_CODE_PICK_BOOK_FOLDER)
+        } catch (e: Exception) {
+            pendingFolderPickResult = null
+            result.error("picker_unavailable", e.message, null)
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+
+        if (requestCode != REQUEST_CODE_PICK_BOOK_FOLDER) return
+
+        val result = pendingFolderPickResult ?: return
+        pendingFolderPickResult = null
+
+        val treeUri = data?.data
+        if (resultCode != Activity.RESULT_OK || treeUri == null) {
+            result.success(null)
+            return
+        }
+
+        // 申请持久读权限，避免进程重启后再次访问该目录被拒绝
+        try {
+            contentResolver.takePersistableUriPermission(
+                treeUri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        } catch (_: SecurityException) {
+            // 授权失败不影响本次导入
+        }
+
+        result.success(
+            mapOf(
+                "uri" to treeUri.toString(),
+                "name" to queryFolderDisplayName(treeUri),
+            )
+        )
+    }
+
+    /**
+     * 列出授权目录下根级文件与一层子目录中的 txt/docx。
+     *
+     * 与桌面端的目录规则保持一致：根级文件没有分卷，一层子目录名作为分卷名。
+     */
+    private fun listChapterFiles(treeUri: String?, result: MethodChannel.Result) {
+        if (treeUri.isNullOrEmpty()) {
+            result.success(emptyList<Map<String, String>>())
+            return
+        }
+
+        val tree = Uri.parse(treeUri)
+        thread {
+            val files = mutableListOf<Map<String, String>>()
+            try {
+                val rootDocumentUri = DocumentsContract.buildDocumentUriUsingTree(
+                    tree,
+                    DocumentsContract.getTreeDocumentId(tree)
+                )
+                val children = queryChildren(tree, rootDocumentUri)
+
+                // 根级文件视为无分卷章节
+                children.filter { !it.isDirectory }.forEach {
+                    addChapterFile(it, "", files)
+                }
+
+                // 一层子目录视为分卷
+                children.filter { it.isDirectory }.forEach { dir ->
+                    if (dir.name.startsWith(".")) return@forEach
+                    queryChildren(tree, dir.uri)
+                        .filter { !it.isDirectory }
+                        .forEach { addChapterFile(it, dir.name, files) }
+                }
+            } catch (e: Exception) {
+                runOnUiThread { result.error("list_failed", e.message, null) }
+                return@thread
+            }
+
+            runOnUiThread { result.success(files) }
+        }
+    }
+
+    /** 读取授权文件的全部字节内容 */
+    private fun readFileBytes(uriString: String?, result: MethodChannel.Result) {
+        if (uriString.isNullOrEmpty()) {
+            result.success(null)
+            return
+        }
+
+        thread {
+            val bytes = try {
+                contentResolver.openInputStream(Uri.parse(uriString))?.use { it.readBytes() }
+            } catch (e: Exception) {
+                runOnUiThread { result.error("read_failed", e.message, null) }
+                return@thread
+            }
+
+            runOnUiThread { result.success(bytes) }
+        }
+    }
+
+    /** 查询目录的直接子项 */
+    private fun queryChildren(treeUri: Uri, parentUri: Uri): List<SafChild> {
+        val parentId = DocumentsContract.getDocumentId(parentUri)
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentId)
+        val projection = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+        )
+
+        val children = mutableListOf<SafChild>()
+        contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+            while (cursor.moveToNext()) {
+                val documentId = cursor.getString(0) ?: continue
+                val name = cursor.getString(1) ?: continue
+                val isDirectory =
+                    cursor.getString(2) == DocumentsContract.Document.MIME_TYPE_DIR
+
+                children.add(
+                    SafChild(
+                        uri = DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId),
+                        name = name,
+                        isDirectory = isDirectory,
+                    )
+                )
+            }
+        }
+        return children
+    }
+
+    /** 查询目录自身的显示名 */
+    private fun queryFolderDisplayName(treeUri: Uri): String {
+        val documentUri = DocumentsContract.buildDocumentUriUsingTree(
+            treeUri,
+            DocumentsContract.getTreeDocumentId(treeUri)
+        )
+        contentResolver.query(
+            documentUri,
+            arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+            null,
+            null,
+            null
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                cursor.getString(0)?.takeIf { it.isNotEmpty() }?.let { return it }
+            }
+        }
+
+        // 查询不到时退回目录 ID 中冒号后的部分
+        val documentId = DocumentsContract.getTreeDocumentId(treeUri)
+        return documentId.substringAfter(':', documentId)
+    }
+
+    /** 把受支持的章节文件加入结果列表 */
+    private fun addChapterFile(
+        child: SafChild,
+        volumeName: String,
+        out: MutableList<Map<String, String>>
+    ) {
+        // 跳过隐藏文件
+        if (child.name.startsWith(".")) return
+
+        // 只处理 txt 和 docx 文件
+        val extension = child.name.substringAfterLast('.', "").lowercase()
+        if (extension != "txt" && extension != "docx") return
+
+        out.add(
+            mapOf(
+                "uri" to child.uri.toString(),
+                "fileName" to child.name,
+                "volumeName" to volumeName,
+            )
+        )
+    }
+
+    /** SAF 目录子项的查询结果 */
+    private data class SafChild(
+        val uri: Uri,
+        val name: String,
+        val isDirectory: Boolean,
+    )
 
     // ================= 剪贴板富文本 =================
 

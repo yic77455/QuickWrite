@@ -52,6 +52,52 @@ class AndroidNative {
     return await _invoke<bool>('writeClipboardHtml', {'text': text, 'html': html}) ?? false;
   }
 
+  /// 拉起系统文件夹选择器，返回授权目录；用户取消时返回 null
+  static Future<SafFolderPick?> pickBookFolder() async {
+    if (!PlatformCapabilities.isAndroid) return null;
+
+    final data = await _invoke<Map<dynamic, dynamic>>('pickBookFolder');
+    final treeUri = data?['uri'];
+    if (treeUri is! String || treeUri.isEmpty) return null;
+
+    final name = data?['name'];
+    return SafFolderPick(
+      treeUri: treeUri,
+      name: name is String ? name : '',
+    );
+  }
+
+  /// 列出授权目录下根级与一层子目录中的章节文件
+  static Future<List<SafChapterFile>> listChapterFiles(String treeUri) async {
+    if (!PlatformCapabilities.isAndroid) return const [];
+
+    final raw = await _invoke<List<dynamic>>('listChapterFiles', {'treeUri': treeUri});
+    if (raw == null) return const [];
+
+    final files = <SafChapterFile>[];
+    for (final item in raw) {
+      if (item is! Map) continue;
+
+      final uri = item['uri'];
+      final fileName = item['fileName'];
+      if (uri is! String || fileName is! String) continue;
+
+      final volumeName = item['volumeName'];
+      files.add(SafChapterFile(
+        uri: uri,
+        fileName: fileName,
+        volumeName: volumeName is String ? volumeName : '',
+      ));
+    }
+    return files;
+  }
+
+  /// 读取授权文件的全部字节，读取失败返回 null
+  static Future<Uint8List?> readFileBytes(String uri) async {
+    if (!PlatformCapabilities.isAndroid) return null;
+    return _invoke<Uint8List>('readFileBytes', {'uri': uri});
+  }
+
   /// 调用原生方法，并把通道异常统一降级为调用失败
   static Future<T?> _invoke<T>(String method, [Map<String, dynamic>? arguments]) async {
     try {
@@ -61,4 +107,33 @@ class AndroidNative {
       return null;
     }
   }
+}
+
+/// 系统文件夹选择器返回的授权目录
+class SafFolderPick {
+  /// 目录树 URI，后续列目录与读取文件都以它为根
+  final String treeUri;
+
+  /// 目录显示名（作为默认书名）
+  final String name;
+
+  const SafFolderPick({required this.treeUri, required this.name});
+}
+
+/// 授权目录中的一个候选章节文件
+class SafChapterFile {
+  /// 文件 URI
+  final String uri;
+
+  /// 文件显示名（含扩展名）
+  final String fileName;
+
+  /// 所属分卷名，文件位于目录根级时为空字符串
+  final String volumeName;
+
+  const SafChapterFile({
+    required this.uri,
+    required this.fileName,
+    required this.volumeName,
+  });
 }

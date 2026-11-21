@@ -5,7 +5,10 @@ import 'package:provider/provider.dart';
 import 'package:quick_write/core/providers/bookshelf_provider.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/services/book_import_service.dart';
+import 'package:quick_write/core/services/book_import_source.dart';
+import 'package:quick_write/core/utils/android_native.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/word_count_utils.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 
@@ -51,7 +54,7 @@ class _ImportBookDialogContentState extends State<_ImportBookDialogContent> {
   final FocusNode _fileTitleFocusNode = FocusNode();
 
   // 文件夹导入相关状态
-  String? _selectedFolderPath;
+  ImportFolderSource? _folderSource;
   late final TextEditingController _folderTitleController;
   final FocusNode _folderTitleFocusNode = FocusNode();
 
@@ -119,14 +122,12 @@ class _ImportBookDialogContentState extends State<_ImportBookDialogContent> {
   /// 选择文件夹
   Future<void> _pickFolder() async {
     try {
-      final result = await FilePicker.platform.getDirectoryPath();
+      final source = await _pickFolderSource();
 
-      if (result != null && mounted) {
-        final folderName = result.split(Platform.pathSeparator).last;
-
+      if (source != null && mounted) {
         setState(() {
-          _selectedFolderPath = result;
-          _folderTitleController.text = folderName;
+          _folderSource = source;
+          _folderTitleController.text = source.folderName;
           _errorMessage = null;
           _titleError = null;
         });
@@ -140,18 +141,37 @@ class _ImportBookDialogContentState extends State<_ImportBookDialogContent> {
     }
   }
 
+  /// 选择文件夹来源
+  ///
+  /// 安卓端通过系统文件选择器获取 content:// 授权目录，
+  /// 其他平台直接取可读写的真实路径。
+  Future<ImportFolderSource?> _pickFolderSource() async {
+    if (PlatformCapabilities.isAndroid) {
+      final picked = await AndroidNative.pickBookFolder();
+      if (picked == null) return null;
+      return SafFolderSource(treeUri: picked.treeUri, folderName: picked.name);
+    }
+
+    final path = await FilePicker.platform.getDirectoryPath();
+    if (path == null) return null;
+    return LocalFolderSource(path);
+  }
+
   /// 开始导入
   Future<void> _startImport() async {
-    // 根据当前页面获取对应的状态
-    final (selectedPath, controller) = _currentPageIndex == 0
-        ? (_selectedFilePath, _fileTitleController)
-        : (_selectedFolderPath, _folderTitleController);
+    final isFileMode = _currentPageIndex == 0;
 
-    if (selectedPath == null) {
-      setState(() => _errorMessage = _currentPageIndex == 0 ? '请先选择文件' : '请先选择文件夹');
+    // 校验当前页面是否已选择要导入的来源
+    if (isFileMode && _selectedFilePath == null) {
+      setState(() => _errorMessage = '请先选择文件');
+      return;
+    }
+    if (!isFileMode && _folderSource == null) {
+      setState(() => _errorMessage = '请先选择文件夹');
       return;
     }
 
+    final controller = isFileMode ? _fileTitleController : _folderTitleController;
     final title = controller.text.trim();
     if (title.isEmpty) {
       setState(() => _titleError = '请输入书名');
@@ -165,19 +185,18 @@ class _ImportBookDialogContentState extends State<_ImportBookDialogContent> {
     }
 
     await _performImport(() async {
-      if (_currentPageIndex == 0) {
+      if (isFileMode) {
         return await BookImportService.instance.importBook(
-          filePath: selectedPath,
-          bookTitle: title,
-          onProgress: _updateProgress,
-        );
-      } else {
-        return await BookImportService.instance.importFromFolder(
-          folderPath: selectedPath,
+          filePath: _selectedFilePath!,
           bookTitle: title,
           onProgress: _updateProgress,
         );
       }
+      return await BookImportService.instance.importFromFolder(
+        source: _folderSource!,
+        bookTitle: title,
+        onProgress: _updateProgress,
+      );
     });
   }
 
@@ -252,7 +271,7 @@ class _ImportBookDialogContentState extends State<_ImportBookDialogContent> {
         _selectedFilePath = null;
         _fileTitleController.clear();
       } else {
-        _selectedFolderPath = null;
+        _folderSource = null;
         _folderTitleController.clear();
       }
       _progress = 0;
@@ -286,7 +305,8 @@ class _ImportBookDialogContentState extends State<_ImportBookDialogContent> {
             child: _buildImportPage(
               colorScheme: colorScheme,
               isFileMode: _currentPageIndex == 0,
-              selectedPath: _currentPageIndex == 0 ? _selectedFilePath : _selectedFolderPath,
+              selectedPath: _currentPageIndex == 0 ? _selectedFilePath : null,
+              folderSource: _currentPageIndex == 0 ? null : _folderSource,
               controller: _currentPageIndex == 0 ? _fileTitleController : _folderTitleController,
               focusNode: _currentPageIndex == 0 ? _fileTitleFocusNode : _folderTitleFocusNode,
             ),
@@ -301,10 +321,17 @@ class _ImportBookDialogContentState extends State<_ImportBookDialogContent> {
     required ColorScheme colorScheme,
     required bool isFileMode,
     required String? selectedPath,
+    required ImportFolderSource? folderSource,
     required TextEditingController controller,
     required FocusNode focusNode,
   }) {
-    final canImport = selectedPath != null;
+    // 已选来源的展示名与位置说明，未选择时为 null
+    final displayName = isFileMode
+        ? selectedPath?.split(Platform.pathSeparator).last
+        : folderSource?.folderName;
+    final displayLocation =
+        isFileMode ? selectedPath : folderSource?.displayLocation;
+    final canImport = displayName != null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -313,7 +340,8 @@ class _ImportBookDialogContentState extends State<_ImportBookDialogContent> {
         _buildPathSelector(
           colorScheme: colorScheme,
           isFileMode: isFileMode,
-          selectedPath: selectedPath,
+          displayName: displayName,
+          displayLocation: displayLocation,
         ),
         const SizedBox(height: 20),
         _buildTitleInput(
@@ -353,7 +381,8 @@ class _ImportBookDialogContentState extends State<_ImportBookDialogContent> {
   Widget _buildPathSelector({
     required ColorScheme colorScheme,
     required bool isFileMode,
-    required String? selectedPath,
+    required String? displayName,
+    required String? displayLocation,
   }) {
     final label = isFileMode ? '选择文件' : '选择文件夹';
     final hint = isFileMode ? '点击选择 txt 或 docx 文件' : '点击选择书籍文件夹';
@@ -363,6 +392,7 @@ class _ImportBookDialogContentState extends State<_ImportBookDialogContent> {
         ? '支持 txt 和 docx 格式，文件大小建议不超过 20MB'
         : '文件夹名称将作为书名，子目录作为分卷，txt/docx 文件作为章节';
     final onTap = isFileMode ? _pickFile : _pickFolder;
+    final hasSelection = displayName != null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -383,7 +413,7 @@ class _ImportBookDialogContentState extends State<_ImportBookDialogContent> {
               color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
-                color: selectedPath != null
+                color: hasSelection
                     ? colorScheme.primary.withValues(alpha: 0.5)
                     : colorScheme.outline.withValues(alpha: 0.3),
               ),
@@ -391,9 +421,9 @@ class _ImportBookDialogContentState extends State<_ImportBookDialogContent> {
             child: Row(
               children: [
                 Icon(
-                  selectedPath != null ? selectedIcon : unselectedIcon,
+                  hasSelection ? selectedIcon : unselectedIcon,
                   size: 24,
-                  color: selectedPath != null
+                  color: hasSelection
                       ? colorScheme.primary
                       : colorScheme.onSurface.withValues(alpha: 0.5),
                 ),
@@ -403,19 +433,17 @@ class _ImportBookDialogContentState extends State<_ImportBookDialogContent> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        selectedPath != null
-                            ? selectedPath.split(Platform.pathSeparator).last
-                            : hint,
+                        displayName ?? hint,
                         style: context.bodyLarge?.copyWith(
-                          color: selectedPath != null
+                          color: hasSelection
                               ? colorScheme.onSurface
                               : colorScheme.onSurface.withValues(alpha: 0.5),
                         ),
                       ),
-                      if (selectedPath != null) ...[
+                      if (displayLocation != null) ...[
                         const SizedBox(height: 4),
                         Text(
-                          selectedPath,
+                          displayLocation,
                           style: context.labelSmall?.copyWith(
                             color:
                                 colorScheme.onSurface.withValues(alpha: 0.5),
@@ -427,7 +455,7 @@ class _ImportBookDialogContentState extends State<_ImportBookDialogContent> {
                     ],
                   ),
                 ),
-                if (selectedPath != null && !_isImporting) ...[
+                if (hasSelection && !_isImporting) ...[
                   const SizedBox(width: 8),
                   IconButton(
                     icon: const Icon(Icons.close, size: 18),

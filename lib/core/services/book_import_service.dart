@@ -1,11 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:docx_to_text/docx_to_text.dart';
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/constants/constants.dart';
 import 'package:quick_write/core/models/chapter.dart';
 import 'package:quick_write/core/models/volume.dart';
 import 'package:quick_write/core/services/app_paths.dart';
+import 'package:quick_write/core/services/book_import_source.dart';
 import 'package:quick_write/core/utils/relative_path_utils.dart';
 import 'package:quick_write/core/utils/text_parser.dart';
 import 'package:quick_write/core/utils/word_count_utils.dart';
@@ -108,12 +110,10 @@ class BookImportService {
       onProgress?.call(0, 100, '正在读取文件...');
       
       // 2. 读取文件内容
-      String content;
-      if (extension == 'docx') {
-        content = await _readDocxFile(file);
-      } else {
-        content = await _readTxtFile(file);
-      }
+      final bytes = await file.readAsBytes();
+      final content = extension == 'docx'
+          ? _decodeDocxBytes(bytes)
+          : _decodeTxtBytes(bytes);
       
       if (content.isEmpty) {
         return ImportResult(
@@ -220,53 +220,46 @@ class BookImportService {
     }
   }
   
-  /// 读取 txt 文件
-  Future<String> _readTxtFile(File file) async {
+  /// 解码 txt 文件字节内容
+  ///
+  /// 依次尝试 UTF-8、GBK、GB2312，检测到乱码时继续尝试下一种编码，
+  /// 全部失败时退回 UTF-8 容错解码
+  String _decodeTxtBytes(Uint8List bytes) {
+    // 尝试 UTF-8
     try {
-      // 尝试多种编码读取
-      final bytes = await file.readAsBytes();
-      
-      // 尝试 UTF-8
-      try {
-        final content = utf8.decode(bytes);
-        // 检查是否有乱码字符
-        if (!_hasGarbledText(content)) {
-          return content;
-        }
-      } catch (_) {}
-      
-      // 尝试 GBK (简体中文)
-      try {
-        final content = _decodeGbk(bytes);
-        if (!_hasGarbledText(content)) {
-          return content;
-        }
-      } catch (_) {}
-      
-      // 尝试 GB2312
-      try {
-        final content = _decodeGb2312(bytes);
-        if (!_hasGarbledText(content)) {
-          return content;
-        }
-      } catch (_) {}
-      
-      // 默认使用 UTF-8，忽略错误
-      return utf8.decode(bytes, allowMalformed: true);
-    } catch (e) {
-      debugPrint('读取 txt 文件失败: $e');
-      return '';
-    }
+      final content = utf8.decode(bytes);
+      // 检查是否有乱码字符
+      if (!_hasGarbledText(content)) {
+        return content;
+      }
+    } catch (_) {}
+    
+    // 尝试 GBK (简体中文)
+    try {
+      final content = _decodeGbk(bytes);
+      if (!_hasGarbledText(content)) {
+        return content;
+      }
+    } catch (_) {}
+    
+    // 尝试 GB2312
+    try {
+      final content = _decodeGb2312(bytes);
+      if (!_hasGarbledText(content)) {
+        return content;
+      }
+    } catch (_) {}
+    
+    // 默认使用 UTF-8，忽略错误
+    return utf8.decode(bytes, allowMalformed: true);
   }
   
-  /// 读取 docx 文件
-  Future<String> _readDocxFile(File file) async {
+  /// 解码 docx 文件字节内容
+  String _decodeDocxBytes(Uint8List bytes) {
     try {
-      final bytes = await file.readAsBytes();
-      final text = docxToText(bytes, handleNumbering: true);
-      return text;
+      return docxToText(bytes, handleNumbering: true);
     } catch (e) {
-      debugPrint('读取 docx 文件失败: $e');
+      debugPrint('解析 docx 文件失败: $e');
       return '';
     }
   }
@@ -375,7 +368,7 @@ class BookImportService {
 
   /// 从文件夹导入书籍
   ///
-  /// [folderPath] 文件夹路径
+  /// [source] 文件夹数据来源（桌面端本地路径或安卓端 SAF 授权目录）
   /// [bookTitle] 书名（可选，默认使用文件夹名）
   /// [onProgress] 进度回调
   ///
@@ -384,27 +377,18 @@ class BookImportService {
   /// - 子目录作为分卷（目录名作为分卷名）
   /// - txt/docx 文件作为章节（文件名作为章节名）
   Future<ImportResult> importFromFolder({
-    required String folderPath,
+    required ImportFolderSource source,
     String? bookTitle,
     ProgressCallback? onProgress,
   }) async {
     try {
-      // 1. 检查文件夹是否存在
-      final folder = Directory(folderPath);
-      if (!await folder.exists()) {
-        return ImportResult(
-          success: false,
-          errorMessage: '文件夹不存在',
-        );
-      }
-
       // 使用传入的书名或文件夹名
-      final title = bookTitle ?? folderPath.split(Platform.pathSeparator).last;
+      final title = bookTitle ?? source.folderName;
 
       onProgress?.call(0, 100, '正在扫描文件夹...');
 
-      // 2. 扫描文件夹结构
-      final scanResult = await _scanFolder(folder);
+      // 1. 扫描文件夹结构
+      final scanResult = await source.listFiles();
       if (scanResult.isEmpty) {
         return ImportResult(
           success: false,
@@ -414,12 +398,12 @@ class BookImportService {
 
       onProgress?.call(10, 100, '正在创建书籍目录...');
 
-      // 3. 创建书籍目录结构
+      // 2. 创建书籍目录结构
       final bookFolderPath = await _createBookDirectory(title);
 
       onProgress?.call(15, 100, '正在导入章节文件...');
 
-      // 4. 导入章节文件并创建章节数据
+      // 3. 导入章节文件并创建章节数据
       final chapters = <ChapterModel>[];
       final volumes = <VolumeModel>[];
       int totalWordCount = 0;
@@ -451,16 +435,19 @@ class BookImportService {
         final progress = 15 + (i / totalFiles * 75).toInt();
         onProgress?.call(progress, 100, '正在导入: ${fileInfo.chapterTitle}');
 
-        // 读取文件内容
-        String content;
-        if (fileInfo.extension == 'docx') {
-          content = await _readDocxFile(File(fileInfo.filePath));
-        } else {
-          content = await _readTxtFile(File(fileInfo.filePath));
+        // 读取并解码文件内容
+        final bytes = await fileInfo.readBytes();
+        if (bytes == null) {
+          debugPrint('跳过无法读取的文件: ${fileInfo.fileName}');
+          continue;
         }
 
+        final content = fileInfo.extension == 'docx'
+            ? _decodeDocxBytes(bytes)
+            : _decodeTxtBytes(bytes);
+
         if (content.isEmpty) {
-          debugPrint('跳过空文件: ${fileInfo.filePath}');
+          debugPrint('跳过空文件: ${fileInfo.fileName}');
           continue;
         }
 
@@ -486,7 +473,7 @@ class BookImportService {
           ..title = fileInfo.chapterTitle
           ..volumeUuid = volumeUuid
           ..orderIndex = orderIndex
-          ..volumeOrderIndex = fileInfo.volumeOrderIndex
+          ..volumeOrderIndex = 0 // 稍后统一分配
           ..wordCount = wordCount
           ..filePath = chapterFilePath
           ..createdAt = DateTime.now()
@@ -503,7 +490,7 @@ class BookImportService {
         );
       }
 
-      // 5. 为章节设置正确的分卷排序索引
+      // 4. 为章节设置正确的分卷排序索引
       _assignVolumeOrderIndex(chapters);
 
       onProgress?.call(100, 100, '导入完成');
@@ -518,6 +505,11 @@ class BookImportService {
         chapters: chapters,
         volumes: volumes,
       );
+    } on FolderUnavailableException {
+      return ImportResult(
+        success: false,
+        errorMessage: '文件夹不存在',
+      );
     } catch (e) {
       debugPrint('从文件夹导入书籍失败: $e');
       return ImportResult(
@@ -525,92 +517,6 @@ class BookImportService {
         errorMessage: '导入失败: $e',
       );
     }
-  }
-
-  /// 扫描文件夹，返回章节文件信息列表
-  Future<List<_ChapterFileInfo>> _scanFolder(Directory folder) async {
-    final result = <_ChapterFileInfo>[];
-
-    // 先扫描根目录下的文件（无分卷）
-    await for (final entity in folder.list()) {
-      if (entity is File) {
-        final info = _getFileInfo(entity.path, '');
-        if (info != null) {
-          result.add(info);
-        }
-      }
-    }
-
-    // 再扫描子目录（作为分卷）
-    await for (final entity in folder.list()) {
-      if (entity is Directory) {
-        final volumeName = entity.path.split(Platform.pathSeparator).last;
-        // 跳过隐藏目录和特殊目录
-        if (volumeName.startsWith('.')) continue;
-
-        await for (final subEntity in entity.list()) {
-          if (subEntity is File) {
-            final info = _getFileInfo(subEntity.path, volumeName);
-            if (info != null) {
-              result.add(info);
-            }
-          }
-        }
-      }
-    }
-
-    // 按文件名排序（自然排序）
-    result.sort((a, b) => _naturalCompare(a.chapterTitle, b.chapterTitle));
-
-    return result;
-  }
-
-  /// 获取文件信息
-  _ChapterFileInfo? _getFileInfo(String filePath, String volumeName) {
-    final fileName = filePath.split(Platform.pathSeparator).last;
-    final extension = fileName.split('.').last.toLowerCase();
-
-    // 只处理 txt 和 docx 文件
-    if (extension != 'txt' && extension != 'docx') {
-      return null;
-    }
-
-    // 跳过隐藏文件
-    if (fileName.startsWith('.')) {
-      return null;
-    }
-
-    // 章节名为文件名（去除扩展名）
-    final chapterTitle = fileName.replaceAll(RegExp(r'\.[^.]+$'), '');
-
-    return _ChapterFileInfo(
-      filePath: filePath,
-      chapterTitle: chapterTitle,
-      volumeName: volumeName,
-      extension: extension,
-      volumeOrderIndex: 0, // 稍后设置
-    );
-  }
-
-  /// 自然排序比较（支持数字排序）
-  int _naturalCompare(String a, String b) {
-    // 提取数字进行比较
-    final regExp = RegExp(r'(\d+)');
-
-    final aMatches = regExp.allMatches(a).toList();
-    final bMatches = regExp.allMatches(b).toList();
-
-    // 如果两个字符串都包含数字，比较第一个数字
-    if (aMatches.isNotEmpty && bMatches.isNotEmpty) {
-      final aNum = int.tryParse(aMatches.first.group(1) ?? '0') ?? 0;
-      final bNum = int.tryParse(bMatches.first.group(1) ?? '0') ?? 0;
-      if (aNum != bNum) {
-        return aNum.compareTo(bNum);
-      }
-    }
-
-    // 否则按字符串比较
-    return a.compareTo(b);
   }
 
   /// 为章节分配分卷排序索引
@@ -630,21 +536,4 @@ class BookImportService {
       }
     }
   }
-}
-
-/// 章节文件信息（内部使用）
-class _ChapterFileInfo {
-  final String filePath;
-  final String chapterTitle;
-  final String volumeName;
-  final String extension;
-  int volumeOrderIndex;
-
-  _ChapterFileInfo({
-    required this.filePath,
-    required this.chapterTitle,
-    required this.volumeName,
-    required this.extension,
-    required this.volumeOrderIndex,
-  });
 }
