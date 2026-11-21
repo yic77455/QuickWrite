@@ -20,10 +20,16 @@ class ToolsPanel extends StatefulWidget {
   /// 可见区块的显示顺序列表（元素为 [ToolsSection] 的 id）
   final List<String> sectionOrder;
 
+  /// 是否展示顶部功能区
+  ///
+  /// 移动端码字统计面板复用本面板的区块内容，但只展示信息区块、不展示功能区
+  final bool showFunctionSection;
+
   const ToolsPanel({
     super.key,
     required this.functionOrder,
     required this.sectionOrder,
+    this.showFunctionSection = true,
   });
 
   @override
@@ -31,6 +37,9 @@ class ToolsPanel extends StatefulWidget {
 }
 
 class _ToolsPanelState extends State<ToolsPanel> {
+  /// 当前是否渲染功能区
+  bool get _showFunctions => widget.showFunctionSection && widget.functionOrder.isNotEmpty;
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -43,7 +52,7 @@ class _ToolsPanelState extends State<ToolsPanel> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // 功能区（全部工具都关闭显示时不渲染）
-            if (widget.functionOrder.isNotEmpty) _buildFunctionSection(context),
+            if (_showFunctions) _buildFunctionSection(context),
             // 按配置顺序渲染可见区块（书籍信息/码字统计）
             ..._buildSectionWidgets(),
           ],
@@ -60,7 +69,7 @@ class _ToolsPanelState extends State<ToolsPanel> {
     for (final id in widget.sectionOrder) {
       final section = _buildSectionById(id);
       if (section == null) continue;
-      if (widgets.isNotEmpty || widget.functionOrder.isNotEmpty) {
+      if (widgets.isNotEmpty || _showFunctions) {
         widgets.add(const SizedBox(height: 20));
       }
       widgets.add(section);

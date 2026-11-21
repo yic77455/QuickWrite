@@ -434,6 +434,15 @@ class ThemeBuilder {
         textStyle: font(TextStyle(color: p.text, fontSize: 13)),
       ),
 
+      // === 菜单浮层 ===
+      menuTheme: MenuThemeData(
+        style: MenuStyle(
+          // 菜单浮层默认沿用进入前的光标（MouseCursor.uncontrolled），
+          // 导致面板空白处和未声明光标的控件保留输入光标或手型光标，这里统一为常规光标
+          mouseCursor: WidgetStateProperty.all(SystemMouseCursors.basic),
+        ),
+      ),
+
       // === 下拉菜单 ===
       dropdownMenuTheme: DropdownMenuThemeData(
         menuStyle: MenuStyle(

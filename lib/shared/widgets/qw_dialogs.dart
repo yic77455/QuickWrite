@@ -198,6 +198,12 @@ class _DraggableDialogState extends State<_DraggableDialog> {
   /// 是否已为当前帧安排避让偏移的重新评估，避免同帧重复调度
   bool _shiftUpdateScheduled = false;
 
+  /// 弹窗内容子树的焦点节点
+  ///
+  /// 节点自身不接受焦点，仅作为子树焦点状态的汇总点，
+  /// 用于判断输入法是否由本弹窗内的输入框唤起
+  final FocusNode _dialogFocusNode = FocusNode(debugLabel: 'dialog_content_focus');
+
   @override
   void initState() {
     super.initState();
@@ -207,6 +213,7 @@ class _DraggableDialogState extends State<_DraggableDialog> {
   @override
   void dispose() {
     widget.dialogInteractiveNotifier?.removeListener(_onInteractiveChanged);
+    _dialogFocusNode.dispose();
     super.dispose();
   }
 
@@ -216,6 +223,19 @@ class _DraggableDialogState extends State<_DraggableDialog> {
 
   /// 键盘弹出时输入法占用的底部高度
   double _keyboardInset(BuildContext context) => MediaQuery.viewInsetsOf(context).bottom;
+
+  /// 计算本弹窗实际需要避让的输入法高度
+  ///
+  /// 只有最顶层、且输入法由本弹窗内输入框唤起的弹窗才参与避让，
+  /// 避免把其他弹窗唤起的输入法误当作自己的避让目标；
+  /// 已处于避让状态的弹窗继续跟随输入法高度变化，使键盘收起时弹窗平滑回落
+  double _effectiveKeyboardInset(BuildContext context, bool isTopmost) {
+    if (!isTopmost) return 0;
+    final double inset = _keyboardInset(context);
+    if (inset <= 0) return 0;
+    final bool keyboardBelongsToDialog = _dialogFocusNode.hasFocus || _keyboardShift > 0;
+    return keyboardBelongsToDialog ? inset : 0;
+  }
 
   /// 屏幕的可用高度（扣除上下留白与输入法占用的高度）
   ///
@@ -316,7 +336,7 @@ class _DraggableDialogState extends State<_DraggableDialog> {
     // 仅最顶层的弹窗参与输入法避让；被其他弹窗覆盖的后台弹窗应保持静止，不随输入法移动或收窄
     final bool isTopmost = ModalRoute.of(context)?.isCurrent ?? true;
     // 读取输入法高度既用于计算避让，也使输入法弹出/收起时本组件重建，及时更新避让偏移
-    final double keyboardInset = isTopmost ? _keyboardInset(context) : 0;
+    final double keyboardInset = _effectiveKeyboardInset(context, isTopmost);
     final double screenHeight = MediaQuery.sizeOf(context).height;
     _scheduleKeyboardShiftUpdate(screenHeight, keyboardInset);
 
@@ -332,7 +352,7 @@ class _DraggableDialogState extends State<_DraggableDialog> {
       (screenSize.width - widget.width) / 2,
       (screenSize.height - referenceHeight) / 2,
     );
-    final dialogContent = Container(
+    final Widget dialogBody = Container(
       key: _dialogKey,
       width: widget.width,
       height: widget.adaptiveHeight ? null : maxHeight,
@@ -434,6 +454,13 @@ class _DraggableDialogState extends State<_DraggableDialog> {
           ),
         ],
       ),
+    );
+
+    // 汇总弹窗内容子树的焦点状态，用于识别输入法是否由本弹窗唤起
+    final Widget dialogContent = Focus(
+      focusNode: _dialogFocusNode,
+      canRequestFocus: false,
+      child: dialogBody,
     );
 
     return PopScope(

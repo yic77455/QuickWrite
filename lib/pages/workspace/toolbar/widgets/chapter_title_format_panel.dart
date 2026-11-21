@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/color_utils.dart';
 import 'package:quick_write/shared/dialogs/color_picker_dialog.dart';
+import 'package:quick_write/shared/widgets/segmented_control.dart';
 
 /// 章节标题格式设置面板
 ///
 /// 作为顶部工具栏"更多格式"下拉菜单的内容，
-/// 提供章节标题字体大小、章节标题颜色及恢复默认设置的快捷操作
+/// 提供章节标题字体大小、对齐方式、颜色及恢复默认设置的快捷操作
 class ChapterTitleFormatPanel extends StatefulWidget {
   /// 关闭外层菜单的回调
   final VoidCallback onCloseMenu;
@@ -41,6 +42,10 @@ class _ChapterTitleFormatPanelState extends State<ChapterTitleFormatPanel> {
           const SizedBox(height: 6),
           // 字体大小滑块（Slider 自带手指样式）
           _buildFontSizeSlider(context, settings, colorScheme),
+          // 分隔线
+          _buildDivider(colorScheme),
+          // 章节标题对齐方式选择
+          _buildAlignmentRow(context, settings, colorScheme),
           // 分隔线
           _buildDivider(colorScheme),
           // 章节标题颜色选择行
@@ -116,6 +121,42 @@ class _ChapterTitleFormatPanelState extends State<ChapterTitleFormatPanel> {
     );
   }
 
+  /// 构建章节标题对齐方式选择行（图标 + 标签 + 分段选择器）
+  Widget _buildAlignmentRow(
+    BuildContext context,
+    SettingsService settings,
+    ColorScheme colorScheme,
+  ) {
+    // 向左对齐位于分段选择器的第二个选项
+    final bool isLeftAligned = settings.isChapterTitleLeftAligned;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.format_align_left_rounded, size: 18, color: colorScheme.onSurfaceVariant),
+            const SizedBox(width: 10),
+            Text(
+              '标题对齐',
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(color: colorScheme.onSurface),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        SegmentedControl(
+          labels: const ['居中', '向左'],
+          selectedIndex: isLeftAligned ? 1 : 0,
+          height: 30,
+          onChanged: (index) {
+            settings.updateChapterTitleAlignment(index == 1);
+            setState(() {});
+          },
+        ),
+      ],
+    );
+  }
+
   /// 构建章节标题颜色选择行（图标 + 标签 + 颜色指示器）
   /// 仅此行的可点击区域显示手指样式
   Widget _buildColorRow(BuildContext context, ColorScheme colorScheme) {
@@ -150,7 +191,7 @@ class _ChapterTitleFormatPanelState extends State<ChapterTitleFormatPanel> {
   }
 
   /// 构建恢复默认设置入口
-  /// 仅用于恢复章节标题字体大小和颜色
+  /// 仅用于恢复章节标题字体大小、对齐方式和颜色
   Widget _buildResetRow(BuildContext context, ColorScheme colorScheme) {
     return InkWell(
       onTap: () => _resetToDefaults(),
@@ -194,7 +235,7 @@ class _ChapterTitleFormatPanelState extends State<ChapterTitleFormatPanel> {
     );
   }
 
-  /// 恢复章节标题字体大小和颜色为默认值
+  /// 恢复章节标题字体大小、对齐方式和颜色为默认值
   void _resetToDefaults() {
     SettingsService.instance.resetChapterTitleFormatSettings();
     setState(() {});

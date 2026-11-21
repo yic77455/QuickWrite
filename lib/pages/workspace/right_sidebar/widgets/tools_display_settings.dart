@@ -73,6 +73,11 @@ class ToolsDisplaySettings extends StatelessWidget {
   /// 信息区块顺序/可见性变化回调
   final ValueChanged<List<String>> onSectionOrderChanged;
 
+  /// 是否展示功能区配置项
+  ///
+  /// 码字统计面板不展示功能区，其显示设置中也不提供功能区的配置
+  final bool showFunctionGroup;
+
   /// 菜单内容固定宽度
   static const double _panelWidth = 235.0;
 
@@ -91,6 +96,7 @@ class ToolsDisplaySettings extends StatelessWidget {
     required this.sectionOrder,
     required this.onFunctionOrderChanged,
     required this.onSectionOrderChanged,
+    this.showFunctionGroup = true,
   });
 
   @override
@@ -117,14 +123,16 @@ class ToolsDisplaySettings extends StatelessWidget {
           const SizedBox(height: 4),
           _buildDivider(colorScheme),
           // 功能区配置项
-          _buildGroupList(
-            context,
-            ToolsSectionGroup.function,
-            functionOrder,
-            onFunctionOrderChanged,
-          ),
-          // 两个区域之间的淡入淡出分隔线
-          _buildGroupDivider(colorScheme),
+          if (showFunctionGroup) ...[
+            _buildGroupList(
+              context,
+              ToolsSectionGroup.function,
+              functionOrder,
+              onFunctionOrderChanged,
+            ),
+            // 两个区域之间的淡入淡出分隔线
+            _buildGroupDivider(colorScheme),
+          ],
           // 信息区块配置项
           _buildGroupList(
             context,

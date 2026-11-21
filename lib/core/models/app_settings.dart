@@ -99,6 +99,10 @@ class AppSettings {
   /// 章节标题字体大小（单位：像素）
   final double chapterTitleFontSize;
   
+  /// 章节标题对齐方式
+  /// 'center' - 居中 / 'left' - 向左对齐
+  final String chapterTitleAlignment;
+  
   /// 章节标题颜色（亮色主题，十六进制字符串）
   final String? chapterTitleColorLight;
 
@@ -311,6 +315,12 @@ class AppSettings {
   /// 关闭主窗口行为：最小化至托盘
   static const String closeActionTray = 'tray';
 
+  /// 章节标题对齐方式：居中
+  static const String chapterTitleAlignCenter = 'center';
+
+  /// 章节标题对齐方式：向左对齐
+  static const String chapterTitleAlignLeft = 'left';
+
   /// 应用默认设置常量
   static const AppSettings defaults = AppSettings();
 
@@ -343,6 +353,7 @@ class AppSettings {
     this.showChapterTitle = true, // 是否显示章节标题
     this.chapterTitleTopMargin = 16.0, // 章节标题顶边距（单位：像素）
     this.chapterTitleFontSize = 24.0, // 章节标题字体大小（单位：像素）
+    this.chapterTitleAlignment = chapterTitleAlignCenter, // 章节标题对齐方式
     this.chapterTitleColorLight, // 章节标题颜色（亮色主题，十六进制字符串）
     this.chapterTitleColorDark, // 章节标题颜色（暗色主题，十六进制字符串）
     this.topMargin = 4.0, // 页面顶边距（单位：百分比）
@@ -465,6 +476,7 @@ class AppSettings {
       showChapterTitle: chapterTitleJson['show'] as bool? ?? defaults.showChapterTitle,
       chapterTitleTopMargin: (chapterTitleJson['topMargin'] as num?)?.toDouble() ?? defaults.chapterTitleTopMargin,
       chapterTitleFontSize: (chapterTitleJson['fontSize'] as num?)?.toDouble() ?? defaults.chapterTitleFontSize,
+      chapterTitleAlignment: chapterTitleJson['alignment'] as String? ?? defaults.chapterTitleAlignment,
       chapterTitleColorLight: chapterTitleColorJson['light'] as String? ?? defaults.chapterTitleColorLight,
       chapterTitleColorDark: chapterTitleColorJson['dark'] as String? ?? defaults.chapterTitleColorDark,
       topMargin: (pageJson['topMargin'] as num?)?.toDouble() ?? defaults.topMargin,
@@ -616,6 +628,7 @@ class AppSettings {
             'show': showChapterTitle,
             'topMargin': chapterTitleTopMargin,
             'fontSize': chapterTitleFontSize,
+            'alignment': chapterTitleAlignment,
             'color': {
               'light': chapterTitleColorLight,
               'dark': chapterTitleColorDark,
@@ -729,6 +742,7 @@ class AppSettings {
     bool? showChapterTitle,
     double? chapterTitleTopMargin,
     double? chapterTitleFontSize,
+    String? chapterTitleAlignment,
     Object? chapterTitleColorLight = _unset,
     Object? chapterTitleColorDark = _unset,
     double? topMargin,
@@ -822,6 +836,7 @@ class AppSettings {
       showChapterTitle: showChapterTitle ?? this.showChapterTitle,
       chapterTitleTopMargin: chapterTitleTopMargin ?? this.chapterTitleTopMargin,
       chapterTitleFontSize: chapterTitleFontSize ?? this.chapterTitleFontSize,
+      chapterTitleAlignment: chapterTitleAlignment ?? this.chapterTitleAlignment,
       chapterTitleColorLight: chapterTitleColorLight == _unset ? this.chapterTitleColorLight : chapterTitleColorLight as String?,
       chapterTitleColorDark: chapterTitleColorDark == _unset ? this.chapterTitleColorDark : chapterTitleColorDark as String?,
       topMargin: topMargin ?? this.topMargin,
@@ -950,6 +965,7 @@ class AppSettings {
            other.showChapterTitle == showChapterTitle &&
            other.chapterTitleTopMargin == chapterTitleTopMargin &&
            other.chapterTitleFontSize == chapterTitleFontSize &&
+           other.chapterTitleAlignment == chapterTitleAlignment &&
            other.chapterTitleColorLight == chapterTitleColorLight &&
            other.chapterTitleColorDark == chapterTitleColorDark &&
            other.topMargin == topMargin &&
@@ -1047,6 +1063,7 @@ class AppSettings {
         showChapterTitle,
         chapterTitleTopMargin,
         chapterTitleFontSize,
+        chapterTitleAlignment,
         chapterTitleColorLight,
         chapterTitleColorDark,
         topMargin,

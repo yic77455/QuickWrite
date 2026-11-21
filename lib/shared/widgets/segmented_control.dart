@@ -183,6 +183,8 @@ class _SegmentedControlState extends State<SegmentedControl> {
     required VoidCallback onTap,
   }) {
     return MouseRegion(
+      // 分段本身不是点击链接，使用常规光标，避免沿用宿主浮层或上一位置的光标
+      cursor: SystemMouseCursors.basic,
       onEnter: (_) => onEnter(),
       onExit: (_) => onExit(),
       child: GestureDetector(

@@ -685,6 +685,7 @@ enum RightSidebarType {
   history,   // 历史版本
   tools,     // 工具
   backup,    // 备份设置（移动端独立入口，仅展示备份相关区块）
+  stats,     // 码字统计（移动端独立入口，仅展示统计区块）
 }
 
 /// 全文搜索匹配行信息

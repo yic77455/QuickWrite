@@ -1,28 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/providers/writing_session_tracker.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
-import 'package:quick_write/shared/widgets/widgets.dart';
-
-/// 显示码字统计弹窗
-///
-/// 将工作台工具面板中的码字统计区块以弹窗形式展示。
-/// [tracker] 为会话统计追踪器，为空时区块内展示占位提示
-Future<void> showWritingStatsDialog({
-  required BuildContext context,
-  required WritingSessionTracker? tracker,
-}) {
-  return showDialogBase(
-    context: context,
-    title: '码字统计',
-    width: 360,
-    height: 480,
-    adaptiveHeight: true,
-    content: Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-      child: WritingStatsSection(tracker: tracker, showTitle: false),
-    ),
-  );
-}
 
 /// 码字统计区块
 ///

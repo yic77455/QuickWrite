@@ -1998,12 +1998,12 @@ class OutlineEditorState extends State<OutlineEditor>
       // 光标位于关联文本左边界或内部时，跳到整段关联文本末尾
       final span = node.linkSpanAt(caret);
       if (span == null) return false;
-      controller.selection = TextSelection.collapsed(offset: span.end);
+      _updateCaretByKeyboard(nodeId, TextSelection.collapsed(offset: span.end));
     } else {
       // 光标位于关联文本右边界或内部时，跳到整段关联文本开头
       final span = node.linkSpanAt(caret - 1);
       if (span == null) return false;
-      controller.selection = TextSelection.collapsed(offset: span.start);
+      _updateCaretByKeyboard(nodeId, TextSelection.collapsed(offset: span.start));
     }
     _ensureCaretVisibleInViewport(nodeId);
     return true;
@@ -2731,6 +2731,25 @@ class OutlineEditorState extends State<OutlineEditor>
 
   // ================= 焦点与滚动 =================
 
+  /// 以键盘移动的方式更新节点内光标位置
+  ///
+  /// 通过输入框的选区更新通道写入，光标移动后会重新开始闪烁计时；
+  /// 节点尚未完成排版时退化为直接赋值。
+  void _updateCaretByKeyboard(String nodeId, TextSelection selection) {
+    final controller = _controllers[nodeId];
+    if (controller == null) return;
+
+    final renderEditable = _findRenderEditable(nodeId);
+    if (renderEditable == null || !renderEditable.attached) {
+      controller.selection = selection;
+      return;
+    }
+    renderEditable.textSelectionDelegate.userUpdateTextEditingValue(
+      controller.value.copyWith(selection: selection),
+      SelectionChangedCause.keyboard,
+    );
+  }
+
   /// 上下箭头垂直移动光标
   ///
   /// 优先在当前节点内的可视行之间移动，位于首行（向上）或末行（向下）时切换到相邻节点；
@@ -2743,7 +2762,7 @@ class OutlineEditorState extends State<OutlineEditor>
     final selection = controller.selection;
     // 存在文字选区时按方向折叠到选区一端，不产生跨行移动
     if (!selection.isCollapsed) {
-      controller.selection = TextSelection.collapsed(offset: forward ? selection.end : selection.start);
+      _updateCaretByKeyboard(nodeId, TextSelection.collapsed(offset: forward ? selection.end : selection.start));
       _preferredCaretX = null;
       return;
     }
@@ -2781,7 +2800,7 @@ class OutlineEditorState extends State<OutlineEditor>
 
     // 探测点落在相邻行：把光标移到该行的对应横向位置
     _preferredCaretX = goalX;
-    controller.selection = TextSelection.fromPosition(probePosition);
+    _updateCaretByKeyboard(nodeId, TextSelection.fromPosition(probePosition));
     _ensureCaretVisibleInViewport(nodeId);
   }
 

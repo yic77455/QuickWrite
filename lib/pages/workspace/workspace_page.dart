@@ -85,8 +85,9 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
   // 移动端右抽屉的 Scaffold 控制器，用于将右侧面板状态同步到抽屉开合
   final GlobalKey<ScaffoldState> _mobileScaffoldKey = GlobalKey<ScaffoldState>();
 
-  // 上一次已知的右侧面板展开状态；为 null 表示尚未完成首次同步
-  bool? _prevRightSidebarExpanded;
+  // 移动端右抽屉是否已完成首次状态同步
+  // 首次同步只校正面板状态，不自动弹出抽屉
+  bool _mobileRightDrawerSynced = false;
 
   // 移动端左侧目录抽屉是否打开，用于同步顶部目录入口的选中高亮
   bool _isMobileContentsDrawerOpen = false;
@@ -434,9 +435,15 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
           if (_isMobileContentsDrawerOpen == isOpen) return;
           setState(() => _isMobileContentsDrawerOpen = isOpen);
         },
-        // 用户滑动或点击遮罩关闭右抽屉时，同步收起右侧面板状态
+        // 抽屉开合的唯一事实来源：滑动开合与面板内的关闭按钮都回写到右侧面板状态
         onEndDrawerChanged: (isOpen) {
-          if (!isOpen) context.read<WorkspaceProvider>().closeRightSidebar();
+          final provider = context.read<WorkspaceProvider>();
+          if (isOpen) {
+            // 右边缘滑出抽屉时补齐展开状态，保证后续开合判断与面板类型保持一致
+            provider.openRightSidebar(provider.rightSidebarType);
+          } else {
+            provider.closeRightSidebar();
+          }
         },
         // 常规状态下应用界面延伸到系统状态栏后方，由顶部操作栏自行避让系统状态栏；
         // 沉浸编辑时顶部操作栏已收起，改由下方 AnimatedPadding 避让，避免正文被系统状态栏压住。
@@ -527,21 +534,25 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
 
   /// 将右侧面板的展开状态同步到右抽屉的开合
   ///
-  /// 工具栏按钮与右侧面板的关闭按钮都会改变展开状态，此处统一映射为抽屉的打开与关闭
+  /// 工具栏按钮与右侧面板的关闭按钮都会改变展开状态，此处统一映射为抽屉的打开与关闭；
+  /// 抽屉的滑动开合会反向回写展开状态，因此以抽屉的真实开合状态为准进行比对
   void _scheduleMobileRightDrawerSync(bool expanded) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
 
-      // 首次同步只记录状态，避免进入工作台时自动弹出右抽屉
-      if (_prevRightSidebarExpanded == null) {
-        _prevRightSidebarExpanded = expanded;
-        return;
-      }
-      if (_prevRightSidebarExpanded == expanded) return;
-      _prevRightSidebarExpanded = expanded;
-
       final scaffoldState = _mobileScaffoldKey.currentState;
       if (scaffoldState == null) return;
+
+      // 首次同步：进入工作台时不自动弹出右抽屉，
+      // 把从缓存恢复的展开状态归零，使其与关闭状态的抽屉保持一致
+      if (!_mobileRightDrawerSynced) {
+        _mobileRightDrawerSynced = true;
+        if (expanded) context.read<WorkspaceProvider>().closeRightSidebar();
+        return;
+      }
+
+      // 以抽屉实际状态为准，状态标记为展开但抽屉关闭时也能正常唤出
+      if (expanded == scaffoldState.isEndDrawerOpen) return;
       if (expanded) {
         scaffoldState.openEndDrawer();
       } else {

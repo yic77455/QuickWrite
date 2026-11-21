@@ -1687,10 +1687,15 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // 标题与正文文本区左右对齐，故同样内缩左右页边距
+                    // 标题与正文文本区左右对齐，故同样内缩左右页边距；
+                    // 左对齐时正文额外留有行首内边距，标题左侧同步补上以对齐正文文字
                     if (showTitle)
                       Padding(
-                        padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+                        padding: EdgeInsets.only(
+                          left: horizontalPadding +
+                              (settings.isChapterTitleLeftAligned ? _contentLeftInset : 0),
+                          right: horizontalPadding,
+                        ),
                         child: _buildChapterTitle(context),
                       ),
                     _buildEditor(
@@ -1736,6 +1741,8 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
             enabledBorder: InputBorder.none,
             focusedBorder: InputBorder.none,
             hoverColor: Colors.transparent,
+            // 去掉主题输入框的默认内边距，使左对齐时标题与正文文字左边缘对齐
+            contentPadding: EdgeInsets.zero,
           ),
           style: Theme.of(context).textTheme.headlineMedium?.copyWith(
             // 章节标题与正文保持一致，使用编辑器正文字体，不受界面字体影响
@@ -1744,7 +1751,8 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
             color: ColorUtils.getChapterTitleColorForTheme(context),
           ),
           maxLines: 1,
-          textAlign: TextAlign.center,
+          // 标题对齐方式由布局设置决定，默认居中
+          textAlign: settings.isChapterTitleLeftAligned ? TextAlign.left : TextAlign.center,
           onChanged: widget.onChapterTitleChanged,
         ),
       ),

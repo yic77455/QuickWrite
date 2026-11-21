@@ -388,6 +388,16 @@ class SettingsService extends ChangeNotifier {
   /// 获取章节标题字体大小
   double get chapterTitleFontSize => _settings.chapterTitleFontSize;
   
+  /// 获取章节标题默认字号（像素）
+  double get defaultChapterTitleFontSize => AppSettings.defaults.chapterTitleFontSize;
+  
+  /// 获取章节标题对齐方式（'center' 居中 / 'left' 向左对齐）
+  String get chapterTitleAlignment => _settings.chapterTitleAlignment;
+  
+  /// 章节标题是否向左对齐（false 表示居中）
+  bool get isChapterTitleLeftAligned =>
+      _settings.chapterTitleAlignment == AppSettings.chapterTitleAlignLeft;
+  
   /// 获取章节标题颜色（亮色主题，为 null 时使用主题默认颜色）
   String? get chapterTitleColorLight => _settings.chapterTitleColorLight;
 
@@ -462,6 +472,17 @@ class SettingsService extends ChangeNotifier {
   Future<bool> updateChapterTitleFontSize(double value, {bool debounce = false}) async {
     final newSettings = _settings.copyWith(chapterTitleFontSize: value);
     return updateSettings(newSettings, debounce: debounce);
+  }
+
+  /// 更新章节标题对齐方式
+  /// [leftAligned] true 为向左对齐，false 为居中
+  Future<bool> updateChapterTitleAlignment(bool leftAligned) async {
+    final newSettings = _settings.copyWith(
+      chapterTitleAlignment: leftAligned
+          ? AppSettings.chapterTitleAlignLeft
+          : AppSettings.chapterTitleAlignCenter,
+    );
+    return updateSettings(newSettings);
   }
   
   /// 更新章节标题颜色（亮色主题）
@@ -613,6 +634,9 @@ class SettingsService extends ChangeNotifier {
   /// 获取字体大小
   double get fontSize => _settings.fontSize;
   
+  /// 获取正文默认字号（像素）
+  double get defaultFontSize => AppSettings.defaults.fontSize;
+  
   /// 获取是否加粗
   bool get isBold => _settings.isBold;
   
@@ -633,6 +657,9 @@ class SettingsService extends ChangeNotifier {
 
   /// 获取大纲编辑器字体大小
   double get outlineFontSize => _settings.outlineFontSize;
+
+  /// 获取大纲编辑器默认字号（像素）
+  double get defaultOutlineFontSize => AppSettings.defaults.outlineFontSize;
 
   // ================= 其他设置 =================
 
@@ -1049,6 +1076,7 @@ class SettingsService extends ChangeNotifier {
   Future<bool> resetChapterTitleFormatSettings() async {
     final newSettings = _settings.copyWith(
       chapterTitleFontSize: AppSettings.defaults.chapterTitleFontSize,
+      chapterTitleAlignment: AppSettings.defaults.chapterTitleAlignment,
       chapterTitleColorLight: AppSettings.defaults.chapterTitleColorLight,
       chapterTitleColorDark: AppSettings.defaults.chapterTitleColorDark,
     );

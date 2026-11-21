@@ -1,8 +1,6 @@
 import 'dart:math' as math;
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:quick_write/core/models/app_settings.dart';
 import 'package:quick_write/core/services/font_service.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/color_utils.dart';
@@ -13,7 +11,7 @@ import 'package:quick_write/shared/widgets/widgets.dart';
 ///
 /// 由顶部操作栏的格式入口在操作栏下方弹出，每个设置项独占一行，
 /// 正文提供字体、字号、样式（字体颜色、加粗、斜体、下划线），
-/// 标题提供字号与颜色。样式与颜色按钮复用桌面端工具栏的按钮组件。
+/// 标题提供字号、对齐方式与颜色。样式与颜色按钮复用桌面端工具栏的按钮组件。
 /// 当前标签页为大纲编辑器时，仅字体与字号作用于大纲，其余设置项不可用
 class MobileFormatCard extends StatefulWidget {
   /// 卡片最大宽度
@@ -95,6 +93,8 @@ class _MobileFormatCardState extends State<MobileFormatCard> {
                       _buildGroupLabel('标题', colorScheme),
                       const SizedBox(height: 12),
                       _wrapDisabled(_buildSettingRow(Icons.format_size_rounded, '字号', _buildTitleFontSizeDropdown())),
+                      const SizedBox(height: 10),
+                      _wrapDisabled(_buildSettingRow(Icons.format_align_left_rounded, '对齐', _buildTitleAlignmentControl())),
                       const SizedBox(height: 10),
                       _wrapDisabled(_buildTitleColorRow(colorScheme)),
                     ],
@@ -229,6 +229,21 @@ class _MobileFormatCardState extends State<MobileFormatCard> {
     );
   }
 
+  /// 构建标题对齐方式分段选择器（居中 / 向左）
+  Widget _buildTitleAlignmentControl() {
+    // 向左对齐位于分段选择器的第二个选项
+    final bool isLeftAligned = SettingsService.instance.isChapterTitleLeftAligned;
+    return SizedBox(
+      width: _dropdownWidth,
+      child: SegmentedControl(
+        labels: const ['居中', '向左'],
+        selectedIndex: isLeftAligned ? 1 : 0,
+        height: 32,
+        onChanged: (index) => SettingsService.instance.updateChapterTitleAlignment(index == 1),
+      ),
+    );
+  }
+
   /// 构建字号选项（默认 + [minSize] 到 [maxSize] 的连续整数字号）
   List<DropdownItem> _buildSizeItems({required int minSize, int maxSize = 72}) {
     return [
@@ -256,12 +271,11 @@ class _MobileFormatCardState extends State<MobileFormatCard> {
 
   /// 处理正文字号选择
   Future<void> _onFontSizeChanged(String value) async {
+    final settings = SettingsService.instance;
     final double size = value == _defaultSizeValue
-        ? (widget.isOutline ? AppSettings.defaults.outlineFontSize : AppSettings.defaults.fontSize)
+        ? (widget.isOutline ? settings.defaultOutlineFontSize : settings.defaultFontSize)
         : (double.tryParse(value) ?? 0);
     if (size <= 0) return;
-
-    final settings = SettingsService.instance;
     if (widget.isOutline) {
       await settings.updateOutlineFontSize(size);
     } else {
@@ -271,12 +285,13 @@ class _MobileFormatCardState extends State<MobileFormatCard> {
 
   /// 处理标题字号选择
   Future<void> _onTitleFontSizeChanged(String value) async {
+    final settings = SettingsService.instance;
     final double size = value == _defaultSizeValue
-        ? AppSettings.defaults.chapterTitleFontSize
+        ? settings.defaultChapterTitleFontSize
         : (double.tryParse(value) ?? 0);
     if (size <= 0) return;
 
-    await SettingsService.instance.updateChapterTitleFontSize(size);
+    await settings.updateChapterTitleFontSize(size);
   }
 
   /// 唤起系统文件选择器导入字体文件并应用到当前编辑器

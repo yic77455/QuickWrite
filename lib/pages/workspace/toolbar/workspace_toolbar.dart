@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:quick_write/core/models/app_settings.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/services/font_service.dart';
 import 'package:quick_write/core/services/settings_service.dart';
@@ -304,9 +303,9 @@ class _WorkspaceToolbarState extends State<WorkspaceToolbar> {
         if (value == '__default_size__') {
           // 选择"默认"项：重置为默认字号
           if (isOutline) {
-            SettingsService.instance.updateOutlineFontSize(AppSettings.defaults.outlineFontSize);
+            SettingsService.instance.updateOutlineFontSize(SettingsService.instance.defaultOutlineFontSize);
           } else {
-            SettingsService.instance.updateFontSize(AppSettings.defaults.fontSize);
+            SettingsService.instance.updateFontSize(SettingsService.instance.defaultFontSize);
           }
         } else {
           final fontSize = double.tryParse(value);

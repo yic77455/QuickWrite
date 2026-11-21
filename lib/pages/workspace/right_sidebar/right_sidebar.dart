@@ -191,7 +191,8 @@ class _RightSidebarState extends State<RightSidebar>
     final sidebarType = provider.rightSidebarType;
     final showResetButton = sidebarType != RightSidebarType.search &&
         sidebarType != RightSidebarType.history &&
-        sidebarType != RightSidebarType.tools;
+        sidebarType != RightSidebarType.tools &&
+        sidebarType != RightSidebarType.stats;
 
     return Container(
       height: 40,
@@ -235,9 +236,10 @@ class _RightSidebarState extends State<RightSidebar>
           // 弹性空间，将关闭按钮推到右侧
           const Spacer(),
 
-          // 显示设置按钮（仅工具面板显示），点击展开下拉菜单配置区块显示与顺序
-          if (sidebarType == RightSidebarType.tools)...[
-            _buildDisplaySettingsButton(context),
+          // 显示设置按钮（工具面板与码字统计面板显示），点击展开下拉菜单配置区块显示与顺序
+          if (sidebarType == RightSidebarType.tools ||
+              sidebarType == RightSidebarType.stats)...[
+            _buildDisplaySettingsButton(context, sidebarType),
             const SizedBox(width: 8),
             Container(
               width: 2,
@@ -328,8 +330,9 @@ class _RightSidebarState extends State<RightSidebar>
   /// 构建显示设置按钮及其下拉菜单
   ///
   /// 点击图标按钮展开 [ToolsDisplaySettings] 菜单，配置功能区与信息区块
-  /// 的显示开关及各自区域内的顺序。
-  Widget _buildDisplaySettingsButton(BuildContext context) {
+  /// 的显示开关及各自区域内的顺序。码字统计面板不展示功能区，
+  /// 对应菜单中也隐藏功能区的配置项。
+  Widget _buildDisplaySettingsButton(BuildContext context, RightSidebarType sidebarType) {
     final colorScheme = Theme.of(context).colorScheme;
 
     return MenuAnchor(
@@ -355,6 +358,7 @@ class _RightSidebarState extends State<RightSidebar>
           sectionOrder: _toolsSectionOrder,
           onFunctionOrderChanged: _onToolsFunctionOrderChanged,
           onSectionOrderChanged: _onToolsSectionOrderChanged,
+          showFunctionGroup: sidebarType == RightSidebarType.tools,
         ),
       ],
       builder: (context, controller, child) {
@@ -428,6 +432,8 @@ class _RightSidebarState extends State<RightSidebar>
         return '工具';
       case RightSidebarType.backup:
         return '备份设置';
+      case RightSidebarType.stats:
+        return '码字统计';
     }
   }
 
@@ -462,6 +468,13 @@ class _RightSidebarState extends State<RightSidebar>
           functionOrder: _toolsFunctionOrder,
           sectionOrder: _toolsSectionOrder,
         );
+      case RightSidebarType.stats:
+        // 码字统计面板：复用工具面板的信息区块，隐藏顶部功能区
+        return ToolsPanel(
+          functionOrder: _toolsFunctionOrder,
+          sectionOrder: _toolsSectionOrder,
+          showFunctionSection: false,
+        );
     }
   }
 
@@ -493,6 +506,9 @@ class _RightSidebarState extends State<RightSidebar>
       case RightSidebarType.backup:
         // 调用 SettingsService 重置备份设置
         SettingsService.instance.resetBackupSettings();
+        break;
+      case RightSidebarType.stats:
+        // 码字统计面板无需重置
         break;
     }
   }

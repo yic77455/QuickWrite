@@ -1,4 +1,7 @@
-import 'package:flutter/widgets.dart';
+import 'dart:ui' show lerpDouble;
+
+import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart';
 import 'package:quick_write/core/utils/reorder_utils.dart';
 
 /// 目录列表中的一行
@@ -123,6 +126,78 @@ int itemDisplayIndexInGroup(List<ContentsRow> rows, int flatIndex) {
 /// 将目标插入位置换算为被拖拽行仍在原位时的索引语义
 int rawReorderIndex(int oldIndex, int targetIndex) {
   return oldIndex < targetIndex ? targetIndex + 1 : targetIndex;
+}
+
+/// 拖拽代理中行底色相对整行的内缩量
+///
+/// 目录行内容自带水平 4、垂直 1 的外边距，抬起底色需按同样边距内缩，
+/// 才能贴合行自身的圆角范围，不会在四周露出多余的底色块。
+const EdgeInsets _kProxyTintInset = EdgeInsets.symmetric(horizontal: 4, vertical: 1);
+
+/// 构建目录列表的拖拽代理装饰器
+///
+/// 代理渲染在 Overlay 中，目录行自身没有底色，
+/// 因此由代理在行范围内绘制与桌面端悬停态一致的底色，
+/// 并按抬起进度叠加阴影与轻微缩放，双端拖拽呈现同样的抬升效果。
+/// [scrollController] 用于在代理上接收滚轮事件并驱动列表滚动：
+/// 代理已脱离列表，无法再触发列表自身的滚动。
+Widget buildContentsReorderProxyDecorator({
+  required ScrollController scrollController,
+  required Widget child,
+  required Animation<double> animation,
+}) {
+  return Listener(
+    onPointerSignal: (PointerSignalEvent event) {
+      // 在代理元素上捕获滚轮事件并手动驱动滚动
+      if (event is PointerScrollEvent && scrollController.hasClients) {
+        final double maxScroll = scrollController.position.maxScrollExtent;
+        final double newOffset = (scrollController.offset + event.scrollDelta.dy)
+            .clamp(0.0, maxScroll);
+        scrollController.jumpTo(newOffset);
+      }
+    },
+    child: AnimatedBuilder(
+      animation: animation,
+      builder: (BuildContext context, Widget? child) {
+        final theme = Theme.of(context);
+        // 根据动画进度计算曲线插值
+        final double animValue = Curves.easeInOut.transform(animation.value);
+        // 拖拽时增加阴影高度
+        final double elevation = lerpDouble(0, 6, animValue)!;
+        // 拖拽时略微放大元素
+        final double scale = lerpDouble(1, 1.02, animValue)!;
+        // 底色随抬起进度淡入，与桌面端悬停时的行底色完全一致
+        final Color tintColor = theme.hoverColor.withValues(alpha: animValue);
+
+        return Transform.scale(
+          scale: scale,
+          child: Material(
+            elevation: elevation,
+            color: Colors.transparent,
+            shadowColor: theme.colorScheme.shadow.withValues(alpha: 0.3),
+            child: Stack(
+              children: [
+                // 底色垫在行内容之下，并按行外边距内缩，避免在行四周多出一圈背景
+                Positioned.fill(
+                  child: Padding(
+                    padding: _kProxyTintInset,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: tintColor,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                  ),
+                ),
+                child!,
+              ],
+            ),
+          ),
+        );
+      },
+      child: child,
+    ),
+  );
 }
 
 /// 目录拖拽排序的状态管理与提交分发

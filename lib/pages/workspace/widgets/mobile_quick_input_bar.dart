@@ -291,13 +291,13 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
         if (!editorState.hasOutlineKeywords) return const SizedBox.shrink();
         return ValueListenableBuilder<bool>(
           valueListenable: editorState.keywordHighlightNotifier,
-          builder: (context, enabled, _) => ToggleToolButton(
+          builder: (context, enabled, _) => PressScaleIconButton(
             icon: icon,
             tooltip: action.label,
             isSelected: enabled,
             size: 44,
             iconSize: 20,
-            onChanged: (_) => editorState.toggleKeywordHighlight(),
+            onPressed: editorState.toggleKeywordHighlight,
           ),
         );
       case QuickInputAction.settings:
@@ -309,25 +309,24 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
       case QuickInputAction.randomName:
         return _buildSmallActionButton(action, icon, _handleRandomNameTap);
       case QuickInputAction.quickPhrase:
-        return ToggleToolButton(
+        return PressScaleIconButton(
           key: _phraseButtonKey,
           icon: icon,
           tooltip: action.label,
           isSelected: _phrasePopupEntry != null,
           size: 44,
           iconSize: 20,
-          onChanged: (_) => _togglePhrasePopup(),
+          onPressed: _togglePhrasePopup,
         );
     }
   }
 
   /// 构建普通样式的操作按钮
   Widget _buildSmallActionButton(QuickInputAction action, IconData icon, VoidCallback onPressed) {
-    return SmallToolbarButton(
+    return PressScaleIconButton(
       icon: icon,
       tooltip: action.label,
-      width: 44,
-      height: _barHeight,
+      size: 44,
       iconSize: 20,
       onPressed: onPressed,
     );

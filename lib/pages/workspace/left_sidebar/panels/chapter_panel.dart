@@ -1,4 +1,3 @@
-import 'dart:ui';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -698,42 +697,11 @@ class _ChapterPanelState extends State<ChapterPanel>
   }
 
   /// 构建拖拽时的装饰器
-  /// 为拖拽中的元素添加缩放、阴影等视觉反馈效果
   Widget _buildReorderProxyDecorator(Widget child, int index, Animation<double> animation) {
-    return Listener(
-      onPointerSignal: (PointerSignalEvent event) {
-        // 拖拽时代理元素渲染在 Overlay 中，无法触发侧边栏滚动，
-        // 因此在代理元素上捕获滚轮事件并手动驱动滚动
-        if (event is PointerScrollEvent && _scrollController.hasClients) {
-          final double maxScroll = _scrollController.position.maxScrollExtent;
-          final double newOffset = (_scrollController.offset + event.scrollDelta.dy)
-              .clamp(0.0, maxScroll);
-          _scrollController.jumpTo(newOffset);
-        }
-      },
-      child: AnimatedBuilder(
-        animation: animation,
-        builder: (BuildContext context, Widget? child) {
-          // 根据动画进度计算曲线插值
-          final double animValue = Curves.easeInOut.transform(animation.value);
-          // 拖拽时增加阴影高度
-          final double elevation = lerpDouble(0, 6, animValue)!;
-          // 拖拽时略微放大元素
-          final double scale = lerpDouble(1, 1.02, animValue)!;
-
-          return Transform.scale(
-            scale: scale,
-            child: Material(
-              elevation: elevation,
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(6),
-              shadowColor: Theme.of(context).colorScheme.shadow.withValues(alpha: 0.3),
-              child: child,
-            ),
-          );
-        },
-        child: child,
-      ),
+    return buildContentsReorderProxyDecorator(
+      scrollController: _scrollController,
+      child: child,
+      animation: animation,
     );
   }
 

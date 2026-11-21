@@ -10,7 +10,6 @@ import 'package:quick_write/core/utils/code_line_selection_utils.dart';
 import 'package:quick_write/core/utils/paragraph_formatter.dart';
 import 'package:quick_write/pages/workspace/editor/novel_editor.dart';
 import 'package:quick_write/pages/workspace/name_gen/name_generator_dialog_mobile.dart';
-import 'package:quick_write/pages/workspace/right_sidebar/widgets/writing_stats_section.dart';
 import 'package:quick_write/pages/workspace/sensitive_word/sensitive_word_check_dialog.dart';
 import 'package:quick_write/shared/dialogs/export_dialog.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
@@ -344,8 +343,8 @@ Future<void> handleMobileToolAction(BuildContext context, MobileToolAction actio
       _exportCurrentChapter(context, provider);
       break;
     case MobileToolAction.writingStats:
-      // 以弹窗展示码字统计
-      showWritingStatsDialog(context: context, tracker: provider.sessionTracker);
+      // 在右侧边栏中展示码字统计
+      provider.openRightSidebar(RightSidebarType.stats);
       break;
     case MobileToolAction.copyChapter:
       // 复制当前章节正文到剪贴板
