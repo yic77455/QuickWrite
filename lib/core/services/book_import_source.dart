@@ -324,21 +324,92 @@ int? _parseVolumeNumber(String raw) {
   return hasDigit ? total : null;
 }
 
-/// 自然排序比较（优先比较文件名中的第一个数字）
+/// 自然排序比较
+///
+/// 把字符串拆分为文本与数字片段后逐段比较：数字片段按数值比较，
+/// 文本片段按字典序比较，从而让「第2章」排在「第10章」之前，
+/// 并正确识别「第九章」「第十章」这类中文数字章节。
 int _naturalCompare(String a, String b) {
-  final regExp = RegExp(r'(\d+)');
+  final aTokens = _splitNaturalTokens(a);
+  final bTokens = _splitNaturalTokens(b);
 
-  final aMatches = regExp.allMatches(a).toList();
-  final bMatches = regExp.allMatches(b).toList();
+  final commonLength =
+      aTokens.length < bTokens.length ? aTokens.length : bTokens.length;
 
-  // 两个字符串都包含数字时，先按第一个数字比较
-  if (aMatches.isNotEmpty && bMatches.isNotEmpty) {
-    final aNum = int.tryParse(aMatches.first.group(1) ?? '0') ?? 0;
-    final bNum = int.tryParse(bMatches.first.group(1) ?? '0') ?? 0;
-    if (aNum != bNum) {
-      return aNum.compareTo(bNum);
+  for (int i = 0; i < commonLength; i++) {
+    final aToken = aTokens[i];
+    final bToken = bTokens[i];
+
+    // 双方都是数字片段时按数值大小比较
+    if (aToken.number != null && bToken.number != null) {
+      final result = aToken.number!.compareTo(bToken.number!);
+      if (result != 0) return result;
+      continue;
     }
+
+    // 其余情况按原始文本比较
+    final result = aToken.text.compareTo(bToken.text);
+    if (result != 0) return result;
   }
 
+  // 前缀相同时，片段更少的字符串排在前面
+  final lengthResult = aTokens.length.compareTo(bTokens.length);
+  if (lengthResult != 0) return lengthResult;
+
+  // 片段完全等价时按原始文本兜底，保证排序结果稳定
   return a.compareTo(b);
+}
+
+/// 把字符串拆分为文本与数字片段
+///
+/// 连续的阿拉伯数字或中文数字组成一个数字片段，其余字符组成文本片段。
+List<_NaturalToken> _splitNaturalTokens(String value) {
+  final tokens = <_NaturalToken>[];
+  final buffer = StringBuffer();
+  bool bufferIsNumber = false;
+
+  void flush() {
+    if (buffer.isEmpty) return;
+    final text = buffer.toString();
+    tokens.add(_NaturalToken(
+      text: text,
+      number: bufferIsNumber ? _parseVolumeNumber(text) : null,
+    ));
+    buffer.clear();
+  }
+
+  for (final char in value.split('')) {
+    final isNumber = _isNaturalNumberChar(char);
+    if (buffer.isNotEmpty && isNumber != bufferIsNumber) {
+      flush();
+    }
+    bufferIsNumber = isNumber;
+    buffer.write(char);
+  }
+  flush();
+
+  return tokens;
+}
+
+/// 判断字符是否属于数字片段（阿拉伯数字或中文数字）
+bool _isNaturalNumberChar(String char) {
+  final code = char.codeUnitAt(0);
+  final isArabicDigit = code >= 0x30 && code <= 0x39;
+  return isArabicDigit ||
+      _chineseDigitValues.containsKey(char) ||
+      _chineseUnitValues.containsKey(char);
+}
+
+/// 自然排序片段
+///
+/// [number] 非空表示数字片段，比较时按数值大小；
+/// 否则按 [text] 的字典序比较。
+class _NaturalToken {
+  /// 片段原文
+  final String text;
+
+  /// 数字片段对应的数值，文本片段为 null
+  final int? number;
+
+  const _NaturalToken({required this.text, this.number});
 }
