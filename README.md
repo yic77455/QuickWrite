@@ -8,7 +8,7 @@
 
 把作品、章节、大纲设定与码字工具集中在一处，帮你专注地把故事写下去。
 
-[![平台](https://img.shields.io/badge/平台-Windows%20%7C%20Android-blue)](#-下载与安装)
+[![平台](https://img.shields.io/badge/平台-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android-blue)](#-下载与安装)
 [![License](https://img.shields.io/badge/License-GPL--3.0-green)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/yic77455/QuickWrite)](https://github.com/yic77455/QuickWrite/releases)
 [![Last Commit](https://img.shields.io/github/last-commit/yic77455/QuickWrite)](https://github.com/yic77455/QuickWrite/commits)
@@ -36,7 +36,7 @@
 除稳定的长文本编辑器外，还有节点式大纲编辑器，帮助作者记录自己的灵感，整理作品的设定。
 
 - **本地优先&&云备份可选**：所有创作数据默认保存在本机，支持自选 WebDAV、S3 协议做云端备份，不绑定账号、不采集内容。
-- **跨平台**：桌面端（Windows）与移动端（Android）双端适配，同一套数据与操作习惯。
+- **跨平台**：桌面端覆盖 Windows、macOS、Linux，移动端支持 Android，同一套数据与操作习惯。
 - **完全免费**：没有会员制，没有任何功能限制，无需购买、无需注册、无需支付任何费用。
 - **项目开源**：基于 GPL-3.0 协议开源，代码安全透明，不收集任何用户数据，无广告、无跟踪、无隐私问题。
 
@@ -79,13 +79,28 @@
 
 ### Windows
 
-1. 在 Releases 页面下载最新版 Windows 安装包，文件名通常为 `quick-write-1.x.x-x64-setup.exe` 或类似格式。
+1. 在 Releases 页面下载最新版 Windows 安装包，文件名形如 `quick-write-1.x.x-windows-x64.exe`。
 2. 运行安装程序，按照提示完成安装。
 3. 首次启动后可在「主界面 → 云同步」中配置 WebDAV 或 S3 服务器地址进行数据同步。
 
+### macOS
+
+1. 下载 `quick-write-1.x.x-macos-universal.dmg`，双击打开后将「快码字」拖入「应用程序」文件夹。
+2. 首次启动若被 Gatekeeper 拦截，请在「应用程序」中右键点击「快码字」选择「打开」，或前往「系统设置 → 隐私与安全性」允许该应用运行。
+3. 首次启动后可在「主界面 → 云同步」中配置 WebDAV 或 S3 服务器地址进行数据同步。
+
+### Linux
+
+1. 下载 `quick-write-1.x.x-linux-amd64.deb`，适用于 amd64 / x86_64 架构的 Debian、Ubuntu 等发行版。
+2. 双击安装包用系统软件中心安装，或在终端执行 `sudo apt install ./quick-write-1.x.x-linux-amd64.deb`。
+3. 卸载执行 `sudo apt remove quickwrite`，书稿与设置不会被删除；如需连同配置一起彻底清除，执行 `sudo apt purge quickwrite`。
+4. 首次启动后可在「主界面 → 云同步」中配置 WebDAV 或 S3 服务器地址进行数据同步。
+
+> macOS 与 Linux 版本目前仍处于测试阶段，使用中遇到问题欢迎在 Issues 中反馈。
+
 ### Android
 
-1. 在 Releases 页面下载最新版 `.apk` 安装包，文件名通常为 `quick-write-1.x.x.apk` 或类似格式。
+1. 在 Releases 页面下载最新版 `.apk` 安装包，文件名形如 `quick-write-1.x.x-android.apk`。
 2. 在手机允许「安装未知来源应用」后完成安装。
 3. 首次启动后可在「工具 → 云同步」中配置 WebDAV 或 S3 服务器地址进行数据同步。
 

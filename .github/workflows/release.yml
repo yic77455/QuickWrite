@@ -130,9 +130,9 @@ jobs:
         run: |
           set -euo pipefail
           for name in \
-            "quickwrite_${VERSION}_amd64.deb" \
+            "quick-write-${VERSION}-linux-amd64.deb" \
             "quick-write-${VERSION}-macos-universal.dmg" \
-            "quick-write-${VERSION}-x64-setup.exe" \
+            "quick-write-${VERSION}-windows-x64.exe" \
             "quick-write-${VERSION}-android.apk"; do
             if [ ! -s "release-assets/${name}" ]; then
               echo "::error::缺少发布资产 ${name}"

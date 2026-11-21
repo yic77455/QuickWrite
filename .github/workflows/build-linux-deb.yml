@@ -275,7 +275,8 @@ jobs:
           chmod 755 "${PKG_ROOT}/DEBIAN/postrm"
 
           # ---------- 9. 打包 ----------
-          DEB_FILE="${PKG_NAME}_${APP_VERSION}_amd64.deb"
+          # 发布资产文件名带上平台与架构，便于用户辨认；包名仍是 control 里的 quickwrite
+          DEB_FILE="quick-write-${APP_VERSION}-linux-amd64.deb"
           dpkg-deb --root-owner-group -Zxz --build "${PKG_ROOT}" "${DEB_FILE}"
 
           echo "=== control ==="
@@ -287,7 +288,7 @@ jobs:
       - name: Verify package
         run: |
           set -euo pipefail
-          DEB_FILE="$(ls -1 quickwrite_*.deb | head -1)"
+          DEB_FILE="$(ls -1 quick-write-*-linux-amd64.deb | head -1)"
           echo "校验 ${DEB_FILE}"
 
           # 菜单项格式校验：只提示不阻断，避免格式告警卡住出包
@@ -322,6 +323,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: quick-write-linux-deb
-          path: quickwrite_*.deb
+          path: quick-write-*-linux-amd64.deb
           if-no-files-found: error
           retention-days: 30

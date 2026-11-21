@@ -350,10 +350,10 @@ class UpdateService {
 
   /// 当前平台对应的资产文件名关键词
   static List<String> _platformKeywords() {
-    if (PlatformCapabilities.isWindows) return const ['win', 'exe', 'msi', 'setup'];
+    if (PlatformCapabilities.isWindows) return const ['windows', 'exe', 'msi', 'setup'];
     if (PlatformCapabilities.isMacOS) return const ['mac', 'dmg', 'pkg'];
     if (PlatformCapabilities.isLinux) return const ['linux', 'appimage', 'deb', 'rpm'];
-    if (PlatformCapabilities.isAndroid) return const ['apk'];
+    if (PlatformCapabilities.isAndroid) return const ['android', 'apk'];
     return const [];
   }
 
