@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:quick_write/core/constants/word_count_floating_mode.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
@@ -69,6 +70,8 @@ class _WordCountFloatingWindowState extends State<WordCountFloatingWindow> {
     final position = SettingsService.instance.wordCountFloatingPosition;
     final bool alignTop = position == 'topLeft' || position == 'topRight';
     final bool alignLeft = position == 'topLeft' || position == 'bottomLeft';
+    // 浮窗显示样式（标准、精简、极简）
+    final mode = SettingsService.instance.wordCountFloatingMode;
 
     return Positioned(
       top: alignTop ? _edgeMargin : null,
@@ -82,6 +85,7 @@ class _WordCountFloatingWindowState extends State<WordCountFloatingWindow> {
             context,
             tab.wordCount,
             speedEnabled ? (tracker?.writingSpeed ?? 0) : null,
+            mode,
           ),
         ),
       ),
@@ -91,7 +95,8 @@ class _WordCountFloatingWindowState extends State<WordCountFloatingWindow> {
   /// 构建浮窗内容
   ///
   /// [writingSpeed] 非空时额外渲染一行码字速度
-  Widget _buildWindow(BuildContext context, int wordCount, int? writingSpeed) {
+  /// [mode] 决定每一行展示图标、标签与数值的组合
+  Widget _buildWindow(BuildContext context, int wordCount, int? writingSpeed, WordCountFloatingMode mode) {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Container(
@@ -119,6 +124,7 @@ class _WordCountFloatingWindowState extends State<WordCountFloatingWindow> {
             icon: Icons.text_fields_rounded,
             label: '字数',
             value: '$wordCount 字',
+            mode: mode,
           ),
           if (writingSpeed != null) ...[
             const SizedBox(height: 4),
@@ -128,6 +134,7 @@ class _WordCountFloatingWindowState extends State<WordCountFloatingWindow> {
               icon: Icons.speed_rounded,
               label: '速度',
               value: '$writingSpeed 字/分',
+              mode: mode,
             ),
           ],
         ],
@@ -135,17 +142,29 @@ class _WordCountFloatingWindowState extends State<WordCountFloatingWindow> {
     );
   }
 
-  /// 构建单行统计（图标 + 标签 + 数值）
-  Widget _buildRow(BuildContext context, {required IconData icon, required String label, required String value}) {
+  /// 构建单行统计
+  ///
+  /// 按 [mode] 决定是否渲染图标与标签，数值始终显示
+  Widget _buildRow(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required String value,
+    required WordCountFloatingMode mode,
+  }) {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 14, color: colorScheme.primary),
-        const SizedBox(width: 6),
-        Text(label, style: context.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant)),
-        const SizedBox(width: 8),
+        if (mode.showIcon) ...[
+          Icon(icon, size: 14, color: colorScheme.primary),
+          const SizedBox(width: 6),
+        ],
+        if (mode.showLabel) ...[
+          Text(label, style: context.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant)),
+          const SizedBox(width: 8),
+        ],
         Text(
           value,
           style: context.bodyMedium?.copyWith(color: colorScheme.onSurface, fontWeight: FontWeight.w600),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:quick_write/core/constants/word_count_floating_mode.dart';
 
 /// 应用全局设置模型类
 /// 
@@ -265,6 +266,9 @@ class AppSettings {
   /// 字数浮窗是否额外显示码字速度
   final bool wordCountFloatingSpeedEnabled;
 
+  /// 字数浮窗显示样式（标准、精简、极简）
+  final WordCountFloatingMode wordCountFloatingMode;
+
   // ================= 码字统计设置 =================
 
   /// 码字统计是否包含粘贴字数
@@ -386,6 +390,7 @@ class AppSettings {
     this.wordCountFloatingEnabled = false, // 是否启用字数浮窗
     this.wordCountFloatingPosition = 'topRight', // 字数浮窗显示位置（默认右上）
     this.wordCountFloatingSpeedEnabled = false, // 字数浮窗是否显示码字速度
+    this.wordCountFloatingMode = WordCountFloatingMode.defaultMode, // 字数浮窗显示样式
     // 码字统计设置
     this.statsIncludePasteWords = false, // 码字统计是否包含粘贴字数
     this.statsIncludeSettingWords = false, // 码字统计是否包含设定字数
@@ -511,6 +516,7 @@ class AppSettings {
       wordCountFloatingEnabled: wordCountFloatingJson['enabled'] as bool? ?? defaults.wordCountFloatingEnabled,
       wordCountFloatingPosition: wordCountFloatingJson['position'] as String? ?? defaults.wordCountFloatingPosition,
       wordCountFloatingSpeedEnabled: wordCountFloatingJson['speedEnabled'] as bool? ?? defaults.wordCountFloatingSpeedEnabled,
+      wordCountFloatingMode: WordCountFloatingMode.fromId(wordCountFloatingJson['mode'] as String?),
 
       // 码字统计设置（编辑器）
       statsIncludePasteWords: writingStatsJson['includePasteWords'] as bool? ?? defaults.statsIncludePasteWords,
@@ -631,6 +637,7 @@ class AppSettings {
           'enabled': wordCountFloatingEnabled,
           'position': wordCountFloatingPosition,
           'speedEnabled': wordCountFloatingSpeedEnabled,
+          'mode': wordCountFloatingMode.id,
         },
         // 码字统计设置
         'writingStats': {
@@ -734,6 +741,7 @@ class AppSettings {
     bool? wordCountFloatingEnabled,
     String? wordCountFloatingPosition,
     bool? wordCountFloatingSpeedEnabled,
+    WordCountFloatingMode? wordCountFloatingMode,
     // 码字统计设置
     bool? statsIncludePasteWords,
     bool? statsIncludeSettingWords,
@@ -822,6 +830,7 @@ class AppSettings {
       wordCountFloatingEnabled: wordCountFloatingEnabled ?? this.wordCountFloatingEnabled,
       wordCountFloatingPosition: wordCountFloatingPosition ?? this.wordCountFloatingPosition,
       wordCountFloatingSpeedEnabled: wordCountFloatingSpeedEnabled ?? this.wordCountFloatingSpeedEnabled,
+      wordCountFloatingMode: wordCountFloatingMode ?? this.wordCountFloatingMode,
       // 码字统计设置
       statsIncludePasteWords: statsIncludePasteWords ?? this.statsIncludePasteWords,
       statsIncludeSettingWords: statsIncludeSettingWords ?? this.statsIncludeSettingWords,
@@ -944,6 +953,7 @@ class AppSettings {
            other.wordCountFloatingEnabled == wordCountFloatingEnabled &&
            other.wordCountFloatingPosition == wordCountFloatingPosition &&
            other.wordCountFloatingSpeedEnabled == wordCountFloatingSpeedEnabled &&
+           other.wordCountFloatingMode == wordCountFloatingMode &&
            // 码字统计设置
            other.statsIncludePasteWords == statsIncludePasteWords &&
            other.statsIncludeSettingWords == statsIncludeSettingWords &&
@@ -1047,6 +1057,7 @@ class AppSettings {
         wordCountFloatingEnabled,
         wordCountFloatingPosition,
         wordCountFloatingSpeedEnabled,
+        wordCountFloatingMode,
       ),
       // 码字统计设置
       Object.hash(

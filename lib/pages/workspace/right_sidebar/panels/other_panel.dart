@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/constants/material_icons.dart';
 import 'package:quick_write/core/constants/quick_input_action.dart';
+import 'package:quick_write/core/constants/word_count_floating_mode.dart';
 import 'package:quick_write/core/services/backup_service.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
@@ -82,6 +83,7 @@ class _OtherPanelState extends State<OtherPanel> {
     final wordCountFloatingEnabled = settingsService.wordCountFloatingEnabled;
     final wordCountFloatingPosition = settingsService.wordCountFloatingPosition;
     final wordCountFloatingSpeedEnabled = settingsService.wordCountFloatingSpeedEnabled;
+    final wordCountFloatingMode = settingsService.wordCountFloatingMode;
     
     // 使用 Column 布局，确保内容区域自适应填充剩余空间
     return Container(
@@ -136,7 +138,7 @@ class _OtherPanelState extends State<OtherPanel> {
                   // 字数浮窗设置区块（移动端专属，「备份设置」入口下隐藏）
                   if (PlatformCapabilities.isMobile && widget.scope != OtherPanelScope.backup) ...[
                     const SizedBox(height: 20),
-                    _buildWordCountFloatingSection(context, wordCountFloatingEnabled, wordCountFloatingPosition, wordCountFloatingSpeedEnabled),
+                    _buildWordCountFloatingSection(context, wordCountFloatingEnabled, wordCountFloatingPosition, wordCountFloatingSpeedEnabled, wordCountFloatingMode),
                   ],
 
                   // 快捷键设置区块（移动端没有物理键盘，不适用）
@@ -505,10 +507,21 @@ class _OtherPanelState extends State<OtherPanel> {
     );
   }
 
+  /// 字数浮窗显示样式的候选项（由模式枚举统一生成）
+  static final List<DropdownItem> _wordCountFloatingModeItems = WordCountFloatingMode.values
+      .map((mode) => DropdownItem(displayText: mode.label, value: mode.id))
+      .toList();
+
   /// 构建字数浮窗设置区块（移动端专属）
   ///
-  /// 管理叠加在编辑器上的字数浮窗：开关、显示位置与码字速度开关
-  Widget _buildWordCountFloatingSection(BuildContext context, bool enabled, String position, bool speedEnabled) {
+  /// 管理叠加在编辑器上的字数浮窗：开关、显示位置、显示样式与码字速度开关
+  Widget _buildWordCountFloatingSection(
+    BuildContext context,
+    bool enabled,
+    String position,
+    bool speedEnabled,
+    WordCountFloatingMode mode,
+  ) {
     // 浮窗显示位置选项
     const positionItems = [
       DropdownItem(displayText: '左上', value: 'topLeft'),
@@ -530,7 +543,7 @@ class _OtherPanelState extends State<OtherPanel> {
             setState(() {});
           },
         ),
-        // 显示位置与码字速度在浮窗开启后才可配置
+        // 显示位置、显示样式与码字速度在浮窗开启后才可配置
         if (enabled) ...[
           _buildDropdownSettingItem(
             context,
@@ -540,6 +553,17 @@ class _OtherPanelState extends State<OtherPanel> {
             items: positionItems,
             onChanged: (value) {
               SettingsService.instance.updateWordCountFloatingPosition(value);
+              setState(() {});
+            },
+          ),
+          _buildDropdownSettingItem(
+            context,
+            icon: Icons.text_fields_outlined,
+            label: '显示样式',
+            value: mode.id,
+            items: _wordCountFloatingModeItems,
+            onChanged: (value) {
+              SettingsService.instance.updateWordCountFloatingMode(WordCountFloatingMode.fromId(value));
               setState(() {});
             },
           ),

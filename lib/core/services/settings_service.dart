@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/constants/punctuation_symbols.dart';
 import 'package:quick_write/core/constants/quick_input_action.dart';
+import 'package:quick_write/core/constants/word_count_floating_mode.dart';
 import 'package:quick_write/core/models/app_settings.dart';
 import 'package:quick_write/core/theme/custom_theme.dart';
 import 'package:quick_write/core/theme/theme_store.dart';
@@ -696,6 +697,9 @@ class SettingsService extends ChangeNotifier {
   /// 获取字数浮窗是否显示码字速度
   bool get wordCountFloatingSpeedEnabled => _settings.wordCountFloatingSpeedEnabled;
 
+  /// 获取字数浮窗显示样式
+  WordCountFloatingMode get wordCountFloatingMode => _settings.wordCountFloatingMode;
+
   /// 更新字间距
   /// [debounce] 是否使用防抖方式保存
   Future<bool> updateLetterSpacing(double value, {bool debounce = false}) async {
@@ -957,6 +961,12 @@ class SettingsService extends ChangeNotifier {
     return updateSettings(newSettings);
   }
 
+  /// 更新字数浮窗显示样式
+  Future<bool> updateWordCountFloatingMode(WordCountFloatingMode value) async {
+    final newSettings = _settings.copyWith(wordCountFloatingMode: value);
+    return updateSettings(newSettings);
+  }
+
   // ================= 码字统计设置相关 =================
 
   /// 码字统计是否包含粘贴字数
@@ -1062,6 +1072,7 @@ class SettingsService extends ChangeNotifier {
       wordCountFloatingEnabled: AppSettings.defaults.wordCountFloatingEnabled,
       wordCountFloatingPosition: AppSettings.defaults.wordCountFloatingPosition,
       wordCountFloatingSpeedEnabled: AppSettings.defaults.wordCountFloatingSpeedEnabled,
+      wordCountFloatingMode: AppSettings.defaults.wordCountFloatingMode,
     );
     return updateSettings(newSettings);
   }
