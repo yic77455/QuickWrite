@@ -16,12 +16,11 @@ Future<void> showImportBookDialog(BuildContext context) {
 
   return showDialogBase(
     context: context,
-    title: '', // 不使用默认标题栏
+    title: '导入书籍',
     width: 480,
     height: 500, // 最大高度
     adaptiveHeight: true, // 自适应高度
     anchorTop: true, // 高度变化时保持顶部位置
-    showCloseButton: false, // 不显示默认关闭按钮
     dialogInteractiveNotifier: interactiveNotifier, // 动态控制对话框交互状态
     content: _ImportBookDialogContent(
       interactiveNotifier: interactiveNotifier,
@@ -266,67 +265,31 @@ class _ImportBookDialogContentState extends State<_ImportBookDialogContent> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    return PopScope(
-      canPop: !_isImporting,
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // 自定义标题栏
-            _buildTitleBar(colorScheme),
-
-            // 分段选择器
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-              child: SegmentedControl(
-                labels: const ['文件导入', '文件夹导入'],
-                selectedIndex: _currentPageIndex,
-                onChanged: _isImporting ? null : _onTabPressed,
-              ),
-            ),
-
-            // 内容区域
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-              child: _buildImportPage(
-                colorScheme: colorScheme,
-                isFileMode: _currentPageIndex == 0,
-                selectedPath: _currentPageIndex == 0 ? _selectedFilePath : _selectedFolderPath,
-                controller: _currentPageIndex == 0 ? _fileTitleController : _folderTitleController,
-                focusNode: _currentPageIndex == 0 ? _fileTitleFocusNode : _folderTitleFocusNode,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 构建标题栏
-  Widget _buildTitleBar(ColorScheme colorScheme) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 12, 0),
-      child: Row(
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: Text(
-              '导入书籍',
-              style: context.titleLarge?.copyWith(fontWeight: FontWeight.w600),
+          // 分段选择器
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+            child: SegmentedControl(
+              labels: const ['文件导入', '文件夹导入'],
+              selectedIndex: _currentPageIndex,
+              onChanged: _isImporting ? null : _onTabPressed,
             ),
           ),
-          IconButton(
-            icon: Icon(
-              Icons.close,
-              size: 20,
-              color: _isImporting
-                  ? colorScheme.onSurface.withValues(alpha: 0.3)
-                  : null,
+
+          // 内容区域
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+            child: _buildImportPage(
+              colorScheme: colorScheme,
+              isFileMode: _currentPageIndex == 0,
+              selectedPath: _currentPageIndex == 0 ? _selectedFilePath : _selectedFolderPath,
+              controller: _currentPageIndex == 0 ? _fileTitleController : _folderTitleController,
+              focusNode: _currentPageIndex == 0 ? _fileTitleFocusNode : _folderTitleFocusNode,
             ),
-            onPressed:
-                _isImporting ? null : () => Navigator.of(context).pop(),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
           ),
         ],
       ),

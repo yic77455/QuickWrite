@@ -101,20 +101,12 @@ class WindowSection extends StatelessWidget {
 
   /// 显示需要关闭工作台窗口的提示对话框
   void _showCloseWindowsDialog(BuildContext context) {
-    showDialog(
+    showConfirmDialog(
       context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('无法修改'),
-          content: const Text('请先关闭所有工作台窗口后再修改此设置。'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('知道了'),
-            ),
-          ],
-        );
-      },
+      title: '无法修改',
+      description: '请先关闭所有工作台窗口后再修改此设置。',
+      confirmText: '知道了',
+      cancelText: null,
     );
   }
 }

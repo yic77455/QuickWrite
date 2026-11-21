@@ -159,12 +159,17 @@ class _StatsPageState extends State<StatsPage> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
       children: [
-        // 顶部标题栏：标题 + 统计设置
+        // 顶部标题栏：标题居左，统计设置图标靠右
         Row(
           children: [
             Text('码字统计', style: context.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
-            const SizedBox(width: 8),
-            _buildStatsSettingsButton(context, statsProvider),
+            const Spacer(),
+            _buildStatsSettingsButton(
+              context,
+              statsProvider,
+              iconSize: 20,
+              offset: const Offset(0, -1),
+            ),
           ],
         ),
         const SizedBox(height: 12),
@@ -228,17 +233,23 @@ class _StatsPageState extends State<StatsPage> {
 
   /// 构建码字统计设置入口
   ///
-  /// 点击打开设置弹窗，集中管理粘贴字数、设定字数与空闲判定时间
-  Widget _buildStatsSettingsButton(BuildContext context, WritingStatsProvider statsProvider) {
+  /// 点击打开设置弹窗，集中管理粘贴字数、设定字数与空闲判定时间。
+  /// [iconSize] 控制图标大小，[offset] 用于微调图标的视觉位置
+  Widget _buildStatsSettingsButton(
+    BuildContext context,
+    WritingStatsProvider statsProvider, {
+    double iconSize = 16,
+    Offset offset = const Offset(0, 1),
+  }) {
     final colorScheme = Theme.of(context).colorScheme;
     return Transform.translate(
-      offset: const Offset(0, 1),
+      offset: offset,
       child: CursorTooltipTarget(
         showTooltip: true,
         tooltipContent: Text('统计设置', style: context.bodySmall),
         child: IconButton(
           icon: const Icon(Icons.settings_rounded),
-          iconSize: 16,
+          iconSize: iconSize,
           padding: EdgeInsets.zero,
           constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
           color: colorScheme.onSurfaceVariant,

@@ -56,14 +56,22 @@ Future<void> showExportDialog({
   // 创建对话框交互状态控制器（导出时禁用拖拽和关闭）
   final interactiveNotifier = ValueNotifier<bool>(true);
 
+  // 根据导出模式确定弹窗标题
+  final String title = switch (mode) {
+    ExportMode.book => '导出书籍',
+    ExportMode.volume => '导出分卷',
+    ExportMode.chapter => '导出章节',
+    ExportMode.settingGroup => '导出分组',
+    ExportMode.setting => '导出设定项',
+  };
+
   return showDialogBase(
     context: context,
-    title: '', // 不使用默认标题栏
+    title: title,
     width: 440,
     height: 680,
     adaptiveHeight: true,
     anchorTop: false,
-    showCloseButton: false,
     dialogInteractiveNotifier: interactiveNotifier,
     content: _ExportDialogContent(
       books: books,
@@ -432,78 +440,38 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    return PopScope(
-      canPop: !_isExporting,
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // 自定义标题栏
-            _buildTitleBar(colorScheme),
-            // 内容区域
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // 导出信息
-                  _buildInfoSection(colorScheme),
-                  const SizedBox(height: 20),
-                  // 导出格式选择
-                  _buildFormatSelector(colorScheme),
-                  // 导出方式选项（单条导出时不显示）
-                  if (!_isSingleItem) ...[const SizedBox(height: 20), _buildMergeOption(colorScheme)],
-                  // 导出目录选择（移动端经系统保存框选定位置，无需预先选择）
-                  if (!_isMobile) ...[const SizedBox(height: 20), _buildDirSelector(colorScheme)],
-                  // 进度条
-                  if (_isExporting || _progress > 0) ...[
-                    const SizedBox(height: 20),
-                    _buildProgressSection(colorScheme),
-                  ],
-                  // 错误信息
-                  if (_errorMessage != null) ...[const SizedBox(height: 12), _buildErrorBox(colorScheme)],
-                  const SizedBox(height: 20),
-                  // 底部按钮
-                  _buildButtonRow(),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 构建标题栏
-  Widget _buildTitleBar(ColorScheme colorScheme) {
-    final title = switch (widget.mode) {
-      ExportMode.book => '导出书籍',
-      ExportMode.volume => '导出分卷',
-      ExportMode.chapter => '导出章节',
-      ExportMode.settingGroup => '导出分组',
-      ExportMode.setting => _isSingleSetting ? '导出设定项' : '导出设定项',
-    };
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 12, 0),
-      child: Row(
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: Text(title, style: context.titleLarge?.copyWith(fontWeight: FontWeight.w600)),
-          ),
-          IconButton(
-            icon: Icon(
-              Icons.close,
-              size: 20,
-              color: _isExporting ? colorScheme.onSurface.withValues(alpha: 0.3) : null,
+          // 内容区域
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // 导出信息
+                _buildInfoSection(colorScheme),
+                const SizedBox(height: 20),
+                // 导出格式选择
+                _buildFormatSelector(colorScheme),
+                // 导出方式选项（单条导出时不显示）
+                if (!_isSingleItem) ...[const SizedBox(height: 20), _buildMergeOption(colorScheme)],
+                // 导出目录选择（移动端经系统保存框选定位置，无需预先选择）
+                if (!_isMobile) ...[const SizedBox(height: 20), _buildDirSelector(colorScheme)],
+                // 进度条
+                if (_isExporting || _progress > 0) ...[
+                  const SizedBox(height: 20),
+                  _buildProgressSection(colorScheme),
+                ],
+                // 错误信息
+                if (_errorMessage != null) ...[const SizedBox(height: 12), _buildErrorBox(colorScheme)],
+                const SizedBox(height: 20),
+                // 底部按钮
+                _buildButtonRow(),
+              ],
             ),
-            onPressed: _isExporting ? null : () => Navigator.of(context).pop(),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-            color: colorScheme.onSurfaceVariant,
-            hoverColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.08),
-            highlightColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.12),
           ),
         ],
       ),

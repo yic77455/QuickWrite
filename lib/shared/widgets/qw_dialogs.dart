@@ -20,20 +20,28 @@ const double _dialogVerticalMargin = 24;
 /// 输入法顶部距弹窗底部不足该间距时即视为过于接近，弹窗需上移避让以保证底部按钮可见
 const double _keyboardDialogGap = 16;
 
-/// 标题栏同时带图标与副标题时关闭按钮的图标尺寸
+/// 普通标题栏关闭按钮的图标尺寸
 ///
-/// 该结构下标题区域纵向较高，放大图标使关闭按钮与标题在视觉上更平衡
-const double _richHeaderCloseIconSize = 22;
+/// 普通标题栏只有一行标题，使用小号关闭按钮保持标题栏紧凑
+const double _closeIconSize = 20;
 
-/// 标题栏同时带图标与副标题时关闭按钮的内边距
+/// 普通标题栏关闭按钮的内边距
 ///
-/// 用于扩大按钮的点击区域，让放大后的关闭按钮更易点中
-const EdgeInsets _richHeaderClosePadding = EdgeInsets.all(6);
+/// 为水波纹留出少量空间，避免悬浮与点击外轮廓紧贴图标
+const EdgeInsets _closePadding = EdgeInsets.all(2);
 
-/// 标题栏同时带图标与副标题时关闭按钮的上移距离
+/// 含图标或副标题的标题栏关闭按钮的图标尺寸
+///
+/// 该结构下标题区域纵向较高，使用大号关闭按钮与标题保持视觉平衡
+const double _largeCloseIconSize = 22;
+
+/// 含图标或副标题的标题栏关闭按钮的内边距
+const EdgeInsets _largeClosePadding = EdgeInsets.all(3);
+
+/// 标题栏带副标题时关闭按钮的上移距离
 ///
 /// 关闭按钮默认纵向居中，会偏向副标题一侧，上移后与标题首行对齐
-const double _richHeaderCloseRise = 6;
+const double _subtitleCloseRise = 6;
 
 /// 通用弹窗外壳
 ///
@@ -96,6 +104,43 @@ Future<T?> showDialogBase<T>({
       dialogInteractiveNotifier: dialogInteractiveNotifier,
     ),
   );
+}
+
+/// 弹窗标题栏关闭按钮
+///
+/// 统一关闭按钮的图标尺寸、点击区域与水波纹样式，
+/// 供统一弹窗和自绘标题栏的弹窗复用，保证各处外观一致
+class DialogCloseButton extends StatelessWidget {
+  /// 点击回调，为空时按钮呈禁用状态
+  final VoidCallback? onPressed;
+
+  /// 是否使用大号尺寸
+  ///
+  /// 标题栏带图标或副标题时纵向较高，使用大号关闭按钮与标题保持平衡
+  final bool large;
+
+  const DialogCloseButton({super.key, this.onPressed, this.large = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme colorScheme = Theme.of(context).colorScheme;
+
+    return IconButton(
+      icon: Icon(
+        Icons.close,
+        size: large ? _largeCloseIconSize : _closeIconSize,
+        // 禁用时降低图标不透明度，与可点击状态形成区分
+        color: onPressed == null
+            ? colorScheme.onSurfaceVariant.withValues(alpha: 0.3)
+            : colorScheme.onSurfaceVariant,
+      ),
+      onPressed: onPressed,
+      padding: large ? _largeClosePadding : _closePadding,
+      constraints: const BoxConstraints(),
+      hoverColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.08),
+      highlightColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.12),
+    );
+  }
 }
 
 /// 可拖拽弹窗组件
@@ -252,14 +297,22 @@ class _DraggableDialogState extends State<_DraggableDialog> {
     return notifier == null || notifier.value;
   }
 
-  /// 标题栏是否同时带图标与副标题
+  /// 标题栏是否带副标题
   ///
-  /// 该结构下标题区域纵向较高，关闭按钮需要放大并上移以保持视觉平衡
-  bool get _hasRichTitleHeader => widget.titleIcon != null && widget.subtitle != null;
+  /// 带副标题时标题区域纵向较高，关闭按钮需要上移与标题首行对齐
+  bool get _hasSubtitle => widget.subtitle != null;
+
+  /// 标题栏是否使用大号关闭按钮
+  ///
+  /// 带图标或副标题时标题区域纵向较高，使用大号关闭按钮保持视觉平衡；
+  /// 只有一行纯文字的标题栏保持小号关闭按钮，避免标题栏被撑高
+  bool get _hasLargeCloseButton => widget.titleIcon != null || widget.subtitle != null;
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    // 当前弹窗是否允许交互：操作进行中（如导入/导出）时禁用关闭按钮，避免任务被中断
+    final bool interactive = widget.dialogInteractiveNotifier?.value ?? true;
     // 仅最顶层的弹窗参与输入法避让；被其他弹窗覆盖的后台弹窗应保持静止，不随输入法移动或收窄
     final bool isTopmost = ModalRoute.of(context)?.isCurrent ?? true;
     // 读取输入法高度既用于计算避让，也使输入法弹出/收起时本组件重建，及时更新避让偏移
@@ -347,17 +400,12 @@ class _DraggableDialogState extends State<_DraggableDialog> {
                     ),
                   ),
                   if (widget.showCloseButton)
-                    // 带图标与副标题的标题栏较高，关闭按钮放大并上移，与标题首行对齐
+                    // 带副标题的标题栏较高，关闭按钮上移与标题首行对齐
                     Transform.translate(
-                      offset: Offset(0, _hasRichTitleHeader ? -_richHeaderCloseRise : 0),
-                      child: IconButton(
-                        icon: Icon(Icons.close, size: _hasRichTitleHeader ? _richHeaderCloseIconSize : 20),
-                        onPressed: () => Navigator.of(context).pop(),
-                        padding: _hasRichTitleHeader ? _richHeaderClosePadding : EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                        color: colorScheme.onSurfaceVariant,
-                        hoverColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.08),
-                        highlightColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.12),
+                      offset: Offset(0, _hasSubtitle ? -_subtitleCloseRise : 0),
+                      child: DialogCloseButton(
+                        large: _hasLargeCloseButton,
+                        onPressed: interactive ? () => Navigator.of(context).pop() : null,
                       ),
                     ),
                 ],
@@ -367,13 +415,11 @@ class _DraggableDialogState extends State<_DraggableDialog> {
           if (widget.title.isEmpty && widget.showCloseButton)
             Align(
               alignment: Alignment.topRight,
+              // 外层留白扣掉按钮自身内边距，保持图标距边缘的位置不变
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(0, 12, 12, 0),
-                child: IconButton(
-                  icon: const Icon(Icons.close, size: 20),
+                padding: const EdgeInsets.fromLTRB(0, 10, 10, 0),
+                child: DialogCloseButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
                 ),
               ),
             ),

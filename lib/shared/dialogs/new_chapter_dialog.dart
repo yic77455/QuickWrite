@@ -286,12 +286,8 @@ class _NewChapterDialogContentState extends State<_NewChapterDialogContent>
             ),
           ),
         ),
-        IconButton(
-          icon: const Icon(Icons.close, size: 20),
-          onPressed: () => Navigator.of(context).pop(),
-          padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(),
-        ),
+        // 复用统一弹窗的关闭按钮
+        DialogCloseButton(onPressed: () => Navigator.of(context).pop()),
       ],
     );
   }
