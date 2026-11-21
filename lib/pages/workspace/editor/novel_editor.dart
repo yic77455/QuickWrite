@@ -24,6 +24,7 @@ import 'package:quick_write/core/utils/persistent_selection.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/re_editor_span_builder.dart';
 import 'package:quick_write/pages/workspace/editor/utils/re_editor_indent_policy.dart';
+import 'package:quick_write/pages/workspace/editor/utils/text_replacement_policy.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_keyword_hover_card.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/re_editor_ime_reporter.dart';
 import 'package:quick_write/shared/widgets/context_menu.dart';
@@ -111,6 +112,15 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
           if (symbol.isPairStart) CodeSymbolPair(symbol.symbol, symbol.closing!),
       ];
 
+  /// 编辑器当前生效的自动替换规则
+  ///
+  /// 由设置中的规则列表推导，规则增删改或开关切换后随设置监听重建即时生效。
+  static List<CodeTextReplacement> get _textReplacements => [
+        for (final rule in SettingsService.instance.textReplacementRules)
+          if (rule.enabled && rule.trigger.isNotEmpty && rule.replacement.isNotEmpty)
+            CodeTextReplacement(rule.trigger, rule.replacement),
+      ];
+
   /// 程序化文本改写的抑制深度
   ///
   /// 备份恢复、段落整理等场景在改写全文期间递增该计数，
@@ -138,6 +148,9 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
 
   /// 段落缩进策略
   late final ReEditorIndentPolicy _indentPolicy;
+
+  /// 正文自动替换策略
+  late final TextReplacementPolicy _replacementPolicy;
 
   /// 焦点节点
   final FocusNode _focusNode = FocusNode();
@@ -347,6 +360,7 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     _codeScrollController = CodeScrollController(verticalScroller: _scrollController);
     _scrollGuard = EditorScrollGuard(_scrollController);
     _indentPolicy = ReEditorIndentPolicy(controller: widget.controller);
+    _replacementPolicy = TextReplacementPolicy(controller: widget.controller);
     _toolbarController = PlatformCapabilities.isMobile
         ? MobileSelectionToolbarController(builder: _buildMobileSelectionToolbar)
         : _EditorToolbarController(onShowMenu: _showContextMenuAt);
@@ -1166,19 +1180,28 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 插入会替换当前选区，插入后光标定位到片段内的 [caretOffsetInText] 处
   /// （为空时落在片段末尾），用于插入成对符号并把光标置于两条符号之间；
   /// 该替换按键盘输入计入编辑事件。
+  /// 插入后若光标前文本凑成某条自动替换规则的原文本，插入内容会被一并改写。
   void insertText(String text, {int? caretOffsetInText}) {
     if (widget.readOnly || text.isEmpty) return;
     final String currentText = widget.controller.text;
     final TextSelection flatSelection = CodeLineSelectionUtils.flatSelectionOf(currentText, widget.controller.selection);
     final int insertOffset = flatSelection.start;
+    bool replaced = false;
     _runEdit(NovelEditType.keyboard, () {
       widget.controller.replaceSelection(text);
+      // 成对符号需要把光标置于符号之间，不参与自动替换
+      if (caretOffsetInText == null) {
+        replaced = _replacementPolicy.applyIfMatched();
+      }
     });
-    final String updatedText = widget.controller.text;
-    widget.controller.selection = CodeLineSelectionUtils.collapsedSelection(
-      updatedText,
-      (insertOffset + (caretOffsetInText ?? text.length)).clamp(0, updatedText.length),
-    );
+    // 发生自动替换时，光标已由替换操作定位到替换文本之后
+    if (!replaced) {
+      final String updatedText = widget.controller.text;
+      widget.controller.selection = CodeLineSelectionUtils.collapsedSelection(
+        updatedText,
+        (insertOffset + (caretOffsetInText ?? text.length)).clamp(0, updatedText.length),
+      );
+    }
     widget.controller.makeCursorCenterIfInvisible();
   }
 
@@ -1856,6 +1879,8 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
               autocompleteSymbols: PlatformCapabilities.isMobile &&
                   SettingsService.instance.punctuationAutoCompleteEnabled,
               autocompletePairs: _punctuationPairs,
+              // 输入命中替换规则时直接把原文本改写为替换文本
+              textReplacements: _textReplacements,
               // 移动端软键盘换行交由段落缩进策略处理，与桌面端回车共用补空行与首行缩进规则；
               // 只读编辑器与桌面端不接管，沿用编辑器默认换行
               onNewLine: PlatformCapabilities.isMobile && !widget.readOnly

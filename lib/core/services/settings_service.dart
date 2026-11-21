@@ -8,6 +8,7 @@ import 'package:quick_write/core/constants/quick_input_action.dart';
 import 'package:quick_write/core/constants/word_count_floating_mode.dart';
 import 'package:quick_write/core/models/app_settings.dart';
 import 'package:quick_write/core/models/quick_phrase.dart';
+import 'package:quick_write/core/models/text_replacement_rule.dart';
 import 'package:quick_write/core/theme/custom_theme.dart';
 import 'package:quick_write/core/theme/theme_store.dart';
 import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
@@ -684,6 +685,9 @@ class SettingsService extends ChangeNotifier {
   /// 获取快捷短语列表
   List<QuickPhrase> get quickPhrases => _settings.quickPhrases;
 
+  /// 获取正文自动替换规则
+  List<TextReplacementRule> get textReplacementRules => _settings.textReplacementRules;
+
   /// 获取快捷输入栏符号列表的可编辑文本
   /// 用户未自定义时返回内置默认列表格式化后的文本
   String get quickInputSymbolsText =>
@@ -953,6 +957,12 @@ class SettingsService extends ChangeNotifier {
     return updateSettings(newSettings);
   }
 
+  /// 更新正文自动替换规则
+  Future<bool> updateTextReplacementRules(List<TextReplacementRule> rules) async {
+    final newSettings = _settings.copyWith(textReplacementRules: rules);
+    return updateSettings(newSettings);
+  }
+
   /// 更新字数浮窗开关
   Future<bool> updateWordCountFloatingEnabled(bool value) async {
     final newSettings = _settings.copyWith(wordCountFloatingEnabled: value);
@@ -1080,6 +1090,7 @@ class SettingsService extends ChangeNotifier {
       quickInputBarRightAction: AppSettings.defaults.quickInputBarRightAction,
       quickInputSymbolsText: AppSettings.defaults.quickInputSymbolsText,
       quickPhrases: AppSettings.defaults.quickPhrases,
+      textReplacementRules: AppSettings.defaults.textReplacementRules,
       wordCountFloatingEnabled: AppSettings.defaults.wordCountFloatingEnabled,
       wordCountFloatingPosition: AppSettings.defaults.wordCountFloatingPosition,
       wordCountFloatingSpeedEnabled: AppSettings.defaults.wordCountFloatingSpeedEnabled,

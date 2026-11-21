@@ -456,7 +456,7 @@ class _QuickPhraseEditContentState extends State<_QuickPhraseEditContent> {
         },
         decoration: _fieldDecoration(
           context,
-          hintText: '列表中显示的简短名称，例如：快码字',
+          hintText: '列表中显示的简短名称',
           colorScheme: colorScheme,
         ),
       ),

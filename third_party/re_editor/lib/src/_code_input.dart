@@ -10,6 +10,9 @@ class _CodeInputController extends ChangeNotifier implements DeltaTextInputClien
   /// 自动补全使用的成对符号，为空时沿用内置符号表
   List<CodeSymbolPair>? _autocompletePairs;
 
+  /// 输入自动替换规则，为空时不做替换
+  List<CodeTextReplacement>? _textReplacements;
+
   /// 外部换行处理，为空时使用控制器默认换行
   VoidCallback? _newLineHandler;
 
@@ -31,6 +34,7 @@ class _CodeInputController extends ChangeNotifier implements DeltaTextInputClien
     required bool readOnly,
     required bool autocompleteSymbols,
     List<CodeSymbolPair>? autocompletePairs,
+    List<CodeTextReplacement>? textReplacements,
     VoidCallback? newLineHandler,
   }) : _controller = controller,
     _floatingCursorController = floatingCursorController,
@@ -39,6 +43,7 @@ class _CodeInputController extends ChangeNotifier implements DeltaTextInputClien
     _updateCausedByFloatingCursor = false,
     _autocompleteSymbols = autocompleteSymbols,
     _autocompletePairs = autocompletePairs,
+    _textReplacements = textReplacements,
     _newLineHandler = newLineHandler {
     _controller.addListener(_onCodeEditingChanged);
     _focusNode.addListener(_onFocusChanged);
@@ -86,6 +91,13 @@ class _CodeInputController extends ChangeNotifier implements DeltaTextInputClien
       return;
     }
     _autocompletePairs = value;
+  }
+
+  set textReplacements(List<CodeTextReplacement>? value) {
+    if (listEquals(_textReplacements, value)) {
+      return;
+    }
+    _textReplacements = value;
   }
 
   set newLineHandler(VoidCallback? value) {
@@ -201,6 +213,12 @@ class _CodeInputController extends ChangeNotifier implements DeltaTextInputClien
       }
       newValue = _applyDelta(newValue, appliedDelta);
     }
+    // 输入内容以规则原文本结尾时改写为替换文本，与本次输入合并为一次编辑
+    final TextEditingValue replacedValue = _applyTextReplacements(newValue);
+    if (replacedValue != newValue) {
+      newValue = replacedValue;
+      smartChange = true;
+    }
     if (newValue == _remoteEditingValue) {
       return;
     }
@@ -264,6 +282,38 @@ class _CodeInputController extends ChangeNotifier implements DeltaTextInputClien
       }
     }
     return delta.apply(value);
+  }
+
+  /// 按自动替换规则改写待提交的输入内容
+  ///
+  /// 光标前恰好以某条规则的原文本结尾时，把这段原文本替换为规则指定的内容，
+  /// 光标随之落在替换文本之后；多条规则同时命中时取原文本最长的一条。
+  TextEditingValue _applyTextReplacements(TextEditingValue value) {
+    final List<CodeTextReplacement>? rules = _textReplacements;
+    if (rules == null || rules.isEmpty) return value;
+    if (!value.selection.isValid || !value.selection.isCollapsed) return value;
+
+    final int caret = value.selection.start;
+    int matchedLength = 0;
+    String? matchedReplacement;
+    for (final CodeTextReplacement rule in rules) {
+      final String trigger = rule.trigger;
+      if (trigger.isEmpty || trigger.length > caret) continue;
+      // 已有更长的规则命中时，短规则不再覆盖
+      if (trigger.length <= matchedLength) continue;
+      if (!value.text.startsWith(trigger, caret - trigger.length)) continue;
+      if (rule.replacement == trigger) continue;
+      matchedLength = trigger.length;
+      matchedReplacement = rule.replacement;
+    }
+    if (matchedReplacement == null) return value;
+
+    final int start = caret - matchedLength;
+    return value.copyWith(
+      text: value.text.replaceRange(start, caret, matchedReplacement),
+      selection: TextSelection.collapsed(offset: start + matchedReplacement.length),
+      composing: TextRange.empty,
+    );
   }
 
   /// 处理光标越过镜像两端零宽哨兵的选区变更

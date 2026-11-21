@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/constants/word_count_floating_mode.dart';
 import 'package:quick_write/core/models/quick_phrase.dart';
+import 'package:quick_write/core/models/text_replacement_rule.dart';
 
 /// 应用全局设置模型类
 /// 
@@ -260,6 +261,11 @@ class AppSettings {
   /// 每条短语包含点击后键入正文的内容与列表中的显示文本
   final List<QuickPhrase> quickPhrases;
 
+  /// 正文自动替换规则
+  ///
+  /// 每条规则包含输入的原文本与替换后的文本，输入原文本结束时自动改写
+  final List<TextReplacementRule> textReplacementRules;
+
   // ================= 字数浮窗设置（移动端）=================
 
   /// 是否启用字数浮窗
@@ -394,6 +400,7 @@ class AppSettings {
     this.quickInputBarRightAction = 'settings', // 快捷输入栏右侧操作区右侧图标
     this.quickInputSymbolsText, // 快捷输入栏自定义符号列表（null 表示使用默认列表）
     this.quickPhrases = const [], // 快捷短语列表（移动端）
+    this.textReplacementRules = const [], // 正文自动替换规则
     // 字数浮窗设置（移动端）
     this.wordCountFloatingEnabled = false, // 是否启用字数浮窗
     this.wordCountFloatingPosition = 'topRight', // 字数浮窗显示位置（默认右上）
@@ -431,6 +438,7 @@ class AppSettings {
     final autoBackupJson = editorJson['autoBackup'] as Map<String, dynamic>? ?? {};
     final wordCountFloatingJson = editorJson['wordCountFloating'] as Map<String, dynamic>? ?? {};
     final writingStatsJson = editorJson['writingStats'] as Map<String, dynamic>? ?? {};
+    final textReplacementJson = editorJson['textReplacement'] as Map<String, dynamic>? ?? {};
 
     return AppSettings(
       // 主题设置（全局）
@@ -521,6 +529,9 @@ class AppSettings {
       quickInputSymbolsText: autoBackupJson['quickInputSymbolsText'] as String?,
       quickPhrases: _parseQuickPhrases(autoBackupJson['quickPhrases']),
 
+      // 正文自动替换规则（编辑器）
+      textReplacementRules: _parseTextReplacementRules(textReplacementJson['rules']),
+
       // 字数浮窗设置（编辑器）
       wordCountFloatingEnabled: wordCountFloatingJson['enabled'] as bool? ?? defaults.wordCountFloatingEnabled,
       wordCountFloatingPosition: wordCountFloatingJson['position'] as String? ?? defaults.wordCountFloatingPosition,
@@ -543,6 +554,19 @@ class AppSettings {
         .whereType<Map>()
         .map((item) => QuickPhrase.fromJson(Map<String, dynamic>.from(item)))
         .where((phrase) => phrase.content.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  /// 解析正文自动替换规则
+  ///
+  /// 配置文件中该字段缺失或格式异常时返回空列表，
+  /// 忽略原文本或替换文本为空的条目
+  static List<TextReplacementRule> _parseTextReplacementRules(Object? raw) {
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map((item) => TextReplacementRule.fromJson(Map<String, dynamic>.from(item)))
+        .where((rule) => rule.trigger.isNotEmpty && rule.replacement.isNotEmpty)
         .toList(growable: false);
   }
 
@@ -661,6 +685,10 @@ class AppSettings {
           'speedEnabled': wordCountFloatingSpeedEnabled,
           'mode': wordCountFloatingMode.id,
         },
+        // 正文自动替换规则
+        'textReplacement': {
+          'rules': textReplacementRules.map((rule) => rule.toJson()).toList(growable: false),
+        },
         // 码字统计设置
         'writingStats': {
           'includePasteWords': statsIncludePasteWords,
@@ -761,6 +789,8 @@ class AppSettings {
     Object? quickInputSymbolsText = _unset,
     // 快捷短语列表（移动端）
     List<QuickPhrase>? quickPhrases,
+    // 正文自动替换规则
+    List<TextReplacementRule>? textReplacementRules,
     // 字数浮窗设置（移动端）
     bool? wordCountFloatingEnabled,
     String? wordCountFloatingPosition,
@@ -852,6 +882,8 @@ class AppSettings {
       quickInputSymbolsText: quickInputSymbolsText == _unset ? this.quickInputSymbolsText : quickInputSymbolsText as String?,
       // 快捷短语列表
       quickPhrases: quickPhrases ?? this.quickPhrases,
+      // 正文自动替换规则
+      textReplacementRules: textReplacementRules ?? this.textReplacementRules,
       // 字数浮窗设置（移动端）
       wordCountFloatingEnabled: wordCountFloatingEnabled ?? this.wordCountFloatingEnabled,
       wordCountFloatingPosition: wordCountFloatingPosition ?? this.wordCountFloatingPosition,
@@ -977,6 +1009,8 @@ class AppSettings {
            other.quickInputSymbolsText == quickInputSymbolsText &&
            // 快捷短语列表
            listEquals(other.quickPhrases, quickPhrases) &&
+           // 正文自动替换规则
+           listEquals(other.textReplacementRules, textReplacementRules) &&
            // 字数浮窗设置（移动端）
            other.wordCountFloatingEnabled == wordCountFloatingEnabled &&
            other.wordCountFloatingPosition == wordCountFloatingPosition &&
@@ -1083,6 +1117,7 @@ class AppSettings {
         quickInputBarRightAction,
         quickInputSymbolsText,
         Object.hashAll(quickPhrases),
+        Object.hashAll(textReplacementRules),
         wordCountFloatingEnabled,
         wordCountFloatingPosition,
         wordCountFloatingSpeedEnabled,

@@ -7,6 +7,7 @@ import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/shared/widgets/qw_dropdown.dart';
 import '../widgets/right_sidebar_widgets.dart';
+import '../widgets/auto_replace_dialog.dart';
 import '../widgets/quick_input_symbols_dialog.dart';
 import '../widgets/shortcut_dialog.dart';
 
@@ -331,6 +332,8 @@ class _OtherPanelState extends State<OtherPanel> {
   ///
   /// 管理正文输入过程中的行为习惯
   Widget _buildInputHabitSection(BuildContext context, bool pairedSymbolEnterJumpEnabled) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return SettingsSection(
       title: '输入习惯',
       icon: Icons.keyboard_alt_outlined,
@@ -343,6 +346,14 @@ class _OtherPanelState extends State<OtherPanel> {
             SettingsService.instance.updatePairedSymbolEnterJumpEnabled(value);
             setState(() {});
           },
+        ),
+        // 自动替换规则配置入口
+        InkWellSettingItem(
+          icon: Icons.repeat_rounded,
+          label: '自动替换',
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 15),
+          trailing: Icon(Icons.chevron_right_rounded, size: 18, color: colorScheme.onSurfaceVariant),
+          onTap: () => showAutoReplaceRulesDialog(context: context),
         ),
       ],
     );
@@ -357,7 +368,7 @@ class _OtherPanelState extends State<OtherPanel> {
   ///
   /// 管理键盘上方的快捷输入栏、标点自动补全与成对符号回车跳出，
   /// 并支持自定义快捷输入栏右侧操作区两个图标的种类与左右顺序（可选「无」隐藏），
-  /// 以及编辑快捷输入栏显示的符号列表
+  /// 以及编辑快捷输入栏显示的符号列表与自动替换规则
   Widget _buildQuickInputSection(
     BuildContext context,
     bool quickInputBarEnabled,
@@ -431,6 +442,14 @@ class _OtherPanelState extends State<OtherPanel> {
             SettingsService.instance.updatePairedSymbolEnterJumpEnabled(value);
             setState(() {});
           },
+        ),
+        // 自动替换规则配置入口
+        InkWellSettingItem(
+          icon: Icons.repeat_rounded,
+          label: '自动替换',
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 15),
+          trailing: Icon(Icons.chevron_right_rounded, size: 18, color: colorScheme.onSurfaceVariant),
+          onTap: () => showAutoReplaceRulesDialog(context: context),
         ),
       ],
     );

@@ -238,6 +238,35 @@ class CodeSymbolPair {
 
 }
 
+/// 输入文本的自动替换规则
+///
+/// 用户在编辑器中输入完 [trigger] 时，编辑器把这段原文本改写为 [replacement]。
+/// 例如原文本为「。。。」、替换为「……」时，输入「。。。」会直接写入「……」。
+class CodeTextReplacement {
+
+  /// 需要被替换的原文本
+  final String trigger;
+
+  /// 替换后的文本
+  final String replacement;
+
+  const CodeTextReplacement(this.trigger, this.replacement);
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) {
+      return true;
+    }
+    return other is CodeTextReplacement &&
+        other.trigger == trigger &&
+        other.replacement == replacement;
+  }
+
+  @override
+  int get hashCode => Object.hash(trigger, replacement);
+
+}
+
 /// Creates a code editor.
 ///
 /// You can freely define the styles of the editor, such as text style,
@@ -295,6 +324,7 @@ class CodeEditor extends StatefulWidget {
     this.wordWrap,
     this.autocompleteSymbols,
     this.autocompletePairs,
+    this.textReplacements,
     this.onNewLine,
     this.onMobileTapIntercept,
     this.autofocus,
@@ -422,6 +452,13 @@ class CodeEditor extends StatefulWidget {
   /// 未列出的符号（如 ASCII 引号）按普通字符输入；为空时沿用内置符号表。
   final List<CodeSymbolPair>? autocompletePairs;
 
+  /// 输入自动替换规则
+  ///
+  /// 输入的内容与某条规则的原文本结尾一致时，编辑器直接把这段原文本替换为
+  /// 规则指定的替换文本，替换与本次输入在同一次编辑中完成。
+  /// 为空时不做任何替换。
+  final List<CodeTextReplacement>? textReplacements;
+
   /// 换行处理回调
   ///
   /// 移动端软键盘的换行不经过快捷键机制，非空时换行由此回调接管，
@@ -506,6 +543,7 @@ class _CodeEditorState extends State<CodeEditor> {
       readOnly: widget.readOnly ?? false,
       autocompleteSymbols: widget.autocompleteSymbols ?? true,
       autocompletePairs: widget.autocompletePairs,
+      textReplacements: widget.textReplacements,
       newLineHandler: widget.onNewLine,
     );
     _inputController.bindEditor(_editorKey);
@@ -621,6 +659,9 @@ class _CodeEditorState extends State<CodeEditor> {
     }
     if (!listEquals(oldWidget.autocompletePairs, widget.autocompletePairs)) {
       _inputController.autocompletePairs = widget.autocompletePairs;
+    }
+    if (!listEquals(oldWidget.textReplacements, widget.textReplacements)) {
+      _inputController.textReplacements = widget.textReplacements;
     }
     if (oldWidget.onNewLine != widget.onNewLine) {
       _inputController.newLineHandler = widget.onNewLine;
