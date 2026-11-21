@@ -100,11 +100,11 @@ class _WordCountFloatingWindowState extends State<WordCountFloatingWindow> {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         // 半透明底色，保留正文可见
         color: colorScheme.surface.withValues(alpha: _backgroundOpacity),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(color: colorScheme.outlineVariant.withValues(alpha: 0.6)),
         boxShadow: [
           BoxShadow(

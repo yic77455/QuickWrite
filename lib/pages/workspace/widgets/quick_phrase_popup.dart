@@ -8,13 +8,16 @@ import 'package:re_editor/re_editor.dart';
 const double _screenMargin = 8;
 
 /// 浮层与图标之间的间距
-const double _anchorGap = 6;
+const double _anchorGap = 4;
 
 /// 浮层宽度
 const double _popupWidth = 200;
 
 /// 浮层内容的最大高度，短语较多时列表在内部滚动
 const double _maxPopupHeight = 320;
+
+/// 浮层内容的最小高度，空状态时保持稳定的浮层高度
+const double _minPopupHeight = 180;
 
 /// 快捷短语浮层
 ///
@@ -68,15 +71,32 @@ class _QuickPhrasePopupState extends State<QuickPhrasePopup> {
     final double topLimit = MediaQuery.paddingOf(context).top + _screenMargin;
 
     // 浮层宽度在窄屏上收窄，避免左右两侧贴边
-    final double width = math.min(_popupWidth, screenSize.width - _screenMargin * 2);
+    final double width = math.min(
+      _popupWidth,
+      screenSize.width - _screenMargin * 2,
+    );
     // 右边缘与图标右边缘对齐，空间不足时向左收敛到屏幕留白内
-    final double maxLeft = math.max(_screenMargin, screenSize.width - width - _screenMargin);
-    final double left = (widget.anchorRect.right - width).clamp(_screenMargin, maxLeft).toDouble();
+    final double maxLeft = math.max(
+      _screenMargin,
+      screenSize.width - width - _screenMargin,
+    );
+    final double left = (widget.anchorRect.right - width)
+        .clamp(_screenMargin, maxLeft)
+        .toDouble();
     // 底部对齐图标顶部上方，高度由内容决定
-    final double bottom = screenSize.height - widget.anchorRect.top + _anchorGap;
+    final double bottom =
+        screenSize.height - widget.anchorRect.top + _anchorGap;
     // 浮层向上伸展，最多占用到状态栏下方的可用高度
-    final double availableHeight = widget.anchorRect.top - _anchorGap - topLimit;
-    final double maxHeight = math.max(0.0, math.min(availableHeight, _maxPopupHeight));
+    final double availableHeight =
+        widget.anchorRect.top - _anchorGap - topLimit;
+    final double maxHeight = math.max(
+      0.0,
+      math.min(availableHeight, _maxPopupHeight),
+    );
+    // 空状态固定为最小高度，有短语时高度随列表内容增长
+    final BoxConstraints contentConstraints = widget.phrases.isEmpty
+        ? BoxConstraints.tightFor(height: math.min(_minPopupHeight, maxHeight))
+        : BoxConstraints(maxHeight: maxHeight);
 
     // 整个浮层纳入编辑器的点击区域组，点击遮罩关闭浮层时编辑器不失焦
     return CodeEditorTapRegion(
@@ -119,18 +139,41 @@ class _QuickPhrasePopupState extends State<QuickPhrasePopup> {
                   clipBehavior: Clip.antiAlias,
                   color: colorScheme.surfaceContainerHigh,
                   child: ConstrainedBox(
-                    constraints: BoxConstraints(maxHeight: maxHeight),
+                    constraints: contentConstraints,
                     child: Column(
-                      mainAxisSize: MainAxisSize.min,
+                      mainAxisSize: widget.phrases.isEmpty
+                          ? MainAxisSize.max
+                          : MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         if (widget.phrases.isEmpty)
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
-                            child: Text(
-                              '还没有快捷短语',
-                              style: context.bodySmall?.copyWith(
-                                color: colorScheme.onSurfaceVariant,
+                          // 空状态提示在分隔线上方的内容区居中
+                          Expanded(
+                            child: Center(
+                              // 图标与提示语整体下移 4px，视觉上更居中
+                              child: Transform.translate(
+                                offset: const Offset(0, 4),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    // 空状态图标，弱化显示避免抢眼
+                                    Icon(
+                                      Icons.quickreply_rounded,
+                                      size: 32,
+                                      color: colorScheme.onSurfaceVariant
+                                          .withValues(alpha: 0.4),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      '还没有快捷短语',
+                                      textAlign: TextAlign.center,
+                                      style: context.bodySmall?.copyWith(
+                                        color: colorScheme.onSurfaceVariant
+                                            .withValues(alpha: 0.6),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           )
@@ -149,7 +192,9 @@ class _QuickPhrasePopupState extends State<QuickPhrasePopup> {
                                 child: ListView.builder(
                                   controller: _scrollController,
                                   shrinkWrap: true,
-                                  padding: const EdgeInsets.symmetric(vertical: 6),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 6,
+                                  ),
                                   itemCount: widget.phrases.length,
                                   itemBuilder: (context, index) {
                                     final phrase = widget.phrases[index];
@@ -163,20 +208,8 @@ class _QuickPhrasePopupState extends State<QuickPhrasePopup> {
                               ),
                             ),
                           ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-                          child: Divider(height: 1, color: colorScheme.outlineVariant),
-                        ),
-                        // 短语编辑入口固定在列表底部
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 2),
-                          child: _PopupTile(
-                            icon: Icons.edit_outlined,
-                            label: '编辑短语',
-                            trailingChevron: true,
-                            onTap: widget.onEdit,
-                          ),
-                        ),
+                        // 短语编辑入口固定在内容底部
+                        _buildEditEntry(colorScheme),
                       ],
                     ),
                   ),
@@ -186,6 +219,29 @@ class _QuickPhrasePopupState extends State<QuickPhrasePopup> {
           ),
         ],
       ),
+    );
+  }
+
+  /// 构建浮层底部的短语编辑入口（分割线 + 菜单项）
+  Widget _buildEditEntry(ColorScheme colorScheme) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+          child: Divider(height: 1, color: colorScheme.outlineVariant),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: _PopupTile(
+            icon: Icons.edit_outlined,
+            label: '编辑短语',
+            trailingChevron: true,
+            onTap: widget.onEdit,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -232,7 +288,9 @@ class _PopupTile extends StatelessWidget {
                   label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: context.bodyMedium?.copyWith(color: colorScheme.onSurface),
+                  style: context.bodyMedium?.copyWith(
+                    color: colorScheme.onSurface,
+                  ),
                 ),
               ),
               if (trailingChevron) ...[

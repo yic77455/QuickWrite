@@ -396,7 +396,7 @@ class _OtherPanelState extends State<OtherPanel> {
         if (quickInputBarEnabled) ...[
           // 符号列表编辑入口
           InkWellSettingItem(
-            icon: Icons.text_fields_outlined,
+            icon: Icons.format_quote_rounded,
             label: '符号列表',
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 15),
             trailing: Icon(Icons.chevron_right_rounded, size: 18, color: colorScheme.onSurfaceVariant),

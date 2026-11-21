@@ -14,7 +14,7 @@ Future<void> showQuickInputSymbolsDialog({required BuildContext context}) async 
     context: context,
     title: '编辑符号列表',
     subtitle: "一行一个符号，用单引号包裹；成对符号形如 '（', closing: '）'",
-    titleIcon: Icons.text_fields_rounded,
+    titleIcon: Icons.format_quote_rounded,
     width: 520,
     height: 620,
     content: const _QuickInputSymbolsContent(),
