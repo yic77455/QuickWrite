@@ -695,7 +695,7 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
   /// 指定位置所在可见行顶部在滚动内容坐标系中的偏移
   ///
   /// 正文自动换行时一个逻辑行会排成多个视觉行，返回值已计入该位置在逻辑行内的纵向偏移。
-  /// 行排版尚未完成、索引越界或非自适应高度模式时返回 null。
+  /// 行排版尚未完成、索引越界、无法确定所在视觉行或非自适应高度模式时返回 null。
   double? contentTopOfPosition(CodeLinePosition position) {
     final List<double>? tops = _lineTops;
     if (_externalScrollController == null ||
@@ -704,7 +704,11 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
         position.index >= _codes.length) {
       return null;
     }
-    return paddingTop + tops[position.index] + _lineVerticalOffsetOf(position) + _externalContentOffset;
+    final double? lineOffset = _lineVerticalOffsetOf(position);
+    if (lineOffset == null) {
+      return null;
+    }
+    return paddingTop + tops[position.index] + lineOffset + _externalContentOffset;
   }
 
   /// 正文行高（像素）
@@ -960,8 +964,15 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
     // 目标位置换算到外部滚动容器的内容坐标系
     // 正文自动换行时一个逻辑行会排成多个视觉行，逻辑行顶部不等于光标所在视觉行的顶部，
     // 需叠加该位置在逻辑行内的纵向偏移，否则段落后半部分滚出视口时不会被判定为不可见
+    final double? lineOffset = _lineVerticalOffsetOf(position);
+    if (lineOffset == null) {
+      // 段落尚未按最新内容重排，光标所在视觉行无法确定：
+      // 此时按逻辑行行首估算会把长段落误判为不可见并滚动到错误位置，因此延后一帧，待排版更新后重新判断
+      _retryRevealInExternalViewport(position, center: center, animated: animated, tryCount: tryCount);
+      return;
+    }
     final double contentTop =
-        paddingTop + tops[position.index] + _lineVerticalOffsetOf(position) + _externalContentOffset;
+        paddingTop + tops[position.index] + lineOffset + _externalContentOffset;
     final double contentBottom = contentTop + _preferredLineHeight;
     final double viewportTop = scrollPosition.pixels;
     final double viewportBottom = viewportTop + scrollPosition.viewportDimension;
@@ -997,11 +1008,13 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
   ///
   /// 正文自动换行时一个逻辑行会排成多个视觉行，需由排版结果取得位置所在的视觉行；
   /// 优先复用已构建的可见段落，行段落尚未构建时按当前排版宽度现场构建。
-  double _lineVerticalOffsetOf(CodeLinePosition position) {
+  /// 光标偏移超出段落文本长度，说明段落仍是上一版内容的排版，无法确定所在视觉行，返回 null。
+  double? _lineVerticalOffsetOf(CodeLinePosition position) {
     final CodeLineRenderParagraph? visible = findDisplayParagraphByLineIndex(position.index);
     final IParagraph paragraph =
         visible?.paragraph ?? _buildParagraph(position.index, _lineTopsWidth > 0 ? _lineTopsWidth : null);
-    return paragraph.getOffset(position)?.dy ?? 0;
+    if (position.offset > paragraph.length) return null;
+    return paragraph.getOffset(position)?.dy;
   }
 
   /// 下一帧重试让指定位置在外部滚动容器中可见

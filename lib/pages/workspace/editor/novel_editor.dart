@@ -295,10 +295,11 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 使视口定位与内容首次绘制一并生效。
   bool _pendingCursorReveal = false;
 
-  /// 末行与视口底部之间保留的底边距
+  /// 末行下方保留的底边距占视口高度的比例
   ///
-  /// 由布局过程按设置换算（视口高度 × 底边距百分比），供末行对齐使用。
-  double _resolvedBottomPadding = 0;
+  /// 由布局过程按设置记录，供末行对齐时按当前可见视口高度换算安全距离；
+  /// 软键盘压缩视口后安全距离随之收窄，使末行下方的留白占比与设置一致。
+  double _bottomMarginRatio = 0;
 
   /// 滚动内容在纸张下方留出的空白高度
   ///
@@ -1108,7 +1109,7 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
 
   /// 让末行连同其下方的底边距与纸张下留白对齐视口底部
   ///
-  /// 目标偏移取「末行底部 + 编辑区底边距 + 纸张下留白 − 视口高度」：
+  /// 目标偏移取「末行底部 + 安全距离 + 纸张下留白 − 视口高度」：
   /// 末行尚未顶到视口底部时该值小于当前偏移，不产生滚动；
   /// 正文未撑满视口（滚动内容由纸张最小页高撑起）时该值同样不足视口高度，视口不会被推到纸张末尾；
   /// 正文撑满视口后，滚动内容的下边缘即末行下方的这段留白，
@@ -1116,10 +1117,14 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   bool _alignLastLineWithBottomPadding(ScrollPosition position, double minExt, double maxExt) {
     final double? lineBottom = _codeScrollController.contentBottomOfLine(widget.controller.codeLines.length - 1);
     if (lineBottom == null) return false;
-    final double bottomMargin = _resolvedBottomPadding + _resolvedBottomGap;
+    // 安全距离按当前可见视口高度换算，软键盘弹出压缩视口后随之收窄，
+    // 使末行停在视口下方留白占当前视口该比例的位置
+    final double bottomMargin = position.viewportDimension * _bottomMarginRatio + _resolvedBottomGap;
     final double targetOffset = (lineBottom + bottomMargin - position.viewportDimension).clamp(minExt, maxExt);
     if (targetOffset > position.pixels + 0.5) {
       position.correctPixels(targetOffset);
+      // 按修正后的偏移重算可见段落，使本帧构建的行段落与对齐结果一致
+      _codeScrollController.refreshVisibleParagraphs();
       return true;
     }
     return false;
@@ -1628,10 +1633,10 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     final double marginBasisHeight = _resolveMarginBasisHeight(constraints.maxHeight);
     // 顶边距：百分比 × 视口高度，作为章节标题与正文首行之间的间距
     final double topMargin = marginBasisHeight * (settings.topMargin / 100);
-    // 底边距：百分比 × 视口高度，作为末行与纸张底边之间的安全距离
+    // 底边距：百分比 × 视口高度，作为纸张的底部留白，即末行与纸张底边之间的距离
     final double bottomPadding = marginBasisHeight * (settings.bottomMargin / 100);
-    // 记录到实例状态，供布局阶段对齐末行时计算目标滚动偏移
-    _resolvedBottomPadding = bottomPadding;
+    // 记录到实例状态，供布局阶段对齐末行时按当前可见视口换算安全距离
+    _bottomMarginRatio = settings.bottomMargin / 100;
     // 纸张上下与容器之间留出的空白，用于显露纸张轮廓
     final double paperGap = pageViewEnabled ? GlobalConstants.paperTopMargin : 0.0;
     // 记录到实例状态，供布局阶段对齐末行时计算目标滚动偏移

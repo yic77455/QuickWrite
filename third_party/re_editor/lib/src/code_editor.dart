@@ -775,17 +775,23 @@ class _CodeEditorState extends State<CodeEditor> {
 
   /// 处理移动端的键盘按键
   ///
-  /// 移动端不注册退格快捷键，输入法未组词时退格直接作用于编辑控制器，
-  /// 回车交由输入控制器的换行处理；
-  /// 组词过程中的按键交由输入法处理，其余按键交由编辑器的快捷键机制响应。
+  /// 退格先结束残留的输入法组合再删除；回车交由输入控制器的换行处理；
+  /// 组词过程中的其它按键交由输入法处理，其余按键交由编辑器的快捷键机制响应。
   KeyEventResult _handleMobileKeyEvent(FocusNode node, KeyEvent event) {
-    if ((event is! KeyDownEvent && event is! KeyRepeatEvent) || _editingController.isComposing) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
     final LogicalKeyboardKey key = event.logicalKey;
     if (key == LogicalKeyboardKey.backspace) {
+      // 结束组合区后再退格，避免残留的组合区拦截删除
+      if (_editingController.isComposing) {
+        _editingController.clearComposing();
+      }
       _editingController.deleteBackward();
       return KeyEventResult.handled;
+    }
+    if (_editingController.isComposing) {
+      return KeyEventResult.ignored;
     }
     if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter) {
       _inputController.applyNewLine();
