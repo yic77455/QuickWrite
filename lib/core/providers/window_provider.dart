@@ -4,6 +4,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
 import 'package:quick_write/core/services/cache_services/window_cache_service.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
+import 'package:quick_write/core/utils/windows_fullscreen_channel.dart';
 import 'package:window_manager/window_manager.dart';
 
 /// 窗口类型枚举
@@ -303,6 +304,12 @@ class WindowProvider extends ChangeNotifier with WindowListener {
     final position = await windowManager.getPosition();
     final isMaximized = await windowManager.isMaximized();
 
+    // 最大化尺寸不是用户设定的普通窗口大小，只记录最大化标志
+    if (isMaximized) {
+      await _saveMaximizedState(true);
+      return;
+    }
+
     // Wayland 下 GTK 读不到真实窗口位置（恒为 0,0），写入会覆盖缓存里
     // 原本有效的值；这种会话只更新尺寸与最大化状态，位置交回合成器管理。
     final bool skipPosition = PlatformCapabilities.isLinuxWayland;
@@ -374,13 +381,15 @@ class WindowProvider extends ChangeNotifier with WindowListener {
     _maximizedBeforeFullScreen = _isMaximized;
     _alwaysOnTopBeforeFullScreen = await windowManager.isAlwaysOnTop();
 
-    // 最大化状态下窗口尺寸由系统接管，无法铺满整个屏幕，先恢复为普通窗口
-    if (_maximizedBeforeFullScreen) {
-      await windowManager.unmaximize();
+    // 最大化窗口被限制在工作区，需同步脱离最大化并保持原矩形才能覆盖任务栏
+    if (_maximizedBeforeFullScreen && PlatformCapabilities.isWindows) {
+      final prepared = await WindowsFullScreenChannel.prepareForFullScreen();
+      if (!prepared) {
+        await windowManager.unmaximize();
+      }
     }
 
     // 置顶显示，避免系统任务栏遮挡全屏内容
-    // 放在全屏之后设置，确保窗口铺满屏幕后再提升到最顶层
     await windowManager.setFullScreen(true);
     await windowManager.setAlwaysOnTop(true);
   }
@@ -396,10 +405,15 @@ class WindowProvider extends ChangeNotifier with WindowListener {
     // 清除全屏标记，避免恢复后的窗口状态被跳过
     _isFullScreen = false;
 
-    // 全屏前处于最大化时恢复最大化状态
-    // 最大化状态由窗口回调单独保存，此处不再写入窗口位置与大小，避免用最大化尺寸覆盖缓存
-    if (restoreMaximized) {
-      await windowManager.maximize();
+    // Windows 需同步恢复最大化；GTK 会自行还原 unfullscreen 前的状态
+    if (restoreMaximized && PlatformCapabilities.isWindows) {
+      final restored = await WindowsFullScreenChannel.restoreMaximized();
+      if (!restored) {
+        await windowManager.maximize();
+      }
+      // 同步最大化不一定发出 SIZE_MAXIMIZED 事件，以系统真实状态为准
+      _isMaximized = await windowManager.isMaximized();
+      notifyListeners();
     } else {
       _debounceSave();
     }

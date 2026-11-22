@@ -28,6 +28,8 @@ class FlutterWindow : public Win32Window {
 
  private:
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> ime_channel_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      fullscreen_channel_;
   // The project to run.
   flutter::DartProject project_;
 

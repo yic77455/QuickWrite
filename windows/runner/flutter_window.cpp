@@ -1,6 +1,7 @@
 #include "flutter_window.h"
 
 #include <optional>
+#include <unordered_map>
 
 #include "flutter/generated_plugin_registrant.h"
 #include "desktop_multi_window/desktop_multi_window_plugin.h"
@@ -47,6 +48,8 @@ struct ImeWindowContext {
   ImeCursorPosition pos;
   bool applying = false;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> channel;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      fullscreen_channel;
 
   void Apply(HWND target_hwnd, bool composition_start = false) {
     if (applying) return;
@@ -61,6 +64,63 @@ struct ImeWindowContext {
     applying = false;
   }
 };
+
+// Normal-position rectangles saved when leaving the maximized state.
+static std::unordered_map<HWND, RECT> g_normal_rect_before_fullscreen;
+
+// Keeps the maximized rectangle while leaving the maximized state.
+static std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+CreateFullScreenChannel(flutter::FlutterViewController* controller) {
+  auto channel =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          controller->engine()->messenger(), "window_fullscreen_channel",
+          &flutter::StandardMethodCodec::GetInstance());
+  HWND hwnd =
+      ::GetAncestor(controller->view()->GetNativeWindow(), GA_ROOT);
+  channel->SetMethodCallHandler(
+      [hwnd](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+                 result) {
+        if (call.method_name() == "prepareForFullScreen") {
+          if (::IsZoomed(hwnd)) {
+            WINDOWPLACEMENT placement{};
+            placement.length = sizeof(WINDOWPLACEMENT);
+            ::GetWindowPlacement(hwnd, &placement);
+            g_normal_rect_before_fullscreen[hwnd] =
+                placement.rcNormalPosition;
+            RECT frame{};
+            ::GetWindowRect(hwnd, &frame);
+            placement.showCmd = SW_SHOWNORMAL;
+            placement.rcNormalPosition = frame;
+            ::SetWindowPlacement(hwnd, &placement);
+            ::SetWindowPos(hwnd, nullptr, frame.left, frame.top,
+                           frame.right - frame.left, frame.bottom - frame.top,
+                           SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+          }
+          result->Success(flutter::EncodableValue(true));
+        } else if (call.method_name() == "restoreMaximized") {
+          // Maximize first; SetWindowPlacement alone restores the small frame
+          // for a visible frame before maximizing.
+          ::ShowWindow(hwnd, SW_MAXIMIZE);
+          auto saved = g_normal_rect_before_fullscreen.find(hwnd);
+          if (saved != g_normal_rect_before_fullscreen.end()) {
+            WINDOWPLACEMENT placement{};
+            placement.length = sizeof(WINDOWPLACEMENT);
+            ::GetWindowPlacement(hwnd, &placement);
+            placement.rcNormalPosition = saved->second;
+            ::SetWindowPlacement(hwnd, &placement);
+            if (!::IsZoomed(hwnd)) {
+              ::ShowWindow(hwnd, SW_MAXIMIZE);
+            }
+            g_normal_rect_before_fullscreen.erase(saved);
+          }
+          result->Success(flutter::EncodableValue(true));
+        } else {
+          result->NotImplemented();
+        }
+      });
+  return channel;
+}
 
 static LRESULT CALLBACK MultiWindowSubclassProc(HWND hWnd, UINT uMsg, WPARAM wParam,
                                                 LPARAM lParam, UINT_PTR uIdSubclass,
@@ -155,6 +215,7 @@ void AttachImeFixerToMultiWindow(flutter::FlutterViewController* controller) {
       });
 
   ctx->channel = std::move(channel);
+  ctx->fullscreen_channel = CreateFullScreenChannel(controller);
   SetWindowSubclass(hwnd, MultiWindowSubclassProc, 1, reinterpret_cast<DWORD_PTR>(ctx));
   // Also attach the Alt+key beep suppressor to multi-window Flutter views
   SetWindowSubclass(hwnd, AltBeepSuppressProc, 2, 0);
@@ -208,6 +269,7 @@ bool FlutterWindow::OnCreate() {
           }
         });
     ime_channel_ = std::move(channel);
+  fullscreen_channel_ = CreateFullScreenChannel(flutter_controller_.get());
   DesktopMultiWindowSetWindowCreatedCallback([](void *controller) {
     auto *flutter_view_controller =
         reinterpret_cast<flutter::FlutterViewController *>(controller);
