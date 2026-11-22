@@ -39,6 +39,9 @@ class WindowProvider extends ChangeNotifier with WindowListener {
   // 进入全屏前的置顶状态，用于退出全屏后还原
   bool _alwaysOnTopBeforeFullScreen = false;
 
+  // 本次全屏是否由原生通道进入，退出时需用同一套逻辑还原
+  bool _enteredFullScreenNatively = false;
+
   // 窗口类型，默认为主窗口
   final WindowType _windowType;
 
@@ -378,37 +381,56 @@ class WindowProvider extends ChangeNotifier with WindowListener {
   Future<void> _enterFullScreen() async {
     // 先标记全屏，避免切换过程中的尺寸与位置变化被当作普通缩放写入缓存
     _isFullScreen = true;
-    _maximizedBeforeFullScreen = _isMaximized;
+    // 以系统真实状态为准，避免状态事件丢失时走错分支
+    _maximizedBeforeFullScreen = await windowManager.isMaximized();
     _alwaysOnTopBeforeFullScreen = await windowManager.isAlwaysOnTop();
 
-    // 最大化窗口被限制在工作区，需同步脱离最大化并保持原矩形才能覆盖任务栏
+    // 最大化窗口被系统限制在工作区，必须脱离最大化才能覆盖任务栏。
+    // 原生通道把「脱离最大化 + 铺满显示器」放进一次调用，中间不产生可合成的帧
+    _enteredFullScreenNatively = false;
     if (_maximizedBeforeFullScreen && PlatformCapabilities.isWindows) {
-      final prepared = await WindowsFullScreenChannel.prepareForFullScreen();
-      if (!prepared) {
+      _enteredFullScreenNatively =
+          await WindowsFullScreenChannel.enterFullScreen();
+    }
+
+    if (!_enteredFullScreenNatively) {
+      if (_maximizedBeforeFullScreen) {
         await windowManager.unmaximize();
+        // 退最大化是异步投递的，等系统真正退出后再请求全屏，
+        // 否则全屏尺寸会被最大化状态钳制在工作区
+        for (int i = 0; i < 10 && await windowManager.isMaximized(); i++) {
+          await Future.delayed(const Duration(milliseconds: 8));
+        }
       }
+      await windowManager.setFullScreen(true);
     }
 
     // 置顶显示，避免系统任务栏遮挡全屏内容
-    await windowManager.setFullScreen(true);
     await windowManager.setAlwaysOnTop(true);
+    // 尺寸切换后立即提交完整帧，避免旧帧被拉伸成文字残影
+    WidgetsBinding.instance.rootElement?.renderObject?.markNeedsPaint();
   }
 
   // 退出系统全屏
   Future<void> _exitFullScreen() async {
-    await windowManager.setFullScreen(false);
-    // 还原进入全屏前的置顶状态
-    await windowManager.setAlwaysOnTop(_alwaysOnTopBeforeFullScreen);
-
     final bool restoreMaximized = _maximizedBeforeFullScreen;
     _maximizedBeforeFullScreen = false;
     // 清除全屏标记，避免恢复后的窗口状态被跳过
     _isFullScreen = false;
 
+    final bool native = _enteredFullScreenNatively;
+    _enteredFullScreenNatively = false;
+    if (native) {
+      await WindowsFullScreenChannel.exitFullScreen();
+    } else {
+      await windowManager.setFullScreen(false);
+    }
+    // 还原进入全屏前的置顶状态
+    await windowManager.setAlwaysOnTop(_alwaysOnTopBeforeFullScreen);
+
     // Windows 需同步恢复最大化；GTK 会自行还原 unfullscreen 前的状态
     if (restoreMaximized && PlatformCapabilities.isWindows) {
-      final restored = await WindowsFullScreenChannel.restoreMaximized();
-      if (!restored) {
+      if (!native) {
         await windowManager.maximize();
       }
       // 同步最大化不一定发出 SIZE_MAXIMIZED 事件，以系统真实状态为准

@@ -65,56 +65,153 @@ struct ImeWindowContext {
   }
 };
 
-// Normal-position rectangles saved when leaving the maximized state.
-static std::unordered_map<HWND, RECT> g_normal_rect_before_fullscreen;
+// Window state saved before entering fullscreen, restored on exit.
+struct FullScreenState {
+  WINDOWPLACEMENT placement{};
+  LONG style = 0;
+};
 
-// Keeps the maximized rectangle while leaving the maximized state.
+// One entry per window handle so multi-window mode keeps its own state.
+static std::unordered_map<HWND, FullScreenState> g_fullscreen_states;
+
+// Resolves the top-level window of a Flutter view. The runner reparents the
+// view after the channel is created, so this has to be resolved lazily;
+// resolving it while the channel is created yields the view itself.
+static HWND GetTopLevelWindow(HWND view) {
+  HWND root = ::GetAncestor(view, GA_ROOT);
+  return root != nullptr ? root : view;
+}
+
+// Returns true when the client area covers |monitor|.
+static bool ClientCoversMonitor(HWND hwnd, const RECT& monitor) {
+  RECT client_rect{};
+  POINT origin{0, 0};
+  ::GetClientRect(hwnd, &client_rect);
+  ::ClientToScreen(hwnd, &origin);
+  return origin.x <= monitor.left && origin.y <= monitor.top &&
+         origin.x + client_rect.right >= monitor.right &&
+         origin.y + client_rect.bottom >= monitor.bottom;
+}
+
+// Makes the client area cover |monitor|.
+// window_manager insets the client area in WM_NCCALCSIZE, so land on the
+// monitor rect first and compensate the window rect by the measured inset.
+static void FitClientToMonitor(HWND hwnd, const RECT& monitor) {
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    ::SetWindowPos(hwnd, nullptr, monitor.left, monitor.top,
+                   monitor.right - monitor.left,
+                   monitor.bottom - monitor.top,
+                   SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
+    RECT window_rect{};
+    RECT client_rect{};
+    POINT origin{0, 0};
+    ::GetWindowRect(hwnd, &window_rect);
+    ::GetClientRect(hwnd, &client_rect);
+    ::ClientToScreen(hwnd, &origin);
+
+    const int dx = monitor.left - origin.x;
+    const int dy = monitor.top - origin.y;
+    const int dw = monitor.right - (origin.x + client_rect.right);
+    const int dh = monitor.bottom - (origin.y + client_rect.bottom);
+    if (dx != 0 || dy != 0 || dw != 0 || dh != 0) {
+      ::SetWindowPos(hwnd, nullptr, window_rect.left + dx, window_rect.top + dy,
+                     (window_rect.right - window_rect.left) + dw,
+                     (window_rect.bottom - window_rect.top) + dh,
+                     SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
+    if (ClientCoversMonitor(hwnd, monitor)) {
+      return;
+    }
+    // The size request was clamped, which means the window is still maximized.
+    ::ShowWindow(hwnd, SW_RESTORE);
+  }
+}
+
+// Enters fullscreen: leave the maximized state, drop the resizable frame and
+// cover the monitor, all inside one call. Splitting it into several calls lets
+// the intermediate state be composited as a frame, which leaves a text ghost.
+static bool EnterFullScreen(HWND hwnd) {
+  if (g_fullscreen_states.find(hwnd) != g_fullscreen_states.end()) {
+    return true;
+  }
+
+  HMONITOR monitor = ::MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO monitor_info{};
+  monitor_info.cbSize = sizeof(MONITORINFO);
+
+  FullScreenState state;
+  state.placement.length = sizeof(WINDOWPLACEMENT);
+  if (monitor == nullptr || !::GetMonitorInfo(monitor, &monitor_info) ||
+      !::GetWindowPlacement(hwnd, &state.placement)) {
+    return false;
+  }
+  state.style = static_cast<LONG>(::GetWindowLongPtr(hwnd, GWL_STYLE));
+
+  const RECT target = monitor_info.rcMonitor;
+  if (::IsZoomed(hwnd)) {
+    // A maximized window keeps its size clamped to the work area, so leave that
+    // state synchronously first (SetWindowPlacement does not animate).
+    WINDOWPLACEMENT placement = state.placement;
+    placement.showCmd = SW_SHOWNORMAL;
+    placement.rcNormalPosition = target;
+    ::SetWindowPlacement(hwnd, &placement);
+  }
+  ::SetWindowLongPtr(hwnd, GWL_STYLE,
+                     static_cast<LONG>(state.style &
+                                       ~(WS_THICKFRAME | WS_MAXIMIZEBOX)));
+  FitClientToMonitor(hwnd, target);
+  if (!ClientCoversMonitor(hwnd, target)) {
+    // Give up and let the caller fall back to window_manager's fullscreen.
+    ::SetWindowLongPtr(hwnd, GWL_STYLE, state.style);
+    return false;
+  }
+
+  // Topmost, so the taskbar cannot cover the fullscreen content.
+  ::SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
+  g_fullscreen_states[hwnd] = state;
+  return true;
+}
+
+// Leaves fullscreen: restores the style and placement saved on entry
+// (including the maximized state) in one call.
+static bool ExitFullScreen(HWND hwnd) {
+  auto saved = g_fullscreen_states.find(hwnd);
+  if (saved == g_fullscreen_states.end()) {
+    return false;
+  }
+  const FullScreenState state = saved->second;
+  g_fullscreen_states.erase(saved);
+
+  ::SetWindowLongPtr(hwnd, GWL_STYLE, state.style);
+  ::SetWindowPlacement(hwnd, &state.placement);
+  ::SetWindowPos(hwnd, nullptr, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE |
+                     SWP_FRAMECHANGED);
+  if (state.placement.showCmd == SW_SHOWMAXIMIZED && !::IsZoomed(hwnd)) {
+    ::ShowWindow(hwnd, SW_MAXIMIZE);
+  }
+  return true;
+}
+
 static std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
 CreateFullScreenChannel(flutter::FlutterViewController* controller) {
   auto channel =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
           controller->engine()->messenger(), "window_fullscreen_channel",
           &flutter::StandardMethodCodec::GetInstance());
-  HWND hwnd =
-      ::GetAncestor(controller->view()->GetNativeWindow(), GA_ROOT);
+  HWND view = controller->view()->GetNativeWindow();
   channel->SetMethodCallHandler(
-      [hwnd](const flutter::MethodCall<flutter::EncodableValue>& call,
+      [view](const flutter::MethodCall<flutter::EncodableValue>& call,
              std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
                  result) {
-        if (call.method_name() == "prepareForFullScreen") {
-          if (::IsZoomed(hwnd)) {
-            WINDOWPLACEMENT placement{};
-            placement.length = sizeof(WINDOWPLACEMENT);
-            ::GetWindowPlacement(hwnd, &placement);
-            g_normal_rect_before_fullscreen[hwnd] =
-                placement.rcNormalPosition;
-            RECT frame{};
-            ::GetWindowRect(hwnd, &frame);
-            placement.showCmd = SW_SHOWNORMAL;
-            placement.rcNormalPosition = frame;
-            ::SetWindowPlacement(hwnd, &placement);
-            ::SetWindowPos(hwnd, nullptr, frame.left, frame.top,
-                           frame.right - frame.left, frame.bottom - frame.top,
-                           SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-          }
-          result->Success(flutter::EncodableValue(true));
-        } else if (call.method_name() == "restoreMaximized") {
-          // Maximize first; SetWindowPlacement alone restores the small frame
-          // for a visible frame before maximizing.
-          ::ShowWindow(hwnd, SW_MAXIMIZE);
-          auto saved = g_normal_rect_before_fullscreen.find(hwnd);
-          if (saved != g_normal_rect_before_fullscreen.end()) {
-            WINDOWPLACEMENT placement{};
-            placement.length = sizeof(WINDOWPLACEMENT);
-            ::GetWindowPlacement(hwnd, &placement);
-            placement.rcNormalPosition = saved->second;
-            ::SetWindowPlacement(hwnd, &placement);
-            if (!::IsZoomed(hwnd)) {
-              ::ShowWindow(hwnd, SW_MAXIMIZE);
-            }
-            g_normal_rect_before_fullscreen.erase(saved);
-          }
-          result->Success(flutter::EncodableValue(true));
+        const HWND hwnd = GetTopLevelWindow(view);
+        if (call.method_name() == "enterFullScreen") {
+          result->Success(flutter::EncodableValue(EnterFullScreen(hwnd)));
+        } else if (call.method_name() == "exitFullScreen") {
+          result->Success(flutter::EncodableValue(ExitFullScreen(hwnd)));
         } else {
           result->NotImplemented();
         }
