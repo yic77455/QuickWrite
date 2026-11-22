@@ -10,9 +10,9 @@ import 'package:quick_write/core/utils/typography_extension.dart';
 /// 移动端屏幕较窄，弹窗宽度需据此收窄，避免左右两侧完全贴边
 const double _mobileDialogHorizontalMargin = 20;
 
-/// 弹窗距离屏幕上下边缘的最小留白
+/// 弹窗距离安全区上下边缘的最小留白
 ///
-/// 弹窗的最大高度据此从屏幕高度折算，保证不论窗口大小都能完整显示
+/// 弹窗的最大高度据此从安全区高度折算，保证不论窗口大小都能完整显示
 const double _dialogVerticalMargin = 24;
 
 /// 弹窗底部与输入法顶部之间需保持的最小间距
@@ -87,6 +87,9 @@ Future<T?> showDialogBase<T>({
     context: context,
     barrierDismissible: barrierDismissible,
     barrierColor: Colors.black.withValues(alpha: 0.5),
+    // 安全区留白由弹窗内部统一处理，路由层不再额外包裹安全区，
+    // 保证弹窗的定位计算与承载它的坐标空间尺寸一致
+    useSafeArea: false,
     builder: (context) => _DraggableDialog(
       title: title,
       content: content,
@@ -237,20 +240,21 @@ class _DraggableDialogState extends State<_DraggableDialog> {
     return keyboardBelongsToDialog ? inset : 0;
   }
 
-  /// 屏幕的可用高度（扣除上下留白与输入法占用的高度）
+  /// 安全区内的可用高度（扣除上下留白与输入法占用的高度）
   ///
-  /// [keyboardInset] 为当前生效的输入法高度（后台弹窗不受输入法影响，传入 0）；
-  /// 可用高度据此扣减，弹窗收窄后仍能完整显示在输入法上方（内容超出时自动转为滚动）
-  double _screenAvailableHeight(double keyboardInset) {
-    final double visible = MediaQuery.sizeOf(context).height - keyboardInset - _dialogVerticalMargin * 2;
+  /// [usableHeight] 为扣除系统安全区后的高度，[keyboardInset] 为当前生效的输入法高度
+  /// （后台弹窗不受输入法影响，传入 0）；可用高度据此扣减，
+  /// 弹窗收窄后仍能完整显示在输入法上方（内容超出时自动转为滚动）
+  double _screenAvailableHeight(double usableHeight, double keyboardInset) {
+    final double visible = usableHeight - keyboardInset - _dialogVerticalMargin * 2;
     return math.max(0, visible);
   }
 
   /// 计算弹窗允许的最大高度
   ///
-  /// [available] 为当前屏幕可用高度；自适应高度弹窗按内容自然高度伸展，
-  /// 移动端上限放宽到屏幕可用高度，使窄屏下文字换行导致内容变高时弹窗能随之增高；
-  /// 其余情况以声明高度为准，仅在屏幕高度不足时收窄，避免弹窗超出可视区域
+  /// [available] 为当前安全区内的可用高度；自适应高度弹窗按内容自然高度伸展，
+  /// 移动端上限放宽到可用高度，使窄屏下文字换行导致内容变高时弹窗能随之增高；
+  /// 其余情况以声明高度为准，仅在高度不足时收窄，避免弹窗超出可视区域
   double _resolveMaxHeight(double available) {
     if (widget.adaptiveHeight && PlatformCapabilities.isMobile) return available;
     return math.min(widget.height, available);
@@ -260,12 +264,12 @@ class _DraggableDialogState extends State<_DraggableDialog> {
   ///
   /// 偏移依赖弹窗与输入框的实际布局结果，需在当前帧布局完成后读取，
   /// 因此推迟到帧末执行，并保证同一帧只调度一次
-  void _scheduleKeyboardShiftUpdate(double screenHeight, double keyboardInset) {
+  void _scheduleKeyboardShiftUpdate(double viewHeight, double keyboardInset, double safeTop) {
     if (_shiftUpdateScheduled) return;
     _shiftUpdateScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _shiftUpdateScheduled = false;
-      _updateKeyboardShift(screenHeight, keyboardInset);
+      _updateKeyboardShift(viewHeight, keyboardInset, safeTop);
     });
   }
 
@@ -273,8 +277,10 @@ class _DraggableDialogState extends State<_DraggableDialog> {
   ///
   /// 仅当弹窗底部会被输入法遮挡，或弹窗底部与输入法顶部不足 [_keyboardDialogGap] 时才上移，
   /// 上移幅度以刚好让弹窗底部（按钮所在位置）避开输入法为准；
-  /// 同时限制上移量，避免弹窗顶部被顶出屏幕外
-  void _updateKeyboardShift(double screenHeight, double keyboardInset) {
+  /// 同时限制上移量，避免弹窗顶部越过安全区顶部留白而被顶出屏幕
+  ///
+  /// [viewHeight] 为包含系统安全区的整屏高度，[safeTop] 为顶部安全区高度
+  void _updateKeyboardShift(double viewHeight, double keyboardInset, double safeTop) {
     if (!mounted) return;
 
     final RenderBox? dialogBox = _dialogKey.currentContext?.findRenderObject() as RenderBox?;
@@ -284,15 +290,15 @@ class _DraggableDialogState extends State<_DraggableDialog> {
       return;
     }
 
-    final double keyboardTop = screenHeight - keyboardInset;
+    final double keyboardTop = viewHeight - keyboardInset;
     // 实测坐标已包含当前上移量，还原后得到弹窗不受避让影响的自然位置
     final double naturalDialogTop = dialogBox.localToGlobal(Offset.zero).dy + _keyboardShift;
     final double naturalDialogBottom = naturalDialogTop + dialogBox.size.height;
 
     // 弹窗底部需保持在输入法顶部上方 [_keyboardDialogGap] 处，据此得到所需上移量
     final double desiredShift = naturalDialogBottom + _keyboardDialogGap - keyboardTop;
-    // 上移量上限：确保弹窗顶部不会越过屏幕留白而被顶出屏幕
-    final double maxShift = math.max(0, naturalDialogTop - _dialogVerticalMargin);
+    // 上移量上限：确保弹窗顶部不会越过安全区顶部留白而被顶出屏幕
+    final double maxShift = math.max(0, naturalDialogTop - safeTop - _dialogVerticalMargin);
     final double shift = desiredShift.clamp(0, maxShift).toDouble();
 
     if ((shift - _keyboardShift).abs() > 0.5) {
@@ -337,20 +343,23 @@ class _DraggableDialogState extends State<_DraggableDialog> {
     final bool isTopmost = ModalRoute.of(context)?.isCurrent ?? true;
     // 读取输入法高度既用于计算避让，也使输入法弹出/收起时本组件重建，及时更新避让偏移
     final double keyboardInset = _effectiveKeyboardInset(context, isTopmost);
-    final double screenHeight = MediaQuery.sizeOf(context).height;
-    _scheduleKeyboardShiftUpdate(screenHeight, keyboardInset);
+    final Size screenSize = MediaQuery.sizeOf(context);
+    // 系统安全区留白（状态栏、导航栏等）：弹窗需在其内部居中并避开这些区域
+    final EdgeInsets safePadding = MediaQuery.paddingOf(context);
+    // 安全区高度：弹窗的居中位置与最大高度均以安全区为参照，保证弹窗上下留白一致
+    final double usableHeight = math.max(0, screenSize.height - safePadding.top - safePadding.bottom);
+    _scheduleKeyboardShiftUpdate(screenSize.height, keyboardInset, safePadding.top);
 
-    final double available = _screenAvailableHeight(keyboardInset);
+    final double available = _screenAvailableHeight(usableHeight, keyboardInset);
     final double maxHeight = _resolveMaxHeight(available);
     // 绝对定位模式（固定高度/锚定顶部）计算基础位置所参照的高度：
     // 以「声明高度与可用高度中的较小值」为参照，使弹窗按设计高度居中，
     // 且内容高度变化时（锚定顶部模式）顶部位置保持稳定
     final double referenceHeight = math.min(widget.height, available);
-    final Size screenSize = MediaQuery.sizeOf(context);
-    // 弹窗在未应用避让偏移前，纵向居中于整个屏幕
+    // 弹窗在未应用避让偏移前，纵向居中于系统安全区
     final Offset basePosition = Offset(
       (screenSize.width - widget.width) / 2,
-      (screenSize.height - referenceHeight) / 2,
+      (usableHeight - referenceHeight) / 2,
     );
     final Widget dialogBody = Container(
       key: _dialogKey,
@@ -465,31 +474,51 @@ class _DraggableDialogState extends State<_DraggableDialog> {
 
     return PopScope(
       canPop: _canPop,
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          // 自适应高度 + 锚定顶部模式：使用 Positioned 绝对定位，高度变化时顶部位置不变
-          if (widget.adaptiveHeight && widget.anchorTop)
-            Positioned(
-              left: basePosition.dx + _dragOffset.dx,
-              top: basePosition.dy + _dragOffset.dy - _keyboardShift,
-              child: GestureDetector(
-                onPanUpdate: _isDraggable
-                    ? (details) {
-                        setState(() {
-                          _dragOffset += details.delta;
-                        });
-                      }
-                    : null,
-                child: dialogContent,
-              ),
-            )
-          // 自适应高度模式：使用 Center + Transform.translate 实现垂直居中
-          // 拖拽偏移叠加在避让偏移之上，初始为零即自然居中
-          else if (widget.adaptiveHeight)
-            Center(
-              child: Transform.translate(
-                offset: _dragOffset + Offset(0, -_keyboardShift),
+      // 弹窗的坐标空间收窄到系统安全区，居中时即可自动避开状态栏与导航栏
+      child: Padding(
+        padding: safePadding,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // 自适应高度 + 锚定顶部模式：使用 Positioned 绝对定位，高度变化时顶部位置不变
+            if (widget.adaptiveHeight && widget.anchorTop)
+              Positioned(
+                left: basePosition.dx + _dragOffset.dx,
+                top: basePosition.dy + _dragOffset.dy - _keyboardShift,
+                child: GestureDetector(
+                  onPanUpdate: _isDraggable
+                      ? (details) {
+                          setState(() {
+                            _dragOffset += details.delta;
+                          });
+                        }
+                      : null,
+                  child: dialogContent,
+                ),
+              )
+            // 自适应高度模式：使用 Center + Transform.translate 实现垂直居中
+            // 拖拽偏移叠加在避让偏移之上，初始为零即自然居中
+            else if (widget.adaptiveHeight)
+              Center(
+                child: Transform.translate(
+                  offset: _dragOffset + Offset(0, -_keyboardShift),
+                  child: GestureDetector(
+                    onPanUpdate: _isDraggable
+                        ? (details) {
+                            setState(() {
+                              _dragOffset += details.delta;
+                            });
+                          }
+                        : null,
+                    child: dialogContent,
+                  ),
+                ),
+              )
+            else
+              // 固定高度模式：使用 Positioned 绝对定位
+              Positioned(
+                left: basePosition.dx + _dragOffset.dx,
+                top: basePosition.dy + _dragOffset.dy - _keyboardShift,
                 child: GestureDetector(
                   onPanUpdate: _isDraggable
                       ? (details) {
@@ -501,24 +530,8 @@ class _DraggableDialogState extends State<_DraggableDialog> {
                   child: dialogContent,
                 ),
               ),
-            )
-          else
-            // 固定高度模式：使用 Positioned 绝对定位
-            Positioned(
-              left: basePosition.dx + _dragOffset.dx,
-              top: basePosition.dy + _dragOffset.dy - _keyboardShift,
-              child: GestureDetector(
-                onPanUpdate: _isDraggable
-                    ? (details) {
-                        setState(() {
-                          _dragOffset += details.delta;
-                        });
-                      }
-                    : null,
-                child: dialogContent,
-              ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
