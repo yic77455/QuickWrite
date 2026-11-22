@@ -19,6 +19,7 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
 
     steps:
       # 两种触发方式的 tag 来源不同：自动事件从 release 对象取，手动触发从 input 取。
@@ -107,12 +108,16 @@ jobs:
 
           echo "Gitee Release id=${RELEASE_ID}"
 
-          shopt -s nullglob
-          for asset in assets/*; do
+          # 按体积从小到大传，避免最后只剩大文件在超时边缘反复重试。
+          while IFS= read -r asset; do
             echo "上传 $(basename "${asset}")"
-            curl -fsS -X POST \
-              "${API}/releases/${RELEASE_ID}/attach_files?access_token=${GITEE_TOKEN}" \
-              -F "file=@${asset}" > /dev/null
-          done
+            # 单连接限制 180 秒，临时网络故障自动重试 3 次；失败立即报错，不再无限挂起。
+            if ! curl -fsS --connect-timeout 15 --max-time 180 --retry 3 --retry-delay 5 \
+              -X POST "${API}/releases/${RELEASE_ID}/attach_files?access_token=${GITEE_TOKEN}" \
+              -F "file=@${asset}" > /dev/null; then
+              echo "::error::上传 $(basename "${asset}") 失败"
+              exit 1
+            fi
+          done < <(find assets -maxdepth 1 -type f -printf '%s\t%p\n' | sort -n | cut -f2-)
 
           echo "Gitee 同步完成：https://gitee.com/${OWNER}/${REPO}/releases/tag/${TAG}"
