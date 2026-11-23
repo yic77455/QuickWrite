@@ -503,6 +503,8 @@ class OutlineEditorState extends State<OutlineEditor>
     _scrollController = SyncScrollController(
       onApplyContentDimensions: _onApplyContentDimensions,
       onCorrectScrollOffset: _onCorrectScrollOffset,
+      // 查找替换栏显隐时需在同帧内完成顶边距补偿，避免内容先移动再回位
+      relayoutOnContentCorrection: true,
     );
     _scrollGuard = EditorScrollGuard(_scrollController);
     // 标题初始内容取自外部传入的大纲标题

@@ -102,6 +102,7 @@ class SyncScrollPosition extends ScrollPositionWithSingleContext {
     super.debugLabel,
     required this.onApplyContentDimensions,
     this.onCorrectScrollOffset,
+    this.relayoutOnContentCorrection = false,
   });
 
   final ApplyContentDimensionsCallback onApplyContentDimensions;
@@ -109,11 +110,23 @@ class SyncScrollPosition extends ScrollPositionWithSingleContext {
   /// 内容尺寸变化时按需修正滚动偏移的回调
   final CorrectScrollOffsetCallback? onCorrectScrollOffset;
 
+  /// 回调在 [applyContentDimensions] 中修正像素后是否强制本帧重新布局
+  ///
+  /// [applyContentDimensions] 调用时子级已按修正前的偏移完成布局，
+  /// 若不重新布局，本帧会先按旧偏移绘制、下一帧再跳到修正后的位置。
+  final bool relayoutOnContentCorrection;
+
   @override
   bool applyContentDimensions(double minScrollExtent, double maxScrollExtent) {
+    // 记录回调前的滚动偏移，用于判断回调是否在本阶段修正了像素
+    final double pixelsBefore = pixels;
     // 在这里触发回调，允许在 Viewport 确定最终尺寸前，通过 correctPixels() 同步修改像素
     onApplyContentDimensions(this, minScrollExtent, maxScrollExtent);
-    return super.applyContentDimensions(minScrollExtent, maxScrollExtent);
+    final bool accepted = super.applyContentDimensions(minScrollExtent, maxScrollExtent);
+    // 像素已被修正时返回 false，让 Viewport 在本帧内按新偏移重新布局并绘制，
+    // 修正结果随本帧一并呈现，避免内容先移动再回位造成的闪烁
+    if (relayoutOnContentCorrection && pixels != pixelsBefore) return false;
+    return accepted;
   }
 
   @override
@@ -133,12 +146,16 @@ class SyncScrollController extends ScrollController {
     super.debugLabel,
     required this.onApplyContentDimensions,
     this.onCorrectScrollOffset,
+    this.relayoutOnContentCorrection = false,
   });
 
   final ApplyContentDimensionsCallback onApplyContentDimensions;
 
   /// 内容尺寸变化时按需修正滚动偏移的回调
   final CorrectScrollOffsetCallback? onCorrectScrollOffset;
+
+  /// 回调在 [applyContentDimensions] 中修正像素后是否强制本帧重新布局
+  final bool relayoutOnContentCorrection;
 
   @override
   ScrollPosition createScrollPosition(
@@ -155,6 +172,7 @@ class SyncScrollController extends ScrollController {
       debugLabel: debugLabel,
       onApplyContentDimensions: onApplyContentDimensions,
       onCorrectScrollOffset: onCorrectScrollOffset,
+      relayoutOnContentCorrection: relayoutOnContentCorrection,
     );
   }
 }
