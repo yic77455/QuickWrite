@@ -255,6 +255,9 @@ class OutlineEditorState extends State<OutlineEditor>
   /// 待补偿的额外顶边距变化量
   double? _pendingExtraPaddingDelta;
 
+  /// 上一次布局时的编辑区宽度，用于识别宽度变化引起的节点重排
+  double? _layoutWidth;
+
   /// 待在本帧布局阶段补足底部安全间距的节点 ID
   ///
   /// 插入新节点后记录该节点，布局完成时在绘制之前修正滚动偏移，
@@ -642,6 +645,55 @@ class OutlineEditorState extends State<OutlineEditor>
       }
       _pendingExtraPaddingDelta = null;
     }
+  }
+
+  /// 记录宽度变化前光标相对视口顶部的位置，并在帧末还原其视口位置
+  ///
+  /// 此时节点高度仍按旧宽度排版；光标行不在视口内时不记录，保留用户的浏览位置。
+  /// 节点为懒加载，重排后的光标位置只能在布局结束后读取，故修正放在帧末执行。
+  void _captureResizeAnchor(double width) {
+    final double? previousWidth = _layoutWidth;
+    _layoutWidth = width;
+    if (previousWidth == null || (width - previousWidth).abs() < 0.5) return;
+    final String? nodeId = _lastFocusedNodeId;
+    if (nodeId == null || !_scrollController.hasClients) return;
+    final ({double top, double height})? caret = _caretContentMetrics(nodeId);
+    if (caret == null) return;
+
+    final ScrollPosition position = _scrollController.position;
+    if (!position.hasViewportDimension) return;
+    final double viewportY = caret.top - position.pixels;
+    if (viewportY + caret.height <= 0 || viewportY >= position.viewportDimension) return;
+    final double maxViewportY = position.viewportDimension - caret.height;
+    if (maxViewportY <= 0) return;
+    final double anchor = viewportY.clamp(0.0, maxViewportY);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _restoreCaretAnchor(nodeId, anchor);
+    });
+  }
+
+  /// 重排后把光标行还原到宽度变化前的视口位置
+  ///
+  /// 光标节点未参与重排后的布局时，退化为直接滚动到该节点。
+  void _restoreCaretAnchor(String nodeId, double anchor) {
+    if (!_scrollController.hasClients) return;
+    final ScrollPosition position = _scrollController.position;
+    final ({double top, double height})? caret = _caretContentMetrics(nodeId);
+    if (caret == null) {
+      _scrollGuard.unprotect();
+      _scrollToNode(nodeId);
+      return;
+    }
+
+    final double targetOffset = (caret.top - anchor).clamp(
+      position.minScrollExtent,
+      position.maxScrollExtent,
+    );
+    if ((targetOffset - position.pixels).abs() <= 0.5) return;
+    // 本次为宽度变化后的主动定位，先解除保护，避免保护器把位置拉回修正前的值
+    _scrollGuard.unprotect();
+    position.jumpTo(targetOffset);
   }
 
   /// 在 Layout 阶段为插入到列表末尾的新节点补足底部安全间距
@@ -7275,6 +7327,25 @@ class OutlineEditorState extends State<OutlineEditor>
     return MatrixUtils.transformRect(renderEditable.getTransformTo(null), caretRect);
   }
 
+  /// 取节点光标在滚动内容坐标系中的位置与行高
+  ///
+  /// 需在构建或帧末等允许读取尺寸的时机调用；节点未被构建时返回 null。
+  ({double top, double height})? _caretContentMetrics(String nodeId) {
+    final controller = _controllers[nodeId];
+    final renderEditable = _findRenderEditable(nodeId);
+    if (controller == null || renderEditable == null || !renderEditable.attached) {
+      return null;
+    }
+    final RenderAbstractViewport? viewport = RenderAbstractViewport.maybeOf(renderEditable);
+    if (viewport == null) return null;
+
+    final Rect caretRect = renderEditable.getLocalRectForCaret(controller.selection.extent);
+    return (
+      top: viewport.getOffsetToReveal(renderEditable, 0.0, rect: caretRect).offset,
+      height: caretRect.height,
+    );
+  }
+
   /// 保证节点光标所在行在编辑区视口内可见
   ///
   /// 节点内文字换行较多时，光标会随可视行移动而移出视口，
@@ -8238,6 +8309,8 @@ class OutlineEditorState extends State<OutlineEditor>
   }) {
     final settings = SettingsService.instance;
     final bool isPaperMode = pageViewMode == 'paper';
+    // 节点文字换行依赖编辑区宽度，宽度变化后由帧末还原光标行的视口位置
+    _captureResizeAnchor(constraints.maxWidth);
     final double horizontalBase = isPaperMode ? GlobalConstants.a4Width : constraints.maxWidth;
     final double horizontalPadding = horizontalBase * (settings.outlineHorizontalMargin / 100);
     // 顶边距和底边距（百分比，相对于编辑器高度）

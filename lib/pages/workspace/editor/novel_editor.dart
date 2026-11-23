@@ -273,6 +273,12 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   /// 用于记录需要在 Layout 阶段补偿的额外顶边距变化量
   double? _pendingExtraPaddingDelta;
 
+  /// 上一次布局时的编辑区宽度，用于识别宽度变化引起的正文重排
+  double? _layoutWidth;
+
+  /// 宽度变化前光标行相对视口顶部的位置，重排后据此还原光标行的视口位置
+  double? _pendingResizeAnchor;
+
   /// 待对齐末行的标记
   ///
   /// 内容在末行增长时置位，由 [SyncScrollPosition.applyContentDimensions]
@@ -1046,7 +1052,7 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
   ///
   /// 修正发生在 Paint 之前，因此结果随当帧一并呈现，不会出现先渲染再滚动的二次跳动。
   /// 一是补偿额外顶边距变化导致的滚动偏移，二是让末行连同底边距对齐视口底部，
-  /// 三是内容载入后把视口定位到光标所在行。
+  /// 三是内容载入后把视口定位到光标所在行，四是宽度变化重排后还原光标行的视口位置。
   void _onApplyContentDimensions(ScrollPosition position, double minExt, double maxExt) {
     bool corrected = false;
     if (_pendingExtraPaddingDelta != null) {
@@ -1076,11 +1082,57 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     if (_pendingCursorReveal && _revealCursorInLayout(position, minExt, maxExt)) {
       corrected = true;
     }
+    if (_alignCursorToResizeAnchor(position, minExt, maxExt)) {
+      corrected = true;
+    }
     // 滚动位置改变后光标在屏幕上的位置随之变化，需要在当帧内刷新输入法坐标：
     // 若等到下一帧，输入法会先按滚动前的位置显示候选框，再跳回正确位置
     if (corrected) {
       _imeReporterKey.currentState?.reportNow();
     }
+  }
+
+  /// 记录宽度变化前光标行相对视口顶部的位置
+  ///
+  /// 此时行高前缀和仍对应旧宽度；光标行不在视口内时不记录，保留用户的浏览位置。
+  void _captureResizeAnchor(double width) {
+    final double? previousWidth = _layoutWidth;
+    _layoutWidth = width;
+    if (previousWidth == null || (width - previousWidth).abs() < 0.5) return;
+    if (!_scrollController.hasClients) return;
+    final ScrollPosition position = _scrollController.position;
+    if (!position.hasViewportDimension) return;
+    final double? cursorTop =
+        _codeScrollController.contentTopOfPosition(widget.controller.selection.extent);
+    final double lineHeight = _codeScrollController.preferredLineHeight;
+    if (cursorTop == null || lineHeight <= 0) return;
+    final double viewportY = cursorTop - position.pixels;
+    if (viewportY + lineHeight <= 0 || viewportY >= position.viewportDimension) return;
+    _pendingResizeAnchor = viewportY.clamp(
+      0.0,
+      math.max(0.0, position.viewportDimension - lineHeight),
+    );
+  }
+
+  /// 重排后按宽度变化前记录的位置还原光标行在视口中的位置
+  ///
+  /// 返回是否修正了滚动像素；排版尚未完成时保留标记，交由下一次布局修正。
+  bool _alignCursorToResizeAnchor(ScrollPosition position, double minExt, double maxExt) {
+    final double? anchor = _pendingResizeAnchor;
+    if (anchor == null) return false;
+    final double? cursorTop =
+        _codeScrollController.contentTopOfPosition(widget.controller.selection.extent);
+    if (cursorTop == null) return false;
+    _pendingResizeAnchor = null;
+
+    final double targetOffset = (cursorTop - anchor).clamp(minExt, maxExt);
+    if ((targetOffset - position.pixels).abs() <= 0.5) return false;
+    position.correctPixels(targetOffset);
+    // 按修正后的偏移重算可见段落，避免本帧仍按旧偏移构建行段落绘制
+    _codeScrollController.refreshVisibleParagraphs();
+    // 同步保护目标，避免保护器把位置拉回修正前的值
+    _scrollGuard.retarget();
+    return true;
   }
 
   /// 在布局阶段把视口定位到光标所在行
@@ -1605,6 +1657,9 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     if (!constraints.hasBoundedWidth || constraints.maxWidth <= 0) {
       return const SizedBox.shrink();
     }
+
+    // 正文换行依赖编辑区宽度，宽度变化后由布局阶段还原光标行的视口位置
+    _captureResizeAnchor(constraints.maxWidth);
 
     final SettingsService settings = SettingsService.instance;
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
