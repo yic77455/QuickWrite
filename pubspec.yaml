@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.3.1+31
+version: 1.3.2+32
 
 environment:
   sdk: ^3.11.0
@@ -37,7 +37,7 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.9
   go_router: ^17.1.0
-  window_manager: ^0.5.1  # 用于窗口管理
+  window_manager: ^0.5.2  # 用于窗口管理
   provider: ^6.1.5+1  # 用于状态管理
   flutter_reorderable_grid_view: ^5.6.0  # 用于实现可拖动排序的网格视图
   path_provider: ^2.1.5  # 用于获取文件系统路径，如临时目录、应用文档目录
@@ -46,7 +46,7 @@ dependencies:
   shared_preferences: ^2.5.4  # 用于存储和检索应用的偏好设置
   uuid: ^4.5.3  # 生成UUID
   screen_retriever: ^0.2.0  # 检索屏幕大小、显示、光标位置等信息
-  desktop_multi_window: ^0.3.0  # 多窗口
+  desktop_multi_window: ^0.3.1  # 多窗口
   file_picker: ^10.3.10   # 文件选择器
   docx_to_text: ^1.0.1  # 用于将docx文件转换为文本
   path: ^1.9.0  # 路径处理工具
@@ -57,7 +57,7 @@ dependencies:
   crypto: ^3.0.7  # 用于计算文件哈希
   dio: ^5.11.1  # HTTP 客户端，WebDAV 依赖
   ffi: ^2.2.0  # 用于本地数据库存储
-  re_editor: ^0.10.0  # 超长文本编辑器，自研排版与输入，用于替代 TextField 解决长文本卡顿
+  re_editor: ^0.10.0  # 超长文本编辑器，用于替代 TextField 解决长文本卡顿
   flutter_launcher_icons: ^0.14.4  # 用于生成应用图标
   tray_manager: ^0.5.0  # 用于实现系统托盘图标
   package_info_plus: ^9.0.1  # 读取应用包信息（版本号、构建号），供关于页与更新检查使用
