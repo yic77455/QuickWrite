@@ -10,6 +10,17 @@ import 'package:quick_write/core/models/outline_models.dart';
 class OutlineMarkdownCodec {
   OutlineMarkdownCodec._();
 
+  /// 行尾节点 ID 注释，Markdown 渲染时不可见
+  static final RegExp _nodeIdPattern =
+      RegExp(r' <!-- qw:id=([A-Za-z0-9_-]+) -->[ \t]*$');
+
+  /// 拆出行尾节点 ID；老文件没有注释时返回原行
+  static ({String text, String? nodeId}) splitNodeId(String line) {
+    final match = _nodeIdPattern.firstMatch(line);
+    if (match == null) return (text: line, nodeId: null);
+    return (text: line.substring(0, match.start), nodeId: match.group(1));
+  }
+
   /// 将单个节点序列化为 Markdown 行
   ///
   /// - 标题级别：行首添加对应数量的 `#`（H1=`#`，H2=`##`，H3=`###`）
@@ -18,7 +29,9 @@ class OutlineMarkdownCodec {
   ///   - 斜体：`*text*`
   ///   - 删除线：`~~text~~`
   ///   - 下划线：`<u>text</u>`（Markdown 无标准语法，使用 HTML 标签）
-  static String serialize(OutlineNode node) {
+  /// - 字面量：文本中的 `\`、`*`、`~`、`<` 与行首 `#` 用反斜杠转义
+  /// - [nodeId] 非空时在行尾附加节点 ID 注释
+  static String serialize(OutlineNode node, {String? nodeId}) {
     final text = node.text;
     final parts = <String>[];
     var currentPos = 0;
@@ -35,11 +48,11 @@ class OutlineMarkdownCodec {
 
       // 无样式的前导段
       if (currentPos < start) {
-        parts.add(text.substring(currentPos, start));
+        parts.add(_escapeText(text.substring(currentPos, start)));
       }
 
       // 为当前段包裹标记（嵌套顺序：bold > italic > strikethrough > underline > fc > bc）
-      var segment = text.substring(start, end);
+      var segment = _escapeText(text.substring(start, end));
       if (range.flags.underline) segment = '<u>$segment</u>';
       if (range.flags.strikethrough) segment = '~~$segment~~';
       if (range.flags.italic) segment = '*$segment*';
@@ -59,7 +72,7 @@ class OutlineMarkdownCodec {
 
     // 尾部无样式段
     if (currentPos < text.length) {
-      parts.add(text.substring(currentPos));
+      parts.add(_escapeText(text.substring(currentPos)));
     }
 
     var result = parts.join();
@@ -67,9 +80,28 @@ class OutlineMarkdownCodec {
     // 添加标题前缀
     if (node.headingLevel > 0) {
       result = '${'#' * node.headingLevel} $result';
+    } else if (result.startsWith('#')) {
+      // 无标题节点的文本以 # 开头时避免被解析成标题
+      result = '\\$result';
     }
-
+    if (nodeId != null && nodeId.isNotEmpty) {
+      result = '$result <!-- qw:id=$nodeId -->';
+    }
     return result;
+  }
+
+  /// 转义文本中的标记字面量
+  static String _escapeText(String raw) {
+    final buffer = StringBuffer();
+    for (int i = 0; i < raw.length; i++) {
+      final String char = raw[i];
+      if (char == '\\' || char == '*' || char == '~' || char == '<') {
+        buffer.write('\\$char');
+      } else {
+        buffer.write(char);
+      }
+    }
+    return buffer.toString();
   }
 
   /// 将大纲文件内容解析为节点纯文本行
@@ -108,6 +140,8 @@ class OutlineMarkdownCodec {
   /// 返回解析得到的纯文本、标题级别和样式区间列表。
   static ({String text, int headingLevel, List<TextStyleRange> styleRanges})
       deserialize(String line) {
+    // 行尾 ID 注释不属于节点文本，全文搜索与关联对话框也走此入口
+    line = splitNodeId(line).text;
     var pos = 0;
 
     // 1. 解析标题前缀（行首 # 数量）
@@ -184,6 +218,18 @@ class OutlineMarkdownCodec {
 
     var i = 0;
     while (i < markdown.length) {
+      // 反斜杠后的字符按字面量处理，保证标记文本往返不丢失
+      if (markdown[i] == '\\') {
+        if (i + 1 < markdown.length) {
+          textBuffer.write(markdown[i + 1]);
+          i += 2;
+        } else {
+          textBuffer.write('\\');
+          i++;
+        }
+        continue;
+      }
+
       // 检查多字符标记（按长度降序匹配，避免 * 被 ** 误匹配）
       // 颜色标签：<fc#RRGGBB>（11字符）和 <bc#RRGGBB>（11字符）
       if (markdown.startsWith('<fc#', i) &&

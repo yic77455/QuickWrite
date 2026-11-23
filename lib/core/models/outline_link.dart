@@ -18,7 +18,7 @@ enum OutlineLinkTargetType {
 ///
 /// 记录被关联文件的标识、展示名称以及跳转定位信息：
 /// - 正文文件：记录段落序号与段落文本，跳转时优先按文本匹配，失败时按序号兜底
-/// - 设定文件：记录大纲节点的层级索引路径，跳转时优先按路径定位，失败时按文本兜底
+/// - 设定文件：记录大纲节点的稳定 ID，老记录用层级路径，定位失败时按文本兜底
 class OutlineLinkTarget {
   /// 关联标识
   ///
@@ -34,7 +34,10 @@ class OutlineLinkTarget {
   /// 目标文件标题（关联设置时的快照，用于界面展示）
   final String targetTitle;
 
-  /// 大纲节点的层级索引路径（形如 `0.2.1`，仅设定文件使用）
+  /// 大纲节点的稳定 ID（新记录使用，仅设定文件使用）
+  final String nodeId;
+
+  /// 大纲节点的层级索引路径（老记录使用，仅设定文件使用）
   final String nodePath;
 
   /// 段落序号（从 0 开始，仅正文文件使用）
@@ -57,6 +60,7 @@ class OutlineLinkTarget {
     required this.type,
     required this.targetUuid,
     this.targetTitle = '',
+    this.nodeId = '',
     this.nodePath = '',
     this.paragraphIndex = 0,
     this.paragraphCount = 0,
@@ -69,6 +73,7 @@ class OutlineLinkTarget {
     OutlineLinkTargetType? type,
     String? targetUuid,
     String? targetTitle,
+    String? nodeId,
     String? nodePath,
     int? paragraphIndex,
     int? paragraphCount,
@@ -79,6 +84,7 @@ class OutlineLinkTarget {
       type: type ?? this.type,
       targetUuid: targetUuid ?? this.targetUuid,
       targetTitle: targetTitle ?? this.targetTitle,
+      nodeId: nodeId ?? this.nodeId,
       nodePath: nodePath ?? this.nodePath,
       paragraphIndex: paragraphIndex ?? this.paragraphIndex,
       paragraphCount: paragraphCount ?? this.paragraphCount,
@@ -94,6 +100,7 @@ class OutlineLinkTarget {
           : OutlineLinkTargetType.chapter,
       targetUuid: (json['targetUuid'] as String?) ?? '',
       targetTitle: (json['targetTitle'] as String?) ?? '',
+      nodeId: (json['nodeId'] as String?) ?? '',
       nodePath: (json['nodePath'] as String?) ?? '',
       paragraphIndex: (json['paragraphIndex'] as num?)?.toInt() ?? 0,
       paragraphCount: (json['paragraphCount'] as num?)?.toInt() ?? 0,
@@ -106,6 +113,7 @@ class OutlineLinkTarget {
         'type': type.name,
         'targetUuid': targetUuid,
         if (targetTitle.isNotEmpty) 'targetTitle': targetTitle,
+        if (nodeId.isNotEmpty) 'nodeId': nodeId,
         if (nodePath.isNotEmpty) 'nodePath': nodePath,
         if (type == OutlineLinkTargetType.chapter) 'paragraphIndex': paragraphIndex,
         if (type == OutlineLinkTargetType.chapter) 'paragraphCount': paragraphCount,

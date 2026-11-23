@@ -96,6 +96,14 @@ class OutlineLastEditCacheService extends CacheService<OutlineLastEditCacheData>
     return _data.getLastEditedPath(bookUuid, settingItemUuid);
   }
 
+  /// 获取上次编辑节点的稳定键：优先节点 ID，老记录回退路径
+  String? getLastEditedNodeKey({
+    required String bookUuid,
+    required String settingItemUuid,
+  }) {
+    return _data.getLastEditedKey(bookUuid, settingItemUuid);
+  }
+
   /// 保存指定设定项上次编辑节点的路径
   ///
   /// [bookUuid] 书籍 UUID
@@ -105,8 +113,10 @@ class OutlineLastEditCacheService extends CacheService<OutlineLastEditCacheData>
     required String bookUuid,
     required String settingItemUuid,
     required String path,
+    String nodeId = '',
   }) async {
     final position = OutlineLastEditPosition(
+      nodeId: nodeId,
       path: path,
       updatedAt: DateTime.now(),
     );

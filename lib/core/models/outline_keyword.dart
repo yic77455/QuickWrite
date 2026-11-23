@@ -56,6 +56,9 @@ class OutlineKeyword {
 /// 同时记录节点的标题级别、文字样式区间、备注、图片与表格，
 /// 使卡片内容区还原节点自身的排版样式并展示节点的附加内容。
 class OutlineKeywordSubNode {
+  /// 稳定节点 ID（新记录使用）
+  final String nodeId;
+
   /// 相对绑定节点的层级
   final int depth;
 
@@ -83,6 +86,7 @@ class OutlineKeywordSubNode {
   final OutlineTableData? table;
 
   const OutlineKeywordSubNode({
+    this.nodeId = '',
     required this.depth,
     required this.text,
     this.note = '',
@@ -97,6 +101,7 @@ class OutlineKeywordSubNode {
   factory OutlineKeywordSubNode.fromJson(Map<String, dynamic> json) {
     final rawRanges = json['styleRanges'];
     return OutlineKeywordSubNode(
+      nodeId: (json['nodeId'] as String?) ?? '',
       depth: (json['depth'] as num?)?.toInt() ?? 1,
       text: (json['text'] as String?) ?? '',
       note: (json['note'] as String?) ?? '',
@@ -113,6 +118,7 @@ class OutlineKeywordSubNode {
 
   /// 序列化为 JSON
   Map<String, dynamic> toJson() => {
+    if (nodeId.isNotEmpty) 'nodeId': nodeId,
     'depth': depth,
     'text': text,
     if (note.isNotEmpty) 'note': note,
@@ -130,6 +136,7 @@ class OutlineKeywordSubNode {
   /// [table] 为从备注数据中补齐的表格，为空时沿用原有表格。
   OutlineKeywordSubNode withImagePath(String imagePath, {OutlineTableData? table}) {
     return OutlineKeywordSubNode(
+      nodeId: nodeId,
       depth: depth,
       text: text,
       note: note,
@@ -251,7 +258,10 @@ class OutlineKeywordEntry {
   /// 所属设定项标题
   final String settingItemTitle;
 
-  /// 节点在大纲树中的层级索引路径（形如 `0.2.1`）
+  /// 稳定节点 ID（新记录使用）
+  final String nodeId;
+
+  /// 节点在大纲树中的层级索引路径（老记录使用）
   final String nodePath;
 
   /// 绑定节点的文本
@@ -271,6 +281,7 @@ class OutlineKeywordEntry {
   const OutlineKeywordEntry({
     required this.settingItemUuid,
     required this.settingItemTitle,
+    this.nodeId = '',
     required this.nodePath,
     required this.nodeText,
     this.imagePath = '',

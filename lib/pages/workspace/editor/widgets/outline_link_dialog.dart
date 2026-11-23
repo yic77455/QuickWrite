@@ -596,6 +596,7 @@ class _OutlineLinkDialogState extends State<OutlineLinkDialog> {
       type: picked.type,
       targetUuid: picked.uuid,
       targetTitle: picked.title,
+      nodeId: isChapter ? '' : target.nodeId,
       nodePath: isChapter ? '' : target.nodePath,
       paragraphIndex: isChapter ? target.paragraphIndex : 0,
       // 记录当前段落总数，供跳转时判断段落序号是否仍然可信
@@ -625,7 +626,7 @@ class _OutlineLinkDialogState extends State<OutlineLinkDialog> {
   /// 与大纲编辑器的解析规则保持一致：每行对应一个节点（文件末尾换行
   /// 产生的空行除外），即使节点文本为空也保留，
   /// 否则后续节点的层级路径会与编辑器错位。
-  /// 节点路径由各级索引拼接而成，用于跳转时精确定位节点。
+  /// 节点 ID 来自行尾注释，老文件仍用各级索引拼成的路径兜底。
   List<_TargetOption> _parseOutlineNodes(String content) {
     final List<_TargetOption> targets = [];
     // 每个树层级当前已使用的同级索引
@@ -664,10 +665,12 @@ class _OutlineLinkDialogState extends State<OutlineLinkDialog> {
       }
       counters[treeDepth]++;
 
+      final lineParts = OutlineMarkdownCodec.splitNodeId(line);
       targets.add(_TargetOption(
+        nodeId: lineParts.nodeId ?? '',
         nodePath: counters.join('.'),
         depth: treeDepth,
-        text: OutlineMarkdownCodec.deserialize(line).text.trim(),
+        text: OutlineMarkdownCodec.deserialize(lineParts.text).text.trim(),
       ));
 
       levelDepths.add(depth);
@@ -713,7 +716,10 @@ class _TargetOption {
   /// 段落序号（仅正文文件使用）
   final int paragraphIndex;
 
-  /// 节点路径（仅设定文件使用）
+  /// 稳定节点 ID（仅设定文件使用）
+  final String nodeId;
+
+  /// 节点路径，老文件兜底（仅设定文件使用）
   final String nodePath;
 
   /// 节点层级深度（仅设定文件使用）
@@ -724,6 +730,7 @@ class _TargetOption {
 
   const _TargetOption({
     this.paragraphIndex = 0,
+    this.nodeId = '',
     this.nodePath = '',
     this.depth = 0,
     required this.text,

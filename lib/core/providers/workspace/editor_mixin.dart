@@ -1058,6 +1058,10 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
 
   // ================= 大纲关键词跳转 =================
 
+  /// 目标节点的稳定键，老记录回退到层级路径
+  String _outlineNodeKey(String nodeId, String nodePath) =>
+      nodeId.isNotEmpty ? nodeId : nodePath;
+
   /// 跳转到大纲关键词绑定的节点
   ///
   /// 目标设定项未打开时以预览标签页打开并等待内容加载完成；
@@ -1067,7 +1071,11 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
     if (existingIndex != -1) {
       _currentTabIndex = existingIndex;
       notifyListeners();
-      _revealOutlineNodeWhenReady(_openedTabs[existingIndex], entry.nodePath, 10);
+      _revealOutlineNodeWhenReady(
+        _openedTabs[existingIndex],
+        _outlineNodeKey(entry.nodeId, entry.nodePath),
+        10,
+      );
       return;
     }
 
@@ -1086,28 +1094,32 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
 
     final EditorTab? openedTab = _openedTabs.where((t) => t.id == entry.settingItemUuid).firstOrNull;
     if (openedTab == null) return;
-    _revealOutlineNodeWhenReady(openedTab, entry.nodePath, 10);
+    _revealOutlineNodeWhenReady(
+      openedTab,
+      _outlineNodeKey(entry.nodeId, entry.nodePath),
+      10,
+    );
   }
 
-  /// 在大纲编辑器就绪后定位并聚焦指定路径的节点
+  /// 在大纲编辑器就绪后定位并聚焦指定节点
   ///
   /// 编辑器尚未挂载或内容尚未解析完成时逐帧重试，
   /// [maxFrames] 用尽后放弃，避免标签页被切换等情况导致无限等待。
-  /// [fallbackText] 为节点路径失效时用于兜底匹配的节点文本。
+  /// [fallbackText] 为节点定位失效时用于兜底匹配的节点文本。
   /// [onResult] 在定位结束（成功或失败）时回调，供跳转入口提示用户。
   void _revealOutlineNodeWhenReady(
     EditorTab tab,
-    String nodePath,
+    String nodeKey,
     int maxFrames, {
     String? fallbackText,
     void Function(bool)? onResult,
   }) {
     final editorState = tab.editorKey.currentState;
     if (editorState is OutlineEditorState) {
-      // 有关联文本时同时校验路径节点文本，兼容节点被移动或文字被修改的情况
+      // 有关联文本时同时校验目标节点文本，兼容节点被移动或文字被修改的情况
       final bool revealed = fallbackText == null
-          ? editorState.revealNodeByPath(nodePath)
-          : editorState.revealLinkedNode(nodePath: nodePath, text: fallbackText);
+          ? editorState.revealNodeByKey(nodeKey)
+          : editorState.revealLinkedNode(nodeKey: nodeKey, text: fallbackText);
       if (revealed) {
         onResult?.call(true);
         return;
@@ -1125,7 +1137,7 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _revealOutlineNodeWhenReady(
         tab,
-        nodePath,
+        nodeKey,
         maxFrames - 1,
         fallbackText: fallbackText,
         onResult: onResult,
@@ -1155,7 +1167,7 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
       final completer = Completer<bool>();
       _revealOutlineNodeWhenReady(
         _openedTabs[existingIndex],
-        target.nodePath,
+        _outlineNodeKey(target.nodeId, target.nodePath),
         10,
         fallbackText: target.anchorText,
         onResult: (result) {
@@ -1184,7 +1196,7 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
     final completer = Completer<bool>();
     _revealOutlineNodeWhenReady(
       openedTab,
-      target.nodePath,
+      _outlineNodeKey(target.nodeId, target.nodePath),
       10,
       fallbackText: target.anchorText,
       onResult: (result) {

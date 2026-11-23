@@ -149,7 +149,7 @@ class OutlineKeywordService extends ChangeNotifier {
   /// 同一节点内的重复关键词会被忽略，无关键词的节点不产生条目；
   /// 节点与子孙节点的图片文件名在此按设定项目录解析为绝对路径，
   /// 供正文悬浮卡片直接展示缩略图。
-  /// [notes] 提供按节点路径保存的备注数据，用于补齐关键词快照中缺失的表格。
+  /// [notes] 提供按节点键保存的备注数据，用于补齐关键词快照中缺失的表格。
   void _appendEntries({
     required String settingItemUuid,
     required String settingItemTitle,
@@ -157,19 +157,21 @@ class OutlineKeywordService extends ChangeNotifier {
     required Map<String, OutlineKeywordFileNode> nodes,
     Map<String, OutlineNoteData> notes = const {},
   }) {
-    final List<String> paths = nodes.keys.toList()..sort(_compareNodePaths);
-    for (final path in paths) {
-      final OutlineKeywordFileNode node = nodes[path]!;
+    final List<String> keys = OutlineCompanionStore.orderedNodeKeys(nodes.keys);
+    for (final key in keys) {
+      final OutlineKeywordFileNode node = nodes[key]!;
       final List<OutlineKeyword> keywords = _dedupeKeywords(node.keywords);
       if (keywords.isEmpty) continue;
+      final bool legacy = OutlineCompanionStore.isLegacyNodePath(key);
       _entries.add(OutlineKeywordEntry(
         settingItemUuid: settingItemUuid,
         settingItemTitle: settingItemTitle,
-        nodePath: path,
+        nodeId: legacy ? '' : key,
+        nodePath: legacy ? key : '',
         nodeText: node.text,
         imagePath: _resolveImagePath(settingItemFilePath, node.imageFileName),
         children: _resolveChildren(
-          parentPath: path,
+          parentPath: key,
           children: node.children,
           settingItemFilePath: settingItemFilePath,
           notes: notes,
@@ -210,7 +212,7 @@ class OutlineKeywordService extends ChangeNotifier {
       final String childPath = '$parentPath.${indices.join('.')}';
       resolved.add(child.withImagePath(
         _resolveImagePath(settingItemFilePath, child.imageFileName),
-        table: notes[childPath]?.table,
+        table: notes[child.nodeId.isNotEmpty ? child.nodeId : childPath]?.table,
       ));
     }
     return resolved;
@@ -246,7 +248,7 @@ class OutlineKeywordService extends ChangeNotifier {
       for (final keyword in entry.keywords) {
         final OutlineKeywordEntry? existing = _byKeyword[keyword.keyword];
         if (existing != null) {
-          if (existing.settingItemUuid != entry.settingItemUuid || existing.nodePath != entry.nodePath) {
+          if (existing.settingItemUuid != entry.settingItemUuid || _nodeKey(existing) != _nodeKey(entry)) {
             debugPrint('关键词「${keyword.keyword}」重复绑定，已保留先绑定的节点');
           }
           continue;
@@ -258,17 +260,7 @@ class OutlineKeywordService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// 比较两个节点层级路径的先后顺序
-  ///
-  /// 路径形如 `0.2.1`，按每级索引数值比较，保证同级顺序与大纲树一致。
-  int _compareNodePaths(String a, String b) {
-    final List<int> segmentsA = a.split('.').map((e) => int.tryParse(e) ?? 0).toList();
-    final List<int> segmentsB = b.split('.').map((e) => int.tryParse(e) ?? 0).toList();
-    final int length = segmentsA.length < segmentsB.length ? segmentsA.length : segmentsB.length;
-    for (int i = 0; i < length; i++) {
-      final int diff = segmentsA[i] - segmentsB[i];
-      if (diff != 0) return diff;
-    }
-    return segmentsA.length - segmentsB.length;
-  }
+  /// 节点的稳定键，老记录回退到层级路径
+  String _nodeKey(OutlineKeywordEntry entry) =>
+      entry.nodeId.isNotEmpty ? entry.nodeId : entry.nodePath;
 }

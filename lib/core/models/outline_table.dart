@@ -215,7 +215,7 @@ class OutlineTableCell {
 
   /// 标题级别（0=正文, 1=H1, 2=H2, 3=H3）
   ///
-  /// 与节点一致，级别越高字号越大，用于强调单元格内容。
+  /// 仅影响字号，与表格行列位置无关。
   int headingLevel;
 
   OutlineTableCell({

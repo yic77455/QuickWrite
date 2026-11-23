@@ -33,11 +33,18 @@ class OutlineLastEditCacheData {
     };
   }
 
-  /// 获取指定设定项上次编辑节点的路径
+  /// 获取指定设定项上次编辑节点的路径（老记录）
   ///
   /// 未记录时返回 null
   String? getLastEditedPath(String bookUuid, String settingItemUuid) {
     return books[bookUuid]?.items[settingItemUuid]?.path;
+  }
+
+  /// 获取上次编辑节点的稳定键：优先节点 ID，老记录回退路径
+  String? getLastEditedKey(String bookUuid, String settingItemUuid) {
+    final position = books[bookUuid]?.items[settingItemUuid];
+    if (position == null) return null;
+    return position.nodeId.isNotEmpty ? position.nodeId : position.path;
   }
 
   /// 记录指定设定项上次编辑节点的路径
@@ -129,16 +136,17 @@ class BookOutlineLastEditCache {
 
 /// 大纲上次编辑节点位置
 class OutlineLastEditPosition {
-  /// 节点自根节点起的层级索引路径（如 `0.2.1`）
-  ///
-  /// 节点 ID 每次解析文件都会重新生成，无法跨次加载对应到同一节点，
-  /// 因此与折叠状态一致，使用层级索引路径标识节点。
+  /// 稳定节点 ID（新记录使用）
+  final String nodeId;
+
+  /// 节点自根节点起的层级索引路径（老记录使用）
   final String path;
 
   /// 最后更新时间
   final DateTime updatedAt;
 
   const OutlineLastEditPosition({
+    this.nodeId = '',
     required this.path,
     required this.updatedAt,
   });
@@ -146,6 +154,7 @@ class OutlineLastEditPosition {
   /// 从 JSON Map 创建实例
   factory OutlineLastEditPosition.fromJson(Map<String, dynamic> json) {
     return OutlineLastEditPosition(
+      nodeId: json['nodeId'] as String? ?? '',
       path: json['path'] as String? ?? '',
       updatedAt: json['updatedAt'] != null
           ? DateTime.parse(json['updatedAt'] as String)
@@ -156,6 +165,7 @@ class OutlineLastEditPosition {
   /// 转换为 JSON Map
   Map<String, dynamic> toJson() {
     return {
+      if (nodeId.isNotEmpty) 'nodeId': nodeId,
       'path': path,
       'updatedAt': updatedAt.toIso8601String(),
     };

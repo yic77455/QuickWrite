@@ -65,6 +65,20 @@ class OutlineCompanionStore {
   /// 读写任务链
   Future<void> _taskChain = Future.value();
 
+  static final RegExp _legacyPathPattern = RegExp(r'^\d+(\.\d+)*$');
+
+  /// 判断是否为老文件的层级路径键
+  static bool isLegacyNodePath(String key) => _legacyPathPattern.hasMatch(key);
+
+  /// 稳定输出键顺序：老路径按数值排序，新 ID 保持调用方的树遍历顺序
+  static List<String> orderedNodeKeys(Iterable<String> keys) {
+    final list = keys.toList();
+    if (list.isNotEmpty && list.every(isLegacyNodePath)) {
+      list.sort(_compareNodePaths);
+    }
+    return list;
+  }
+
   // ================= 对外接口 =================
 
   /// 把设定项的伴生文件复制到指定目录
@@ -398,10 +412,9 @@ class OutlineCompanionStore {
   static Map<String, dynamic> _toJson(OutlineCompanionData data) {
     final Map<String, dynamic> json = {'version': 2};
 
-    final List<String> keywordPaths = data.keywords.keys
-        .where((path) => data.keywords[path]!.keywords.isNotEmpty)
-        .toList()
-      ..sort(_compareNodePaths);
+    final List<String> keywordPaths = orderedNodeKeys(
+      data.keywords.keys.where((key) => data.keywords[key]!.keywords.isNotEmpty),
+    );
     if (keywordPaths.isNotEmpty) {
       json['keywords'] = {
         for (final path in keywordPaths) path: data.keywords[path]!.toJson(),
@@ -409,10 +422,9 @@ class OutlineCompanionStore {
     }
 
     final List<String> linkIds = data.links.keys.toList()..sort();
-    final List<String> linkPaths = data.linkNodes.keys
-        .where((path) => data.linkNodes[path]!.isNotEmpty)
-        .toList()
-      ..sort(_compareNodePaths);
+    final List<String> linkPaths = orderedNodeKeys(
+      data.linkNodes.keys.where((key) => data.linkNodes[key]!.isNotEmpty),
+    );
     if (linkIds.isNotEmpty || linkPaths.isNotEmpty) {
       json['links'] = {
         if (linkIds.isNotEmpty)
@@ -427,10 +439,9 @@ class OutlineCompanionStore {
       };
     }
 
-    final List<String> notePaths = data.notes.keys
-        .where((path) => !data.notes[path]!.isEmpty)
-        .toList()
-      ..sort(_compareNodePaths);
+    final List<String> notePaths = orderedNodeKeys(
+      data.notes.keys.where((key) => !data.notes[key]!.isEmpty),
+    );
     if (notePaths.isNotEmpty) {
       json['notes'] = {
         for (final path in notePaths) path: data.notes[path]!.toJson(),
