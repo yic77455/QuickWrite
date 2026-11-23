@@ -10,6 +10,7 @@ import 'package:quick_write/core/services/app_paths.dart';
 import 'package:quick_write/core/services/workspace/book_folder_service.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 移动端简介输入框的固定高度
 ///
@@ -541,7 +542,7 @@ class _NewBookDialogContentState extends State<_NewBookDialogContent> {
     return ImeCursorFixerWrapper(
       controller: _titleController,
       focusNode: _titleFocusNode,
-      child: TextField(
+      child: QwTextField(
         controller: _titleController,
         focusNode: _titleFocusNode,
         autofocus: true,
@@ -571,7 +572,7 @@ class _NewBookDialogContentState extends State<_NewBookDialogContent> {
     return ImeCursorFixerWrapper(
       controller: _synopsisController,
       focusNode: _synopsisFocusNode,
-      child: TextField(
+      child: QwTextField(
         controller: _synopsisController,
         focusNode: _synopsisFocusNode,
         maxLines: null,

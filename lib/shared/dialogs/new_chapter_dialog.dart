@@ -7,6 +7,7 @@ import 'package:quick_write/core/utils/chapter_number_utils.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 显示新建章节/分卷对话框
 ///
@@ -302,7 +303,7 @@ class _NewChapterDialogContentState extends State<_NewChapterDialogContent>
         ImeCursorFixerWrapper(
           controller: _chapterTitleController,
           focusNode: _chapterTitleFocusNode,
-          child: TextField(
+          child: QwTextField(
             controller: _chapterTitleController,
             focusNode: _chapterTitleFocusNode,
             autofocus: true,
@@ -379,7 +380,7 @@ class _NewChapterDialogContentState extends State<_NewChapterDialogContent>
     return ImeCursorFixerWrapper(
       controller: _volumeNameController,
       focusNode: _volumeNameFocusNode,
-      child: TextField(
+      child: QwTextField(
         controller: _volumeNameController,
         focusNode: _volumeNameFocusNode,
         autofocus: false,

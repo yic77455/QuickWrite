@@ -3,6 +3,7 @@ import 'package:quick_write/core/services/workspace/sensitive_word_service.dart'
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/qw_dialogs.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 显示敏感词词库编辑弹窗
 ///
@@ -104,7 +105,7 @@ class _SensitiveWordEditorContentState
               child: ImeCursorFixerWrapper(
                 controller: _controller,
                 focusNode: _focusNode,
-                child: TextField(
+                child: QwTextField(
                   controller: _controller,
                   focusNode: _focusNode,
                   onTapOutside: (_) => _unfocus(),

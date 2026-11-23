@@ -5,6 +5,7 @@ import 'package:quick_write/core/models/name_gen/name_gen_options.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/qw_dropdown.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 生成参数面板
 ///
@@ -245,7 +246,7 @@ class NameOptionsPanel extends StatelessWidget {
           child: ImeCursorFixerWrapper(
             controller: controller,
             focusNode: focusNode,
-            child: TextField(
+            child: QwTextField(
               controller: controller,
               focusNode: focusNode,
               keyboardType: keyboardType,

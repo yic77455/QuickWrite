@@ -4,6 +4,7 @@ import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/qw_dialogs.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 显示快捷短语管理弹窗
 ///
@@ -443,7 +444,7 @@ class _QuickPhraseEditContentState extends State<_QuickPhraseEditContent> {
     return ImeCursorFixerWrapper(
       controller: _displayController,
       focusNode: _displayFocusNode,
-      child: TextField(
+      child: QwTextField(
         controller: _displayController,
         focusNode: _displayFocusNode,
         autofocus: true,
@@ -470,7 +471,7 @@ class _QuickPhraseEditContentState extends State<_QuickPhraseEditContent> {
     return ImeCursorFixerWrapper(
       controller: _contentController,
       focusNode: _contentFocusNode,
-      child: TextField(
+      child: QwTextField(
         controller: _contentController,
         focusNode: _contentFocusNode,
         onTapOutside: (_) => _unfocus(),

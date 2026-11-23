@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 带文本输入框的设置项
 ///
@@ -128,7 +129,7 @@ class SettingInputTile extends StatelessWidget {
 
   /// 文本输入框
   Widget _buildInputField() {
-    return TextField(
+    return QwTextField(
       controller: controller,
       obscureText: obscureText,
       // 点击输入框以外的区域（如测试连接、连接、立即同步等按钮）时取消输入框焦点，

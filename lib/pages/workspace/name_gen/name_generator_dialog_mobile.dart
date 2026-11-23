@@ -12,6 +12,7 @@ import 'package:quick_write/pages/workspace/name_gen/widgets/name_dictionary_edi
 import 'package:quick_write/pages/workspace/name_gen/widgets/name_dictionary_sheet.dart';
 import 'package:quick_write/pages/workspace/name_gen/widgets/name_result_panel.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 结果标签之间的间距
 const double _chipGap = 8;
@@ -658,7 +659,7 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
     final colorScheme = Theme.of(context).colorScheme;
     return SizedBox(
       height: _controlHeight,
-      child: TextField(
+      child: QwTextField(
         controller: controller,
         focusNode: focusNode,
         keyboardType: keyboardType,

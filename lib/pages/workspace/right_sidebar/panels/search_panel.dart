@@ -6,6 +6,7 @@ import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/search_query_parser.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/qw_tooltip.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 全文搜索面板
 ///
@@ -97,7 +98,7 @@ class _SearchPanelState extends State<SearchPanel> {
           ImeCursorFixerWrapper(
             controller: _searchController,
             focusNode: _searchFocusNode,
-            child: TextField(
+            child: QwTextField(
               controller: _searchController,
               focusNode: _searchFocusNode,
               onChanged: _onSearchChanged,

@@ -6,6 +6,7 @@ import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_color_palette.dart';
 import 'package:quick_write/shared/widgets/qw_dialogs.dart';
 import 'package:quick_write/shared/widgets/qw_tooltip.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 大纲节点关键词编辑弹窗
 ///
@@ -239,7 +240,7 @@ class _OutlineKeywordCardState extends State<OutlineKeywordCard> {
             child: ImeCursorFixerWrapper(
               controller: _inputController,
               focusNode: _inputFocusNode,
-              child: TextField(
+              child: QwTextField(
                 controller: _inputController,
                 focusNode: _inputFocusNode,
                 textInputAction: TextInputAction.done,

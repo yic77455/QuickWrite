@@ -10,6 +10,7 @@ import 'package:quick_write/core/models/outline_models.dart';
 import 'package:quick_write/core/utils/text_style_range.dart';
 import 'package:quick_write/pages/workspace/editor/utils/shortcut_catalog.dart';
 import 'package:quick_write/shared/widgets/toolbar_button.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 大纲编辑器顶部工具栏
 ///
@@ -492,7 +493,7 @@ class OutlineTitleField extends StatelessWidget {
               : ImeCursorFixerWrapper(
                   controller: controller,
                   focusNode: focusNode,
-                  child: TextField(
+                  child: QwTextField(
                     controller: controller,
                     focusNode: focusNode,
                     maxLines: 1,

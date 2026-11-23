@@ -5,6 +5,7 @@ import 'package:quick_write/core/models/setting_item.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/outline_markdown_codec.dart';
 import 'package:quick_write/shared/widgets/qw_dialogs.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 大纲关联目标选择弹窗
 ///
@@ -262,7 +263,7 @@ class _OutlineLinkDialogState extends State<OutlineLinkDialog> {
     return ImeCursorFixerWrapper(
       controller: controller,
       focusNode: focusNode,
-      child: TextField(
+      child: QwTextField(
         controller: controller,
         focusNode: focusNode,
         onChanged: onChanged,

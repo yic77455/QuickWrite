@@ -13,6 +13,7 @@ import 'package:quick_write/shared/widgets/qw_switch.dart';
 import 'package:quick_write/shared/widgets/qw_tooltip.dart';
 import 'package:quick_write/shared/widgets/toolbar_button.dart';
 import 'right_sidebar_widgets.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 显示自定义高亮设置对话框
 ///
@@ -549,7 +550,7 @@ class _CustomHighlightDialogContentState
           }
           return KeyEventResult.ignored;
         },
-        child: TextField(
+        child: QwTextField(
           controller: _editController,
           focusNode: _editFocusNode,
           autofocus: true,
@@ -645,7 +646,7 @@ class _CustomHighlightDialogContentState
           child: ImeCursorFixerWrapper(
             controller: _keywordInputController,
             focusNode: _keywordInputFocusNode,
-            child: TextField(
+            child: QwTextField(
               controller: _keywordInputController,
               focusNode: _keywordInputFocusNode,
               decoration: InputDecoration(

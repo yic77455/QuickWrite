@@ -8,6 +8,7 @@ import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/persistent_selection.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_table_block.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 大纲节点的附加备注区
 ///
@@ -579,7 +580,7 @@ class _OutlineNodeAttachmentState extends State<OutlineNodeAttachment> {
         child: ImeCursorFixerWrapper(
           controller: _noteController,
           focusNode: _noteFocusNode,
-          child: TextField(
+          child: QwTextField(
             key: _noteFieldKey,
             controller: _noteController,
             focusNode: _noteFocusNode,

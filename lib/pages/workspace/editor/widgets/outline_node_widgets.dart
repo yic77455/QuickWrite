@@ -1,10 +1,8 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/services/settings_service.dart';
-import 'package:quick_write/core/utils/find_match_highlighter.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/persistent_selection.dart';
-import 'package:quick_write/core/utils/rich_text_controller.dart';
 import 'package:quick_write/core/models/outline_models.dart';
 import 'package:quick_write/core/models/outline_keyword.dart';
 import 'package:quick_write/core/models/outline_table.dart';
@@ -13,6 +11,7 @@ import 'package:quick_write/pages/workspace/editor/widgets/outline_color_palette
 import 'package:quick_write/pages/workspace/editor/widgets/outline_connection_painter.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_editor_widgets.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_node_attachment.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 单个节点行组件
 ///
@@ -320,14 +319,6 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
   /// 展开态与折叠态共用该偏移量做整体水平微调，默认为 0 时两态三角均落在竖条内居中位置
   static const double _trailingBarIconOffsetX = 1.0;
 
-  /// 失焦时绘制持久化选区的 Painter
-  final PersistentSelectionOverlayPainter _persistentSelectionPainter = PersistentSelectionOverlayPainter();
-
-  /// 当前查找匹配高亮绘制器
-  ///
-  /// 与持久化选区绘制器组合注入 RenderEditable，绘制在选区之上、文字之下。
-  final CurrentMatchHighlightPainter _currentMatchPainter = CurrentMatchHighlightPainter();
-
   /// 关键词标签的锚点（相对于文本输入框左上角）
   ///
   /// 由节点文本末尾的光标矩形决定，标签紧随文本末尾排布；
@@ -458,26 +449,17 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
   @override
   void initState() {
     super.initState();
-    // 监听焦点变化，更新持久化选区 Painter 的失焦状态
     widget.focusNode.addListener(_onFocusChanged);
-    // 监听选区变化，同步给 Painter
     widget.controller.addListener(_onSelectionChanged);
-    // 第一帧后将 Painter 注入到 RenderEditable，此时渲染树已构建完成
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _attachPersistentSelectionPainter();
-    });
   }
 
   @override
   void dispose() {
     widget.focusNode.removeListener(_onFocusChanged);
     widget.controller.removeListener(_onSelectionChanged);
-    _persistentSelectionPainter.dispose();
-    _currentMatchPainter.dispose();
     super.dispose();
   }
 
-  /// 焦点变化时更新 Painter 的失焦状态
   void _onFocusChanged() {
     final hasFocus = widget.focusNode.hasFocus;
     // 失焦时：非右键菜单目标节点清除文本选区，避免切换到其他节点时旧选区残留
@@ -485,16 +467,9 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
       final offset = widget.controller.selection.baseOffset.clamp(0, widget.controller.text.length);
       widget.controller.selection = TextSelection.collapsed(offset: offset);
     }
-    _persistentSelectionPainter.update(
-      isUnfocused: !hasFocus,
-      selection: widget.controller.selection,
-      color: computePersistentSelectionColor(context, widget.colorScheme.primary),
-    );
   }
 
-  /// 选区变化时同步给 Painter
   void _onSelectionChanged() {
-    _persistentSelectionPainter.update(selection: widget.controller.selection);
     // 文本变化会改变文本末尾位置，重新测量关键词标签锚点
     _scheduleKeywordMeasure();
   }
@@ -570,31 +545,6 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
     });
   }
 
-  /// 将持久化选区 Painter 注入到 RenderEditable
-  void _attachPersistentSelectionPainter() {
-    attachPersistentSelectionPainter(
-      textFieldKey: _textFieldKey,
-      painter: _persistentSelectionPainter,
-      controller: widget.controller,
-      focusNode: widget.focusNode,
-      context: context,
-      fallbackColor: widget.colorScheme.primary,
-      // 当前匹配高亮排在选区绘制器之后，避免被选区遮盖
-      overlayPainter: _currentMatchPainter,
-    );
-  }
-
-  /// 将节点的查找匹配状态同步给当前匹配高亮绘制器
-  void _syncCurrentMatchPainter(BuildContext context) {
-    final controller = widget.controller;
-    if (controller is! RichTextEditingController) return;
-    _currentMatchPainter.update(
-      matches: controller.findMatches,
-      currentMatchIndex: controller.currentMatchIndex,
-      color: FindMatchHighlighter.getCurrentMatchColor(context),
-    );
-  }
-
   /// 最大标题级别常量
   ///
   /// 用于计算标题字号偏移，扩展标题级别时只需调整此值。
@@ -624,9 +574,6 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
         final colorScheme = widget.colorScheme;
         final indentWidth = widget.indentWidth;
         final lineColor = colorScheme.outlineVariant.withValues(alpha: 0.4);
-
-        // 同步当前节点的查找匹配状态，供高亮绘制器使用
-        _syncCurrentMatchPainter(context);
 
         // 移动端折叠入口位于行尾，行首不再为折叠箭头预留列，指示区整体左移一列
         final bool isMobile = PlatformCapabilities.isMobile;
@@ -851,7 +798,7 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
     final Widget textField = Padding(
       // 没有关键词时忽略历史遗留的预留高度，避免节点行下方多出空白
       padding: EdgeInsets.only(bottom: node.keywords.isEmpty ? 0 : _keywordOverflowHeight),
-      child: _buildTextField(node, colorScheme),
+      child: _buildQwTextField(node, colorScheme),
     );
 
     final Rect? anchor = _keywordAnchor;
@@ -968,7 +915,7 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
   /// 构建节点文本输入区
   ///
   /// 批量选择模式下屏蔽输入交互，节点只能整体选中与操作，不能编辑文字
-  Widget _buildTextField(OutlineNode node, ColorScheme colorScheme) {
+  Widget _buildQwTextField(OutlineNode node, ColorScheme colorScheme) {
     return IgnorePointer(
       ignoring: widget.isBatchMode,
       child: ImeCursorFixerWrapper(
@@ -986,7 +933,7 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
             child: Listener(
               onPointerDown: _handleLinkPointerDown,
               onPointerUp: _handleLinkPointerUp,
-              child: TextField(
+              child: QwTextField(
                 key: _textFieldKey,
                 controller: widget.controller,
                 focusNode: widget.focusNode,

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 移动端弹窗距离屏幕左右两侧的最小间距
 ///
@@ -652,7 +653,7 @@ class _InputDialogContentState extends State<_InputDialogContent> {
           ImeCursorFixerWrapper(
             controller: _controller,
             focusNode: _focusNode,
-            child: TextField(
+            child: QwTextField(
               style: context.bodyLarge,
               controller: _controller,
               focusNode: _focusNode,

@@ -6,6 +6,7 @@ import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 import '../utils/shortcut_catalog.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 查找替换栏
 ///
@@ -366,7 +367,7 @@ class FindReplaceBarState extends State<FindReplaceBar> {
     return ImeCursorFixerWrapper(
       controller: controller,
       focusNode: focusNode,
-      child: TextField(
+      child: QwTextField(
         controller: controller,
         focusNode: focusNode,
         style: context.bodySmall?.copyWith(color: colorScheme.onSurface),

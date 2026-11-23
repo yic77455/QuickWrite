@@ -5,6 +5,7 @@ import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/qw_dialogs.dart';
 import 'package:quick_write/shared/widgets/qw_switch.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 显示正文自动替换规则弹窗
 ///
@@ -439,7 +440,7 @@ class _AutoReplaceRuleEditContentState extends State<_AutoReplaceRuleEditContent
     return ImeCursorFixerWrapper(
       controller: _triggerController,
       focusNode: _triggerFocusNode,
-      child: TextField(
+      child: QwTextField(
         controller: _triggerController,
         focusNode: _triggerFocusNode,
         autofocus: true,
@@ -466,7 +467,7 @@ class _AutoReplaceRuleEditContentState extends State<_AutoReplaceRuleEditContent
     return ImeCursorFixerWrapper(
       controller: _replacementController,
       focusNode: _replacementFocusNode,
-      child: TextField(
+      child: QwTextField(
         controller: _replacementController,
         focusNode: _replacementFocusNode,
         onTapOutside: (_) => _unfocus(),

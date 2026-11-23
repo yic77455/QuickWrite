@@ -1,5 +1,4 @@
 import 'package:flutter/widgets.dart';
-import 'package:quick_write/core/utils/find_match_highlighter.dart';
 import 'package:quick_write/core/utils/text_style_range.dart';
 
 /// 富文本编辑控制器
@@ -9,6 +8,10 @@ import 'package:quick_write/core/utils/text_style_range.dart';
 ///
 /// 样式区间维护由外部（编辑器）完成，本类只负责渲染。
 class RichTextEditingController extends TextEditingController {
+  // 透明画笔：copyWith(background: ...) 会顺带清空 backgroundColor
+  static final Paint _transparentBackground = Paint()
+    ..color = const Color(0x00000000);
+
   /// 样式区间列表
   ///
   /// 由外部维护并设置，应为不重叠、按 start 排序的规范形式。
@@ -52,20 +55,22 @@ class RichTextEditingController extends TextEditingController {
     required bool withComposing,
   }) {
     final text = this.text;
-    final baseStyle = style ?? const TextStyle();
+    final baseStyle = (style ?? const TextStyle()).copyWith(
+      background: _transparentBackground,
+    );
     final hasFindMatches = findMatches.isNotEmpty;
 
     // 无样式区间且无查找匹配时，使用默认构建
     if (_styleRanges.isEmpty && !hasFindMatches) {
       return super.buildTextSpan(
         context: context,
-        style: style,
+        style: baseStyle,
         withComposing: withComposing,
       );
     }
 
     if (text.isEmpty) {
-      return TextSpan(text: '', style: style);
+      return TextSpan(text: '', style: baseStyle);
     }
 
     // 按 start 排序，确保分段顺序正确
@@ -95,7 +100,10 @@ class RichTextEditingController extends TextEditingController {
       // 添加带样式的段
       children.add(TextSpan(
         text: text.substring(start, end),
-        style: styleResolver(baseStyle, range.flags),
+        // 字底色改由 QwTextFieldPainter 在选区之前绘制
+        style: styleResolver(baseStyle, range.flags).copyWith(
+          background: _transparentBackground,
+        ),
       ));
       currentPos = end;
     }
@@ -122,18 +130,7 @@ class RichTextEditingController extends TextEditingController {
       children.add(TextSpan(text: text, style: baseStyle));
     }
 
-    // 叠加查找匹配高亮
-    if (hasFindMatches) {
-      final highlightedChildren = FindMatchHighlighter.apply(
-        spans: children,
-        matches: findMatches,
-        currentMatchIndex: currentMatchIndex,
-        matchColor: FindMatchHighlighter.getMatchColor(context),
-        currentMatchColor: FindMatchHighlighter.getCurrentMatchColor(context),
-      );
-      return TextSpan(style: baseStyle, children: highlightedChildren);
-    }
-
+    // 查找匹配底色改由 QwTextFieldPainter 绘制
     return TextSpan(style: baseStyle, children: children);
   }
 }

@@ -29,6 +29,7 @@ import 'package:quick_write/pages/workspace/editor/widgets/outline_keyword_hover
 import 'package:quick_write/pages/workspace/editor/widgets/re_editor_ime_reporter.dart';
 import 'package:quick_write/shared/widgets/context_menu.dart';
 import 'package:re_editor/re_editor.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 小说编辑器
 ///
@@ -1737,7 +1738,7 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
       child: ImeCursorFixerWrapper(
         controller: titleController,
         focusNode: _titleFocusNode,
-        child: TextField(
+        child: QwTextField(
           controller: titleController,
           focusNode: _titleFocusNode,
           decoration: const InputDecoration(

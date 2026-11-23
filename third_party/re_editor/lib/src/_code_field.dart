@@ -1999,6 +1999,7 @@ abstract class _CodeFieldSelectionsPainter extends _CodeFieldExtraPainter {
     if (paragraphs.isEmpty) {
       return;
     }
+    final Path path = Path();
     for (final CodeLineSelection selection in _selections) {
       if (selection.isCollapsed) {
         continue;
@@ -2044,8 +2045,7 @@ abstract class _CodeFieldSelectionsPainter extends _CodeFieldExtraPainter {
         }
         final Offset paragraphOffset = paragraph.offset - render.paintOffset;
         for (final Rect rect in rects) {
-          // 逐行排版时字符盒的高度略小于行高，相邻行（含自动换行的视觉行）的矩形之间会残留细缝，
-          // 将当前矩形顶边上移到上一行的底边，使两行衔接处不留空白
+          // 把当前矩形顶边接到上一行底边，避免行间留白
           Rect current = rect;
           final double? bottom = previousBottom;
           if (bottom != null && current.top + paragraphOffset.dy > bottom) {
@@ -2057,20 +2057,22 @@ abstract class _CodeFieldSelectionsPainter extends _CodeFieldExtraPainter {
             );
           }
           previousBottom = current.bottom + paragraphOffset.dy;
-          if (rect == rects.last && paragraph.index < end.index) {
-            _drawRect(canvas, Rect.fromPoints(current.topLeft, current.bottomRight + _newLinePadding),
-              paragraphOffset);
-          } else if (!current.isEmpty) {
-            _drawRect(canvas, current, paragraphOffset);
-          }
+          final Rect drawRect = rect == rects.last && paragraph.index < end.index
+              ? Rect.fromPoints(current.topLeft, current.bottomRight + _newLinePadding)
+              : current;
+          if (drawRect.isEmpty) continue;
+          // 上下外扩 1px、左右 0.2px，合并到同一 Path 一次绘制，避免半透明重叠与行间细缝
+          path.addRect(Rect.fromLTRB(
+            drawRect.left - 0.2 + paragraphOffset.dx,
+            drawRect.top - 1.0 + paragraphOffset.dy,
+            drawRect.right + 0.2 + paragraphOffset.dx,
+            drawRect.bottom + 1.0 + paragraphOffset.dy,
+          ));
         }
       }
     }
-  }
-
-  void _drawRect(Canvas canvas, Rect rect, Offset offset) {
     _paint.color = _color;
-    canvas.drawRect(Rect.fromPoints(rect.topLeft + offset, rect.bottomRight + offset), _paint);
+    canvas.drawPath(path, _paint);
   }
 
 }

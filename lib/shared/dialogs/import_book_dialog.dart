@@ -11,6 +11,7 @@ import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/word_count_utils.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 显示导入书籍对话框
 Future<void> showImportBookDialog(BuildContext context) {
@@ -499,7 +500,7 @@ class _ImportBookDialogContentState extends State<_ImportBookDialogContent> {
         ImeCursorFixerWrapper(
           controller: controller,
           focusNode: focusNode,
-          child: TextField(
+          child: QwTextField(
             controller: controller,
             focusNode: focusNode,
             enabled: !_isImporting,

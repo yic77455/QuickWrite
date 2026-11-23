@@ -4,6 +4,7 @@ import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/qw_dialogs.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 显示快捷输入栏符号列表编辑弹窗
 ///
@@ -89,7 +90,7 @@ class _QuickInputSymbolsContentState extends State<_QuickInputSymbolsContent> {
               child: ImeCursorFixerWrapper(
                 controller: _controller,
                 focusNode: _focusNode,
-                child: TextField(
+                child: QwTextField(
                   controller: _controller,
                   focusNode: _focusNode,
                   onTapOutside: (_) => _unfocus(),

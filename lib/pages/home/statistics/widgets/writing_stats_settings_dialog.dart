@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:quick_write/core/providers/writing_stats_provider.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 显示码字统计设置弹窗
 ///
@@ -153,7 +154,7 @@ class _WritingStatsSettingsContentState
 
     return SizedBox(
       width: 92,
-      child: TextField(
+      child: QwTextField(
         controller: _idleController,
         focusNode: _idleFocusNode,
         keyboardType: TextInputType.number,

@@ -19,6 +19,7 @@ import 'package:quick_write/pages/workspace/editor/widgets/outline_color_palette
 import 'package:quick_write/pages/workspace/editor/widgets/outline_editor_widgets.dart';
 import 'package:quick_write/pages/workspace/widgets/mobile_table_toolbar_binding.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 单元格坐标（行、列）
 typedef _CellPosition = ({int row, int col});
@@ -2282,7 +2283,7 @@ class _OutlineTableBlockState extends State<OutlineTableBlock>
           child: ImeCursorFixerWrapper(
             controller: controller,
             focusNode: focusNode,
-            child: TextField(
+            child: QwTextField(
               controller: controller,
               focusNode: focusNode,
               readOnly: widget.readOnly,

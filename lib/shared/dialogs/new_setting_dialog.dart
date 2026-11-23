@@ -6,6 +6,7 @@ import 'package:quick_write/core/services/cache_services/misc_cache_service.dart
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 显示新建设定/分组对话框
 ///
@@ -285,7 +286,7 @@ class _NewSettingDialogContentState extends State<_NewSettingDialogContent>
         ImeCursorFixerWrapper(
           controller: _settingTitleController,
           focusNode: _settingTitleFocusNode,
-          child: TextField(
+          child: QwTextField(
             controller: _settingTitleController,
             focusNode: _settingTitleFocusNode,
             autofocus: true,
@@ -360,7 +361,7 @@ class _NewSettingDialogContentState extends State<_NewSettingDialogContent>
     return ImeCursorFixerWrapper(
       controller: _groupNameController,
       focusNode: _groupNameFocusNode,
-      child: TextField(
+      child: QwTextField(
         controller: _groupNameController,
         focusNode: _groupNameFocusNode,
         autofocus: false,

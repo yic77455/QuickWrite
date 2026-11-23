@@ -6,6 +6,7 @@ import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/qw_dialogs.dart';
 import 'package:quick_write/shared/widgets/qw_dropdown.dart';
 import 'package:quick_write/shared/widgets/qw_switch.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 显示词典编辑对话框
 ///
@@ -298,7 +299,7 @@ class _NameDictionaryEditorContentState extends State<_NameDictionaryEditorConte
     return ImeCursorFixerWrapper(
       controller: _nameController,
       focusNode: _nameFocusNode,
-      child: TextField(
+      child: QwTextField(
         controller: _nameController,
         focusNode: _nameFocusNode,
         onTapOutside: (_) => _unfocus(),
@@ -334,7 +335,7 @@ class _NameDictionaryEditorContentState extends State<_NameDictionaryEditorConte
       child: ImeCursorFixerWrapper(
         controller: input.controller,
         focusNode: input.focusNode,
-        child: TextField(
+        child: QwTextField(
           controller: input.controller,
           focusNode: input.focusNode,
           onTapOutside: (_) => _unfocus(),
