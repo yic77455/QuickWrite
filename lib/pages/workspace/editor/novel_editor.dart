@@ -18,6 +18,7 @@ import 'package:quick_write/core/utils/clean_scroll.dart';
 import 'package:quick_write/core/utils/clipboard_state_cache.dart';
 import 'package:quick_write/core/utils/code_line_selection_utils.dart';
 import 'package:quick_write/core/utils/color_utils.dart';
+import 'package:quick_write/core/utils/find_match_highlighter.dart';
 import 'package:quick_write/core/utils/editor_scroll_helper.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/core/utils/persistent_selection.dart';
@@ -1497,11 +1498,8 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
       return hash;
     });
 
-    // 同步查找匹配到样式构建器，并刷新其高亮解析缓存
     final ReEditorSpanBuilder? spanBuilder = widget.spanBuilder;
     if (spanBuilder != null) {
-      spanBuilder.findMatches = workspaceProvider.findMatches;
-      spanBuilder.currentMatchIndex = workspaceProvider.currentMatchIndex;
       spanBuilder.update(context: context, text: widget.controller.text);
     }
 
@@ -1836,6 +1834,16 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
     final Color focusedSelectionColor = computeFocusedSelectionColor(colorScheme);
     final Color unfocusedSelectionColor = computePersistentSelectionColor(context, colorScheme.primary);
+    // 查找匹配变化时重建编辑器，供 span/painter 同步
+    context.select<WorkspaceProvider, int>((p) {
+      final matches = p.findMatches;
+      int hash = p.currentMatchIndex ^ matches.length;
+      for (final m in matches) {
+        hash = Object.hash(hash, m.start, m.end);
+      }
+      return hash;
+    });
+    final WorkspaceProvider workspaceProvider = context.read<WorkspaceProvider>();
     // 行间线样式：仅在开启时传入，关闭时交由编辑器跳过绘制
     final CodeLineSeparatorStyle? lineSeparator = settings.showLineSeparator
         ? CodeLineSeparatorStyle(
@@ -1874,8 +1882,14 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
                 backgroundColor: Colors.transparent,
                 cursorColor: colorScheme.primary,
                 cursorWidth: _cursorWidth,
-                selectionColor: _focusNode.hasFocus ? focusedSelectionColor : unfocusedSelectionColor,
+                selectionColor: _focusNode.hasFocus
+                    ? focusedSelectionColor
+                    : unfocusedSelectionColor,
                 highlightColor: focusedSelectionColor,
+                findMatches: workspaceProvider.findMatches,
+                currentMatchIndex: workspaceProvider.currentMatchIndex,
+                findMatchColor: FindMatchHighlighter.getMatchColor(context),
+                currentFindMatchColor: FindMatchHighlighter.getCurrentMatchColor(context),
                 lineSeparator: lineSeparator,
                 // 视觉首行缩进：首行缩进改由排版实现，正文不再写入全角空格
                 firstLineIndent: _resolveFirstLineIndentWidth(settings),

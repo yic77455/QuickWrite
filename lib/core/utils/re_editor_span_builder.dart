@@ -6,7 +6,6 @@ import 'package:quick_write/core/services/workspace/sensitive_word_service.dart'
 import 'package:quick_write/core/models/outline_keyword.dart';
 import 'package:quick_write/core/utils/color_utils.dart';
 import 'package:quick_write/core/utils/custom_highlight_regex.dart';
-import 'package:quick_write/core/utils/find_match_highlighter.dart';
 import 'package:quick_write/core/utils/highlight_range_resolver.dart';
 import 'package:re_editor/re_editor.dart';
 
@@ -46,12 +45,6 @@ class ReEditorSpanBuilder {
 
   /// 大纲关键词悬停离开回调
   void Function(String keyword)? onKeywordHoverExit;
-
-  /// 查找匹配范围（相对于全文的扁平偏移量）
-  List<TextSelection> findMatches = const [];
-
-  /// 当前选中匹配在 [findMatches] 中的索引（-1 表示无选中）
-  int currentMatchIndex = -1;
 
   /// 缓存：上一次参与解析的文本
   String _text = '';
@@ -254,16 +247,7 @@ class ReEditorSpanBuilder {
       ));
     }
 
-    // 查找匹配高亮
-    if (findMatches.isNotEmpty) {
-      ranges.addAll(HighlightRangeResolver.parseFindMatchRanges(
-        findMatches,
-        currentMatchIndex,
-        FindMatchHighlighter.getMatchColor(context),
-        FindMatchHighlighter.getCurrentMatchColor(context),
-      ));
-    }
-
+    // 查找匹配高亮由 QwTextFieldPainter 同级的正文 painter 绘制，不再写入 span
     return HighlightRangeResolver.mergeRanges(ranges);
   }
 
@@ -337,11 +321,7 @@ class ReEditorSpanBuilder {
   String _configSignatureOf() {
     final SettingsService settings = SettingsService.instance;
     final StringBuffer buffer = StringBuffer()
-      ..write(settings.dialogueHighlightEnabled)
-      ..write('|')
-      ..write(currentMatchIndex)
-      ..write('|')
-      ..write(findMatches.length);
+      ..write(settings.dialogueHighlightEnabled);
 
     // 关键词修饰键状态决定是否参与大纲关键词高亮；按住时还需纳入关键词索引版本
     buffer

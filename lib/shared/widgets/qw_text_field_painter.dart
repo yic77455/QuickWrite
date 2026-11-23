@@ -136,6 +136,20 @@ class QwTextFieldPainter extends RenderEditablePainter {
           0.0,
         );
       }
+      if (rich.currentMatchIndex >= 0 &&
+          rich.currentMatchIndex < rich.findMatches.length) {
+        final match = rich.findMatches[rich.currentMatchIndex];
+        _drawRange(
+          canvas,
+          renderEditable,
+          match.start,
+          match.end,
+          currentMatchColor,
+          textLength,
+          0.2,
+          1.0,
+        );
+      }
     }
 
     final TextSelection? selection = renderEditable.selection;
@@ -153,28 +167,27 @@ class QwTextFieldPainter extends RenderEditablePainter {
       if (renderEditable.selectionWidthStyle == ui.BoxWidthStyle.tight) {
         _addNewlineBlocks(path, renderEditable, selection, textLength);
       }
+      final bool active =
+          renderEditable.hasFocus || _isCurrentFindMatch(selection, rich);
       canvas.drawPath(
         path,
-        Paint()
-          ..color = renderEditable.hasFocus ? focusedColor : unfocusedColor,
+        Paint()..color = active ? focusedColor : unfocusedColor,
       );
     }
 
-    if (rich != null &&
-        rich.currentMatchIndex >= 0 &&
-        rich.currentMatchIndex < rich.findMatches.length) {
-      final match = rich.findMatches[rich.currentMatchIndex];
-      _drawRange(
-        canvas,
-        renderEditable,
-        match.start,
-        match.end,
-        currentMatchColor,
-        textLength,
-        0.2,
-        1.0,
-      );
+  }
+
+  bool _isCurrentFindMatch(
+    TextSelection selection,
+    RichTextEditingController? rich,
+  ) {
+    if (rich == null ||
+        rich.currentMatchIndex < 0 ||
+        rich.currentMatchIndex >= rich.findMatches.length) {
+      return false;
     }
+    final TextSelection match = rich.findMatches[rich.currentMatchIndex];
+    return selection.start == match.start && selection.end == match.end;
   }
 
   void _drawRange(

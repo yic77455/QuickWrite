@@ -52,6 +52,10 @@ class CodeEditorStyle {
     this.backgroundColor,
     this.selectionColor,
     this.highlightColor,
+    this.findMatches,
+    this.currentMatchIndex = -1,
+    this.findMatchColor,
+    this.currentFindMatchColor,
     this.cursorColor,
     this.cursorWidth,
     this.cursorLineColor,
@@ -160,6 +164,18 @@ class CodeEditorStyle {
   ///
   /// The paint layer is above [selectionColor].
   final Color? highlightColor;
+
+  /// 查找匹配范围（全文扁平偏移量）
+  final List<TextSelection>? findMatches;
+
+  /// 当前匹配在 [findMatches] 中的索引
+  final int currentMatchIndex;
+
+  /// 普通查找匹配底色
+  final Color? findMatchColor;
+
+  /// 当前查找匹配底色
+  final Color? currentFindMatchColor;
 
   /// The color of the cursor.
   ///
@@ -698,6 +714,10 @@ class _CodeEditorState extends State<CodeEditor> {
       backgroundColor: widget.style?.backgroundColor,
       selectionColor: widget.style?.selectionColor ?? selectionTheme.selectionColor ?? theme.colorScheme.primary.withOpacity(0.4),
       highlightColor: widget.style?.highlightColor ?? selectionTheme.selectionColor ?? theme.colorScheme.primary.withOpacity(0.4),
+      findMatches: widget.style?.findMatches ?? const [],
+      currentMatchIndex: widget.style?.currentMatchIndex ?? -1,
+      findMatchColor: widget.style?.findMatchColor,
+      currentFindMatchColor: widget.style?.currentFindMatchColor,
       cursorColor:  widget.style?.cursorColor ?? selectionTheme.cursorColor ?? theme.colorScheme.primary,
       cursorLineColor: widget.style?.cursorLineColor,
       chunkIndicatorColor: widget.style?.chunkIndicatorColor,

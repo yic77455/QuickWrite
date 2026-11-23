@@ -20,6 +20,10 @@ class _CodeField extends SingleChildRenderObjectWidget {
   final ValueChanged<List<CodeLineRenderParagraph>> onRenderParagraphsChanged;
   final Color selectionColor;
   final Color highlightColor;
+  final List<TextSelection> findMatches;
+  final int currentMatchIndex;
+  final Color? findMatchColor;
+  final Color? currentFindMatchColor;
   final Color cursorColor;
   final Color floatingCursorColor;
   final Color? cursorLineColor;
@@ -56,6 +60,10 @@ class _CodeField extends SingleChildRenderObjectWidget {
     required this.onRenderParagraphsChanged,
     required this.selectionColor,
     required this.highlightColor,
+    required this.findMatches,
+    required this.currentMatchIndex,
+    this.findMatchColor,
+    this.currentFindMatchColor,
     required this.cursorColor,
     floatingCursorColor,
     this.cursorLineColor,
@@ -94,6 +102,10 @@ class _CodeField extends SingleChildRenderObjectWidget {
     onRenderParagraphsChanged: onRenderParagraphsChanged,
     selectionColor: selectionColor,
     highlightColor: highlightColor,
+    findMatches: findMatches,
+    currentMatchIndex: currentMatchIndex,
+    findMatchColor: findMatchColor,
+    currentFindMatchColor: currentFindMatchColor,
     cursorColor: cursorColor,
     floatingCursorColor: floatingCursorColor,
     cursorLineColor: cursorLineColor,
@@ -130,6 +142,10 @@ class _CodeField extends SingleChildRenderObjectWidget {
       ..onRenderParagraphsChanged = onRenderParagraphsChanged
       ..selectionColor = selectionColor
       ..highlightColor = highlightColor
+      ..findMatches = findMatches
+      ..currentMatchIndex = currentMatchIndex
+      ..findMatchColor = findMatchColor
+      ..currentFindMatchColor = currentFindMatchColor
       ..cursorColor = cursorColor
       ..floatingCursorColor = floatingCursorColor
       ..cursorLineColor = cursorLineColor
@@ -169,6 +185,13 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
   double _horizontalScrollbarHeight;
   CodeLines _codes;
   CodeLineSelection _selection;
+  List<TextSelection> _findMatches = const [];
+  int _currentMatchIndex = -1;
+  Color? _findMatchColor;
+  Color? _currentFindMatchColor;
+  late final _CodeFieldHighlightPainter _findMatchPainter;
+  late final _CodeFieldHighlightPainter _currentFindMatchPainter;
+  late final _CodeFieldHighlightPainter _highlightPainter;
   TextStyle _textStyle;
   bool _hasFocus;
   _CodeHighlighter _highlighter;
@@ -227,6 +250,10 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
     required ValueChanged<List<CodeLineRenderParagraph>> onRenderParagraphsChanged,
     required Color selectionColor,
     required Color highlightColor,
+    required List<TextSelection> findMatches,
+    required int currentMatchIndex,
+    Color? findMatchColor,
+    Color? currentFindMatchColor,
     required Color cursorColor,
     required Color floatingCursorColor,
     Color? cursorLineColor,
@@ -249,6 +276,10 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
     _horizontalScrollbarHeight = horizontalScrollbarHeight,
     _codes = codes,
     _selection = selection,
+    _findMatches = findMatches,
+    _currentMatchIndex = currentMatchIndex,
+    _findMatchColor = findMatchColor,
+    _currentFindMatchColor = currentFindMatchColor,
     _textStyle = textStyle,
     _hasFocus = hasFocus,
     _highlighter = highlighter,
@@ -269,11 +300,25 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
     _cursor = SystemMouseCursors.text,
     _startHandleLayerLink = startHandleLayerLink,
     _endHandleLayerLink = endHandleLayerLink {
+    _findMatchPainter = _CodeFieldHighlightPainter(
+      findMatchColor ?? Colors.transparent,
+      const [],
+    );
+    _currentFindMatchPainter = _CodeFieldHighlightPainter(
+      currentFindMatchColor ?? Colors.transparent,
+      const [],
+    );
+    _highlightPainter = _CodeFieldHighlightPainter(
+      highlightColor,
+      highlightSelections ?? const [],
+    );
     _backgroundRender = _CodeFieldExtraRender(
       painters: [
         _CodeCursorLinePainter(cursorLineColor, _selection),
+        _findMatchPainter,
+        _currentFindMatchPainter,
+        _highlightPainter,
         _CodeFieldSelectionPainter(selectionColor, _selection),
-        _CodeFieldHighlightPainter(highlightColor, highlightSelections ?? const [])
       ]
     );
     adoptChild(_backgroundRender);
@@ -297,6 +342,7 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
     );
     adoptChild(_foregroundRender);
     _calculatePreferredLineHeight();
+    _syncFindMatchSelections();
   }
 
   set verticalViewport(ViewportOffset value) {
@@ -416,7 +462,95 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
   }
 
   set highlightSelections(List<CodeLineSelection>? value) {
-    _backgroundRender.find<_CodeFieldHighlightPainter>().selections = value ?? const [];
+    _highlightPainter.selections = value ?? const [];
+  }
+
+  set findMatches(List<TextSelection> value) {
+    if (listEquals(_findMatches, value)) {
+      return;
+    }
+    _findMatches = value;
+    _syncFindMatchSelections();
+  }
+
+  set currentMatchIndex(int value) {
+    if (_currentMatchIndex == value) {
+      return;
+    }
+    _currentMatchIndex = value;
+    _syncFindMatchSelections();
+  }
+
+  set findMatchColor(Color? value) {
+    if (_findMatchColor == value) {
+      return;
+    }
+    _findMatchColor = value;
+    _findMatchPainter.color = value ?? Colors.transparent;
+  }
+
+  set currentFindMatchColor(Color? value) {
+    if (_currentFindMatchColor == value) {
+      return;
+    }
+    _currentFindMatchColor = value;
+    _currentFindMatchPainter.color = value ?? Colors.transparent;
+  }
+
+  void _syncFindMatchSelections() {
+    final List<CodeLineSelection> normal = <CodeLineSelection>[];
+    CodeLineSelection? current;
+    for (int i = 0; i < _findMatches.length; i++) {
+      final CodeLineSelection? selection = _toCodeLineSelection(_findMatches[i]);
+      if (selection == null) {
+        continue;
+      }
+      if (i == _currentMatchIndex) {
+        current = selection;
+      } else {
+        normal.add(selection);
+      }
+    }
+    _findMatchPainter.selections = normal;
+    _currentFindMatchPainter.selections = current == null
+        ? const <CodeLineSelection>[]
+        : <CodeLineSelection>[current];
+  }
+
+  CodeLineSelection? _toCodeLineSelection(TextSelection selection) {
+    if (!selection.isValid) {
+      return null;
+    }
+    final CodeLinePosition? start = _locateOffset(selection.start);
+    final CodeLinePosition? end = _locateOffset(selection.end);
+    if (start == null || end == null) {
+      return null;
+    }
+    return CodeLineSelection(
+      baseIndex: start.index,
+      baseOffset: start.offset,
+      extentIndex: end.index,
+      extentOffset: end.offset,
+    );
+  }
+
+  CodeLinePosition? _locateOffset(int offset) {
+    int consumed = 0;
+    for (int i = 0; i < _codes.lineCount; i++) {
+      final int length = _codes[i].text.length;
+      if (offset <= consumed + length) {
+        return CodeLinePosition(index: i, offset: offset - consumed);
+      }
+      consumed += length + 1;
+    }
+    if (_codes.lineCount == 0) {
+      return null;
+    }
+    final CodeLine last = _codes[_codes.lineCount - 1];
+    return CodeLinePosition(
+      index: _codes.lineCount - 1,
+      offset: last.text.length,
+    );
   }
 
   set textStyle(TextStyle value) {
@@ -501,7 +635,7 @@ class _CodeFieldRender extends RenderBox implements MouseTrackerAnnotation {
   }
 
   set highlightColor(Color value) {
-    _backgroundRender.find<_CodeFieldHighlightPainter>().color = value;
+    _highlightPainter.color = value;
   }
 
   set cursorColor(Color value) {

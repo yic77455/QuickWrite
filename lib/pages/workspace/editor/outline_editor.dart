@@ -956,6 +956,8 @@ class OutlineEditorState extends State<OutlineEditor>
       focusNode.addListener(() {
         if (focusNode.hasFocus) {
           _lastFocusedNodeId = node.id;
+          // 查找定位留下的选区不会触发失焦清理，切到其他节点时手动收起
+          _clearFindSelectionExcept(node.id);
           // 记录最近编辑的节点，供下次打开时按「上一次编辑」定位
           _scheduleLastEditedPathSave();
           // 输入框获得焦点时清除节点选区（Shift+click、右键菜单唤起、撤销/重做时除外）
@@ -7698,6 +7700,22 @@ class OutlineEditorState extends State<OutlineEditor>
   @override
   void notifyContentChanged() {
     _notifyContentChanged();
+  }
+
+  /// 焦点切到其他节点时，清掉查找定位留下的旧选区
+  void _clearFindSelectionExcept(String keepNodeId) {
+    for (final entry in _controllers.entries) {
+      if (entry.key == keepNodeId) continue;
+      final controller = entry.value;
+      if (controller is! RichTextEditingController ||
+          controller.currentMatchIndex < 0) {
+        continue;
+      }
+      final selection = controller.selection;
+      if (selection.isCollapsed) continue;
+      final offset = selection.baseOffset.clamp(0, controller.text.length);
+      controller.selection = TextSelection.collapsed(offset: offset);
+    }
   }
 
   /// 将全局查找匹配同步到各节点控制器，解析为节点本地偏移量

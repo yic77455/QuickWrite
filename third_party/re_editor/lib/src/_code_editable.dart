@@ -19,6 +19,10 @@ class _CodeEditable extends StatefulWidget {
   final Color? backgroundColor;
   final Color selectionColor;
   final Color highlightColor;
+  final List<TextSelection> findMatches;
+  final int currentMatchIndex;
+  final Color? findMatchColor;
+  final Color? currentFindMatchColor;
   final Color cursorColor;
   final Color? cursorLineColor;
   final Color? chunkIndicatorColor;
@@ -67,6 +71,10 @@ class _CodeEditable extends StatefulWidget {
     this.backgroundColor,
     required this.selectionColor,
     required this.highlightColor,
+    required this.findMatches,
+    required this.currentMatchIndex,
+    this.findMatchColor,
+    this.currentFindMatchColor,
     required this.cursorColor,
     this.cursorLineColor,
     this.chunkIndicatorColor,
@@ -328,6 +336,10 @@ class _CodeEditableState extends State<_CodeEditable> with AutomaticKeepAliveCli
       },
       selectionColor: widget.selectionColor,
       highlightColor: widget.highlightColor,
+      findMatches: widget.findMatches,
+      currentMatchIndex: widget.currentMatchIndex,
+      findMatchColor: widget.findMatchColor,
+      currentFindMatchColor: widget.currentFindMatchColor,
       cursorColor: widget.cursorColor,
       cursorLineColor: widget.cursorLineColor,
       chunkIndicatorColor: widget.chunkIndicatorColor,

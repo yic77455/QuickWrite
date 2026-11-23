@@ -172,14 +172,17 @@ Color computePersistentSelectionColor(BuildContext context, Color fallback) {
   // - 背景较暗（亮度 <= 0.5）：使用较高亮度的灰色，确保可见性
   double targetLightness;
   if (backgroundLightness > 0.5) {
-    // 亮色背景：使用较低亮度的灰色（0.82）
-    targetLightness = 0.82;
+    targetLightness = 0.7;
   } else {
-    // 暗色背景：使用较高亮度的灰色（0.25）
-    targetLightness = 0.25;
+    targetLightness = 0.35;
   }
 
-  return hsl.withSaturation(0.08).withLightness(targetLightness).toColor();
+  // 半透明，保证下层字底色/查找高亮仍能透出
+  return hsl
+      .withSaturation(0.08)
+      .withLightness(targetLightness)
+      .toColor()
+      .withValues(alpha: 0.55);
 }
 
 /// 计算获得焦点时的文本选区颜色
