@@ -235,41 +235,35 @@ class _OutlineKeywordCardState extends State<OutlineKeywordCard> {
     return Row(
       children: [
         Expanded(
-          child: SizedBox(
-            height: _controlHeight,
-            child: ImeCursorFixerWrapper(
+          child: ImeCursorFixerWrapper(
+            controller: _inputController,
+            focusNode: _inputFocusNode,
+            child: QwTextField(
               controller: _inputController,
               focusNode: _inputFocusNode,
-              child: QwTextField(
-                controller: _inputController,
-                focusNode: _inputFocusNode,
-                textInputAction: TextInputAction.done,
-                onSubmitted: (_) => _addKeyword(),
-                // 输入框填满固定高度的容器，文字在其中垂直居中
-                expands: true,
-                maxLines: null,
-                minLines: null,
-                textAlignVertical: TextAlignVertical.center,
-                style: const TextStyle(fontSize: 13),
-                decoration: InputDecoration(
-                  isDense: true,
-                  hintText: '输入关键词',
-                  hintStyle: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant.withValues(alpha: 0.6)),
-                  filled: true,
-                  fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide.none,
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide.none,
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(color: colorScheme.primary, width: 1.4),
-                  ),
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _addKeyword(),
+              maxLines: 1,
+              textAlignVertical: TextAlignVertical.center,
+              style: const TextStyle(fontSize: 13),
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: '输入关键词',
+                hintStyle: TextStyle(fontSize: 13, color: colorScheme.onSurfaceVariant.withValues(alpha: 0.6)),
+                filled: true,
+                fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none,
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: colorScheme.primary, width: 1.4),
                 ),
               ),
             ),

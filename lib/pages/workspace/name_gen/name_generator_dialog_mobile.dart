@@ -645,8 +645,7 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
   }
 
   /// 构建文本参数输入框
-  ///
-  /// 输入框与下拉框保持同样高度并填满可用宽度，文字垂直居中，
+  /// 
   /// 与左侧标签在同一行内对齐；点击输入框以外的区域时退出焦点。
   Widget _buildTextControl({
     required TextEditingController controller,
@@ -657,34 +656,28 @@ class _MobileNameGeneratorDialogState extends State<_MobileNameGeneratorDialog> 
     List<TextInputFormatter>? inputFormatters,
   }) {
     final colorScheme = Theme.of(context).colorScheme;
-    return SizedBox(
-      height: _controlHeight,
-      child: QwTextField(
-        controller: controller,
-        focusNode: focusNode,
-        keyboardType: keyboardType,
-        inputFormatters: inputFormatters,
-        onChanged: onChanged,
-        onTapOutside: (_) => _unfocus(),
-        // 输入框填满固定高度的容器，文字在其中垂直居中
-        expands: true,
-        maxLines: null,
-        minLines: null,
-        textAlignVertical: TextAlignVertical.center,
-        style: context.bodySmall,
-        decoration: InputDecoration(
-          hintText: hintText,
-          hintStyle: context.bodySmall?.copyWith(
-            color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-          ),
-          filled: true,
-          fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
-          isDense: true,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 10),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(6),
-            borderSide: BorderSide.none,
-          ),
+    return QwTextField(
+      controller: controller,
+      focusNode: focusNode,
+      keyboardType: keyboardType,
+      inputFormatters: inputFormatters,
+      onChanged: onChanged,
+      onTapOutside: (_) => _unfocus(),
+      maxLines: 1,
+      textAlignVertical: TextAlignVertical.center,
+      style: context.bodySmall,
+      decoration: InputDecoration(
+        hintText: hintText,
+        hintStyle: context.bodySmall?.copyWith(
+          color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+        ),
+        filled: true,
+        fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(6),
+          borderSide: BorderSide.none,
         ),
       ),
     );

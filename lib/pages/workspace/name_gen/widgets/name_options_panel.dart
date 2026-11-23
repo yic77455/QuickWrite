@@ -219,8 +219,8 @@ class NameOptionsPanel extends StatelessWidget {
   }
 
   /// 构建带前置标签的文本输入参数
-  ///
-  /// [width] 为空时使用默认输入框宽度；数量输入框较窄，与下拉框宽度保持一致。
+  /// 
+  /// [width] 为空时使用默认输入框宽度，数量输入框较窄，与下拉框宽度保持一致。
   Widget _buildTextFieldField(
     BuildContext context, {
     required String label,
@@ -239,10 +239,8 @@ class NameOptionsPanel extends StatelessWidget {
       children: [
         _buildLabel(context, label),
         const SizedBox(width: 6),
-        // 输入框自身撑满指定尺寸，样式与下拉框保持一致，文字垂直居中
         SizedBox(
           width: width ?? _fieldWidth,
-          height: _controlHeight-4,
           child: ImeCursorFixerWrapper(
             controller: controller,
             focusNode: focusNode,
@@ -253,9 +251,7 @@ class NameOptionsPanel extends StatelessWidget {
               inputFormatters: inputFormatters,
               onChanged: onChanged,
               style: context.bodyMedium,
-              expands: true,
-              maxLines: null,
-              minLines: null,
+              maxLines: 1,
               textAlignVertical: TextAlignVertical.center,
               decoration: InputDecoration(
                 hintText: hintText,
@@ -265,7 +261,7 @@ class NameOptionsPanel extends StatelessWidget {
                 filled: true,
                 fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
                 isDense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(6),
                   borderSide: BorderSide.none,
