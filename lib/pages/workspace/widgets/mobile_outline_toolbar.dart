@@ -4,10 +4,12 @@ import 'package:provider/provider.dart';
 import 'package:quick_write/core/constants/material_icons.dart';
 import 'package:quick_write/core/models/outline_table.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
+import 'package:quick_write/core/services/cache_services/custom_color_cache_service.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/text_style_range.dart';
 import 'package:quick_write/pages/workspace/editor/outline_editor.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_color_palette.dart';
+import 'package:quick_write/pages/workspace/editor/widgets/outline_color_swatch_menu.dart';
 import 'package:quick_write/pages/workspace/widgets/mobile_table_toolbar_binding.dart';
 import 'package:quick_write/pages/workspace/widgets/punctuation_key_button.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
@@ -702,6 +704,7 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
             currentLevel: headingLevel,
             icon: MaterialIcons.format_title,
             tooltip: '正文',
+            iconSize: _headingIconSize - 4,
           ),
 
           // 标题级别与字形样式之间分隔线
@@ -952,7 +955,16 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
     MobileToolbarStyleTarget target, {
     required bool isForeground,
   }) {
+    final ColorScheme colorScheme = Theme.of(context).colorScheme;
     final ({bool isUniform, Color? color}) current = target.currentColor(isForeground: isForeground);
+
+    void applyColor(Color? color) => _runAction(() {
+      if (isForeground) {
+        target.applyColor(foregroundColor: color, clearForeground: color == null);
+      } else {
+        target.applyColor(backgroundColor: color, clearBackground: color == null);
+      }
+    });
 
     return _buildPanelContainer(
       context,
@@ -967,15 +979,11 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
             isSelected: current.isUniform && current.color == null,
             size: _buttonSize,
             iconSize: _iconSize,
-            onPressed: () => _runAction(
-              () => isForeground
-                  ? target.applyColor(clearForeground: true)
-                  : target.applyColor(clearBackground: true),
-            ),
+            onPressed: () => applyColor(null),
           ),
 
           // 默认色与调色板之间分隔线
-          _buildDivider(Theme.of(context).colorScheme, height: _panelDividerHeight),
+          _buildDivider(colorScheme, height: _panelDividerHeight),
 
           for (final item in OutlineColorPalette.colors)
             _ColorSwatchButton(
@@ -983,13 +991,31 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
               tooltip: item.name,
               isSelected:
                   current.isUniform && current.color == (isForeground ? item.foreground : item.background),
-              onTap: () => _runAction(
-                () => target.applyColor(
-                  foregroundColor: isForeground ? item.foreground : null,
-                  backgroundColor: isForeground ? null : item.background,
-                ),
-              ),
+              onTap: () => applyColor(isForeground ? item.foreground : item.background),
             ),
+
+          // 自定义色与新增、删除入口，与内置色块连续排列
+          OutlineColorSwatchMenu(
+            compact: true,
+            scene: isForeground
+                ? CustomColorCacheService.sceneOutlineFont
+                : CustomColorCacheService.sceneOutlineBackground,
+            presetSwatches: [
+              for (final item in OutlineColorPalette.colors)
+                (
+                  color: isForeground ? item.foreground : item.background,
+                  name: item.name,
+                ),
+            ],
+            pickerInitialColor:
+                current.color ?? (isForeground ? colorScheme.onSurface : colorScheme.surface),
+            currentColor: current.color,
+            isMixed: !current.isUniform,
+            enabled: true,
+            pickerTitle: isForeground ? '自定义字体颜色' : '自定义字底颜色',
+            showNoneSwatch: false,
+            onSelected: applyColor,
+          ),
         ],
       ),
     );

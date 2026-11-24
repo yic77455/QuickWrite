@@ -40,6 +40,9 @@ class ColorSwatchOption extends StatelessWidget {
   /// 悬停提示文本，为 null 时不显示
   final String? tooltip;
 
+  /// 删除模式下覆盖 - 号，点击交由调用方删除色块
+  final bool deleteMode;
+
   const ColorSwatchOption({
     super.key,
     this.color,
@@ -53,6 +56,7 @@ class ColorSwatchOption extends StatelessWidget {
     this.hitTargetSize,
     this.pressedScale = 0.9,
     this.tooltip,
+    this.deleteMode = false,
   }) : assert(isNone || color != null, '普通色块必须提供 color');
 
   @override
@@ -82,7 +86,13 @@ class ColorSwatchOption extends StatelessWidget {
             ? Border.all(color: colorScheme.outlineVariant, width: 0.5)
             : null,
       ),
-      child: isNone
+      child: deleteMode
+          ? Icon(
+              Icons.remove_rounded,
+              size: checkSize + 2,
+              color: useLightCheck ? Colors.white : Colors.black87,
+            )
+          : isNone
           ? CustomPaint(
               painter: _SlashPainter(
                 color: selected

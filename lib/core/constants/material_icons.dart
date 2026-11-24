@@ -6,7 +6,7 @@ class MaterialIcons {
   static const IconData format_h1 = IconData(0xf85d, fontFamily: 'MaterialIconsOutlined');
   static const IconData format_h2 = IconData(0xf85e, fontFamily: 'MaterialIconsOutlined');
   static const IconData format_h3 = IconData(0xf85f, fontFamily: 'MaterialIconsOutlined');
-  static const IconData format_title = IconData(0xe264, fontFamily: 'MaterialIconsRounded');
+  static const IconData format_title = IconData(0xe264, fontFamily: 'MaterialIconsOutlined');
   static const IconData format_bold = IconData(0xe238, fontFamily: 'MaterialIconsOutlined');
   static const IconData format_italic = IconData(0xe23f, fontFamily: 'MaterialIconsOutlined');
   static const IconData format_underlined = IconData(0xe249, fontFamily: 'MaterialIconsOutlined');
