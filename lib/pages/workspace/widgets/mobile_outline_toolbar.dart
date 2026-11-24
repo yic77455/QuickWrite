@@ -980,6 +980,7 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
           for (final item in OutlineColorPalette.colors)
             _ColorSwatchButton(
               color: isForeground ? item.foreground : item.background,
+              tooltip: item.name,
               isSelected:
                   current.isUniform && current.color == (isForeground ? item.foreground : item.background),
               onTap: () => _runAction(
@@ -1042,6 +1043,9 @@ class _ColorSwatchButton extends StatelessWidget {
   /// 色块显示的颜色
   final Color color;
 
+  /// 悬停提示文本
+  final String tooltip;
+
   /// 是否为当前颜色
   final bool isSelected;
 
@@ -1050,51 +1054,24 @@ class _ColorSwatchButton extends StatelessWidget {
 
   const _ColorSwatchButton({
     required this.color,
+    required this.tooltip,
     required this.isSelected,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    // 选中标记的颜色按色块明度取黑白，保证在深浅底色上均清晰可见
-    final Color checkColor = ThemeData.estimateBrightnessForColor(color) == Brightness.dark
-        ? Colors.white
-        : Colors.black87;
-
-    return PressScale(
-      pressedScale: 0.82,
+    return ColorSwatchOption(
+      color: color,
+      tooltip: tooltip,
+      selected: isSelected,
       onTap: onTap,
-      child: SizedBox(
-        width: _buttonSize,
-        height: _buttonSize,
-        child: Center(
-          // 选中时描主色外环，未选中时外环透明，保证色块位置不随状态变化
-          child: Container(
-            width: 30,
-            height: 30,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: isSelected ? colorScheme.primary : Colors.transparent,
-                width: 2,
-              ),
-            ),
-            child: Center(
-              child: Container(
-                width: 22,
-                height: 22,
-                decoration: BoxDecoration(
-                  color: color,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: colorScheme.outlineVariant, width: 0.5),
-                ),
-                child: isSelected ? Icon(Icons.check, size: 12, color: checkColor) : null,
-              ),
-            ),
-          ),
-        ),
-      ),
+      size: 30,
+      innerSize: 22,
+      checkSize: 12,
+      showInnerBorder: true,
+      hitTargetSize: _buttonSize,
+      pressedScale: 0.82,
     );
   }
 }

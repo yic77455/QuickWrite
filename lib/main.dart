@@ -11,6 +11,7 @@ import 'package:quick_write/core/services/app_info_service.dart';
 import 'package:quick_write/core/services/backup_service.dart';
 import 'package:quick_write/core/services/database_service.dart';
 import 'package:quick_write/core/services/cache_services/chapter_cursor_cache_service.dart';
+import 'package:quick_write/core/services/cache_services/custom_color_cache_service.dart';
 import 'package:quick_write/core/services/cache_services/outline_last_edit_cache_service.dart';
 import 'package:quick_write/core/services/cache_services/workspace_session_cache_service.dart';
 import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
@@ -82,6 +83,9 @@ void main(List<String> args) async {
   
   // 初始化杂项缓存服务（用于存储分组展开状态、书架分组选择等零散数据）
   await MiscCacheService.instance.initialize();
+
+  // 初始化自定义颜色缓存服务（字体颜色、字底颜色等自定义色块共用一份缓存）
+  await CustomColorCacheService.instance.initialize();
   
   // 初始化全局敏感词服务（加载共用词库与标红开关）
   await SensitiveWordService.instance.initialize();

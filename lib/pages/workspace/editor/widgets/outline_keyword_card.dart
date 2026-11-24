@@ -4,6 +4,8 @@ import 'package:quick_write/core/models/outline_keyword.dart';
 import 'package:quick_write/core/utils/color_utils.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_color_palette.dart';
+import 'package:quick_write/shared/widgets/color_swatch_option.dart';
+import 'package:quick_write/shared/widgets/press_scale.dart';
 import 'package:quick_write/shared/widgets/qw_dialogs.dart';
 import 'package:quick_write/shared/widgets/qw_tooltip.dart';
 import 'package:quick_write/shared/widgets/qw_text_field.dart';
@@ -293,36 +295,14 @@ class _OutlineKeywordCardState extends State<OutlineKeywordCard> {
       spacing: 10,
       runSpacing: 8,
       children: [
-        for (final color in OutlineColorPalette.colors) _buildColorOption(color.foreground),
-      ],
-    );
-  }
-
-  /// 构建单个颜色选项：外圈选中描边 + 内圈色块 + 选中对勾
-  Widget _buildColorOption(Color color) {
-    final bool selected = color == _selectedColor;
-    final bool useLightCheck = ThemeData.estimateBrightnessForColor(color) == Brightness.dark;
-    return _PressScale(
-      onTap: () => setState(() => _selectedColor = color),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
-        width: 28,
-        height: 28,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: selected ? Theme.of(context).colorScheme.onSurface : Colors.transparent,
-            width: 2,
+        for (final color in OutlineColorPalette.colors)
+          ColorSwatchOption(
+            color: color.foreground,
+            tooltip: color.name,
+            selected: color.foreground == _selectedColor,
+            onTap: () => setState(() => _selectedColor = color.foreground),
           ),
-        ),
-        padding: const EdgeInsets.all(2),
-        child: DecoratedBox(
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-          child: selected
-              ? Icon(Icons.check_rounded, size: 13, color: useLightCheck ? Colors.white : Colors.black87)
-              : null,
-        ),
-      ),
+      ],
     );
   }
 
@@ -401,7 +381,7 @@ class _OutlineKeywordCardState extends State<OutlineKeywordCard> {
     return Builder(
       builder: (dotContext) => CursorTooltipTarget(
         tooltipContent: const Text('修改颜色'),
-        child: _PressScale(
+        child: PressScale(
           onTap: () => _showColorPicker(dotContext, keyword, index),
           child: Container(
             width: 16,
@@ -459,36 +439,19 @@ class _OutlineKeywordCardState extends State<OutlineKeywordCard> {
           children: [
             for (int i = 0; i < OutlineColorPalette.colors.length; i++) ...[
               if (i > 0) const SizedBox(width: 10),
-              _buildColorPickerOption(dialogContext, keyword, index, OutlineColorPalette.colors[i].foreground),
+              ColorSwatchOption(
+                color: OutlineColorPalette.colors[i].foreground,
+                tooltip: OutlineColorPalette.colors[i].name,
+                selected: OutlineColorPalette.colors[i].foreground == keyword.color,
+                size: 24,
+                onTap: () {
+                  _updateColor(index, OutlineColorPalette.colors[i].foreground);
+                  Navigator.of(dialogContext).pop();
+                },
+              ),
             ],
           ],
         ),
-      ),
-    );
-  }
-
-  /// 构建卡片中的单个色块（当前颜色带选中描边与对勾）
-  Widget _buildColorPickerOption(BuildContext dialogContext, OutlineKeyword keyword, int index, Color color) {
-    final ColorScheme colorScheme = Theme.of(dialogContext).colorScheme;
-    final bool selected = color == keyword.color;
-    final bool useLightCheck = ThemeData.estimateBrightnessForColor(color) == Brightness.dark;
-
-    return _PressScale(
-      onTap: () {
-        _updateColor(index, color);
-        Navigator.of(dialogContext).pop();
-      },
-      child: Container(
-        width: 24,
-        height: 24,
-        decoration: BoxDecoration(
-          color: color,
-          shape: BoxShape.circle,
-          border: Border.all(color: selected ? colorScheme.onSurface : Colors.transparent, width: 2),
-        ),
-        child: selected
-            ? Icon(Icons.check_rounded, size: 13, color: useLightCheck ? Colors.white : Colors.black87)
-            : null,
       ),
     );
   }
@@ -571,59 +534,4 @@ class _ColorPickerLayout extends SingleChildLayoutDelegate {
 
   @override
   bool shouldRelayout(_ColorPickerLayout oldDelegate) => oldDelegate.anchor != anchor;
-}
-
-/// 可点击的缩放交互容器
-///
-/// 鼠标悬停时放大、按下时缩小，用于色块与颜色圆点的交互反馈。
-class _PressScale extends StatefulWidget {
-  /// 子组件
-  final Widget child;
-
-  /// 点击回调
-  final VoidCallback? onTap;
-
-  const _PressScale({required this.child, this.onTap});
-
-  @override
-  State<_PressScale> createState() => _PressScaleState();
-}
-
-class _PressScaleState extends State<_PressScale> {
-  /// 悬停时的缩放倍数
-  static const double _hoverScale = 1.15;
-
-  /// 按下时的缩放倍数
-  static const double _pressedScale = 0.9;
-
-  /// 鼠标是否悬停在组件上
-  bool _hovered = false;
-
-  /// 组件是否处于按下状态
-  bool _pressed = false;
-
-  @override
-  Widget build(BuildContext context) {
-    // 按下优先于悬停，松开后回到悬停或原始大小
-    final double scale = _pressed ? _pressedScale : (_hovered ? _hoverScale : 1);
-
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTapDown: (_) => setState(() => _pressed = true),
-        onTapUp: (_) => setState(() => _pressed = false),
-        onTapCancel: () => setState(() => _pressed = false),
-        onTap: widget.onTap,
-        child: AnimatedScale(
-          scale: scale,
-          duration: const Duration(milliseconds: 120),
-          curve: Curves.easeOut,
-          child: widget.child,
-        ),
-      ),
-    );
-  }
 }

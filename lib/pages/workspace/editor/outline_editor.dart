@@ -12,6 +12,7 @@ import 'package:quick_write/core/constants/constants.dart';
 import 'package:quick_write/core/constants/material_icons.dart';
 import 'package:quick_write/core/constants/punctuation_symbols.dart';
 import 'package:quick_write/core/services/settings_service.dart';
+import 'package:quick_write/core/services/cache_services/custom_color_cache_service.dart';
 import 'package:quick_write/core/services/cache_services/outline_last_edit_cache_service.dart';
 import 'package:quick_write/core/services/workspace/book_folder_service.dart';
 import 'package:quick_write/core/services/workspace/outline_companion_store.dart';
@@ -45,6 +46,7 @@ import 'package:quick_write/shared/widgets/widgets.dart';
 import 'utils/drag_cursor.dart';
 import 'utils/outline_shortcut_keys.dart';
 import 'widgets/outline_color_palette.dart';
+import 'widgets/outline_color_swatch_menu.dart';
 import 'widgets/outline_connection_painter.dart';
 import 'widgets/outline_keyword_card.dart';
 import 'widgets/outline_link_dialog.dart';
@@ -6281,36 +6283,32 @@ class OutlineEditorState extends State<OutlineEditor>
         labelText: '字体颜色',
         iconBuilder: (color) => OutlineColorPalette.buildColorBarIcon(Icons.format_color_text, color, Colors.red),
         children: [
-          for (final c in OutlineColorPalette.colors)
-            ContextMenuItem(
-              // 当前颜色与该色板一致时，文字前加 '·' 标记
-              labelText: currentFg.isUniform && currentFg.color == c.foreground ? '· ${c.name}' : c.name,
-              iconBuilder: (_) => OutlineColorPalette.buildColorSwatchIcon(c.foreground),
-              // 当前颜色与该色板一致时，文字高亮为对应颜色并加粗
-              labelColor: currentFg.isUniform && currentFg.color == c.foreground ? c.foreground : null,
-              labelBold: currentFg.isUniform && currentFg.color == c.foreground,
+          ContextMenuItem(
+            label: OutlineColorSwatchMenu(
+              scene: CustomColorCacheService.sceneOutlineFont,
+              presetSwatches: [
+                for (final c in OutlineColorPalette.colors) (color: c.foreground, name: c.name),
+              ],
+              pickerInitialColor: widget.colorScheme.onSurface,
+              currentColor: currentFg.color,
+              isMixed: !currentFg.isUniform,
               enabled: !isReadOnly && (hasNodeSelection || hasTarget),
-              onTap: () {
+              pickerTitle: '自定义字体颜色',
+              onSelected: (color) {
                 if (hasNodeSelection) {
-                  _applyColor(_selectedNodeIds.toList(), foregroundColor: c.foreground);
+                  _applyColor(
+                    _selectedNodeIds.toList(),
+                    foregroundColor: color,
+                    clearForeground: color == null,
+                  );
                 } else if (nodeId != null) {
-                  _applyColor([nodeId], foregroundColor: c.foreground);
+                  _applyColor([nodeId], foregroundColor: color, clearForeground: color == null);
                 }
               },
             ),
-          // 默认：清除字体颜色
-          ContextMenuItem.divider(),
-          ContextMenuItem(
-            labelText: '默认',
-            iconBuilder: (_) => OutlineColorPalette.buildColorSwatchIcon(widget.colorScheme.onSurface),
-            enabled: !isReadOnly && (hasNodeSelection || hasTarget),
-            onTap: () {
-              if (hasNodeSelection) {
-                _applyColor(_selectedNodeIds.toList(), clearForeground: true);
-              } else if (nodeId != null) {
-                _applyColor([nodeId], clearForeground: true);
-              }
-            },
+            labelPadding: outlineColorSwatchPadding,
+            highlightOnHover: false,
+            enabled: false,
           ),
         ],
       ),
@@ -6319,36 +6317,32 @@ class OutlineEditorState extends State<OutlineEditor>
         labelText: '字底颜色',
         iconBuilder: (color) => OutlineColorPalette.buildColorBarIcon(Icons.format_color_fill, color, Colors.amber),
         children: [
-          for (final c in OutlineColorPalette.colors)
-            ContextMenuItem(
-              // 当前字底色与该色板一致时，文字前加 '·' 标记
-              labelText: currentBg.isUniform && currentBg.color == c.background ? '· ${c.name}' : c.name,
-              iconBuilder: (_) => OutlineColorPalette.buildColorSwatchIcon(c.background),
-              // 当前字底色与该色板一致时，文字高亮为对应颜色并加粗
-              labelColor: currentBg.isUniform && currentBg.color == c.background ? c.background : null,
-              labelBold: currentBg.isUniform && currentBg.color == c.background,
+          ContextMenuItem(
+            label: OutlineColorSwatchMenu(
+              scene: CustomColorCacheService.sceneOutlineBackground,
+              presetSwatches: [
+                for (final c in OutlineColorPalette.colors) (color: c.background, name: c.name),
+              ],
+              pickerInitialColor: widget.colorScheme.surface,
+              currentColor: currentBg.color,
+              isMixed: !currentBg.isUniform,
               enabled: !isReadOnly && (hasNodeSelection || hasTarget),
-              onTap: () {
+              pickerTitle: '自定义字底颜色',
+              onSelected: (color) {
                 if (hasNodeSelection) {
-                  _applyColor(_selectedNodeIds.toList(), backgroundColor: c.background);
+                  _applyColor(
+                    _selectedNodeIds.toList(),
+                    backgroundColor: color,
+                    clearBackground: color == null,
+                  );
                 } else if (nodeId != null) {
-                  _applyColor([nodeId], backgroundColor: c.background);
+                  _applyColor([nodeId], backgroundColor: color, clearBackground: color == null);
                 }
               },
             ),
-          // 默认：清除字底颜色
-          ContextMenuItem.divider(),
-          ContextMenuItem(
-            labelText: '默认',
-            iconBuilder: (_) => OutlineColorPalette.buildColorSwatchIcon(widget.colorScheme.surface),
-            enabled: !isReadOnly && (hasNodeSelection || hasTarget),
-            onTap: () {
-              if (hasNodeSelection) {
-                _applyColor(_selectedNodeIds.toList(), clearBackground: true);
-              } else if (nodeId != null) {
-                _applyColor([nodeId], clearBackground: true);
-              }
-            },
+            labelPadding: outlineColorSwatchPadding,
+            highlightOnHover: false,
+            enabled: false,
           ),
         ],
       ),
