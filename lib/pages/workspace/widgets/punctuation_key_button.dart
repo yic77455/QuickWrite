@@ -8,10 +8,10 @@ import 'package:quick_write/core/utils/typography_extension.dart';
 /// 按键宽度统一便于连续点按，多字标点按可用宽度等比缩小避免文字裁切。
 class PunctuationKeyButton extends StatelessWidget {
   /// 按键宽度，所有按键统一宽度
-  static const double width = 44;
+  static const double width = 42;
 
   /// 按键高度
-  static const double height = 44;
+  static const double height = 42;
 
   /// 按键对应的标点符号
   final PunctuationSymbol symbol;
@@ -46,7 +46,7 @@ class PunctuationKeyButton extends StatelessWidget {
               fit: BoxFit.scaleDown,
               child: Text(
                 symbol.symbol,
-                style: context.bodyLarge?.copyWith(color: colorScheme.onSurface),
+                style: context.bodyLarge?.copyWith(fontSize: 13, color: colorScheme.onSurface),
               ),
             ),
           ),

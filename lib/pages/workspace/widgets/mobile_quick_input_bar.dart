@@ -13,6 +13,12 @@ import 'package:quick_write/pages/workspace/widgets/quick_phrase_popup.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 import 'package:re_editor/re_editor.dart';
 
+/// 快捷操作按钮尺寸
+const double _buttonSize = 42;
+
+/// 快捷操作图标尺寸
+const double _iconSize = 18;
+
 /// 移动端快捷输入栏
 ///
 /// 软键盘弹出时贴在键盘上方，提供常用标点符号的快捷输入；
@@ -29,7 +35,7 @@ class MobileQuickInputBar extends StatefulWidget {
 
 class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsBindingObserver {
   /// 快捷输入栏高度
-  static const double _barHeight = 44;
+  static const double _barHeight = 42;
 
   /// 标点按键列表左侧留白，避免首个按键紧贴屏幕边缘不便点按
   static const double _keyListLeftPadding = 8;
@@ -295,8 +301,8 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
             icon: icon,
             tooltip: action.label,
             isSelected: enabled,
-            size: 44,
-            iconSize: 20,
+            size: _buttonSize,
+            iconSize: _iconSize,
             onPressed: editorState.toggleKeywordHighlight,
           ),
         );
@@ -314,8 +320,8 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
           icon: icon,
           tooltip: action.label,
           isSelected: _phrasePopupEntry != null,
-          size: 44,
-          iconSize: 20,
+          size: _buttonSize,
+          iconSize: _iconSize,
           onPressed: _togglePhrasePopup,
         );
     }
@@ -326,8 +332,8 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
     return PressScaleIconButton(
       icon: icon,
       tooltip: action.label,
-      size: 44,
-      iconSize: 20,
+      size: _buttonSize,
+      iconSize: _iconSize,
       onPressed: onPressed,
     );
   }
@@ -394,7 +400,7 @@ class _MobileQuickInputBarState extends State<MobileQuickInputBar> with WidgetsB
           if (visibleActions.isNotEmpty)
             Container(
               width: 1,
-              height: _barHeight - 16,
+              height: 24,
               margin: const EdgeInsets.symmetric(horizontal: 4),
               color: colorScheme.outlineVariant,
             ),

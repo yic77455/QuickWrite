@@ -13,19 +13,25 @@ import 'package:quick_write/pages/workspace/widgets/punctuation_key_button.dart'
 import 'package:quick_write/shared/widgets/widgets.dart';
 
 /// 键盘工具栏与二级面板的高度
-const double _barHeight = 44;
+const double _barHeight = 42;
 
 /// 工具栏按钮的点击区域尺寸
-const double _buttonSize = 44;
+const double _buttonSize = 42;
 
 /// 工具栏按钮图标尺寸
-const double _iconSize = 20;
+const double _iconSize = 18;
+
+/// 标题图标尺寸，补偿字形视觉偏小
+const double _headingIconSize = 22;
 
 /// 工具栏图标组左侧留白，避免首个图标紧贴屏幕边缘不便点按
 const double _iconListLeftPadding = 8;
 
-/// 分部面板与主工具栏之间的分隔线高度留白
-const double _dividerVerticalInset = 16;
+/// 一级栏分隔线高度，与正文快捷栏一致
+const double _mainDividerHeight = 24;
+
+/// 二级面板分隔线高度，低于图标尺寸
+const double _panelDividerHeight = 16;
 
 /// 大纲编辑器键盘工具栏二级面板类型
 enum OutlineToolbarPanel {
@@ -339,13 +345,13 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
     String tooltip,
     OutlineToolbarPanel? effective,
   ) {
-    return ToggleToolButton(
+    return PressScaleIconButton(
       icon: icon,
       tooltip: tooltip,
       isSelected: effective == entry,
       size: _buttonSize,
       iconSize: _iconSize,
-      onChanged: (_) => _toggleTablePanel(entry, effective),
+      onPressed: () => _toggleTablePanel(entry, effective),
     );
   }
 
@@ -524,13 +530,12 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
   }) {
     return Opacity(
       opacity: enabled ? 1 : 0.35,
-      child: SmallToolbarButton(
+      child: PressScaleIconButton(
         icon: icon,
         tooltip: tooltip,
-        width: _buttonSize,
-        height: _barHeight,
+        size: _buttonSize,
         iconSize: _iconSize,
-        iconColor: iconColor,
+        unselectedColor: iconColor,
         onPressed: enabled ? () => _runAction(onPressed) : null,
       ),
     );
@@ -540,13 +545,13 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
   ///
   /// 对应面板展开时按钮图标点亮。
   Widget _buildPanelEntry(OutlineToolbarPanel panel, IconData icon, String tooltip) {
-    return ToggleToolButton(
+    return PressScaleIconButton(
       icon: icon,
       tooltip: tooltip,
       isSelected: _panel == panel,
       size: _buttonSize,
       iconSize: _iconSize,
-      onChanged: (_) => _togglePanel(panel),
+      onPressed: () => _togglePanel(panel),
     );
   }
 
@@ -567,12 +572,10 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
     );
   }
 
-  /// 构建工具组之间的分隔线
-  ///
-  /// 通过上下内边距留出空隙，使分隔线不占满整栏高度
-  Widget _buildDivider(ColorScheme colorScheme) {
+  /// 构建工具组之间的分隔线，上下留白使线条居中
+  Widget _buildDivider(ColorScheme colorScheme, {double height = _mainDividerHeight}) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: _dividerVerticalInset / 2 + 2),
+      padding: EdgeInsets.symmetric(vertical: (_barHeight - height) / 2),
       child: Container(
         width: 1,
         margin: const EdgeInsets.symmetric(horizontal: 4),
@@ -675,6 +678,7 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
             currentLevel: headingLevel,
             icon: MaterialIcons.format_h1,
             tooltip: '一级标题',
+            iconSize: _headingIconSize,
           ),
           _buildHeadingButton(
             target,
@@ -682,6 +686,7 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
             currentLevel: headingLevel,
             icon: MaterialIcons.format_h2,
             tooltip: '二级标题',
+            iconSize: _headingIconSize,
           ),
           _buildHeadingButton(
             target,
@@ -689,6 +694,7 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
             currentLevel: headingLevel,
             icon: MaterialIcons.format_h3,
             tooltip: '三级标题',
+            iconSize: _headingIconSize,
           ),
           _buildHeadingButton(
             target,
@@ -699,7 +705,7 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
           ),
 
           // 标题级别与字形样式之间分隔线
-          _buildDivider(Theme.of(context).colorScheme),
+          _buildDivider(Theme.of(context).colorScheme, height: _panelDividerHeight),
 
           _buildStyleButton(
             target,
@@ -743,15 +749,16 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
     required int currentLevel,
     required IconData icon,
     required String tooltip,
+    double iconSize = _iconSize,
   }) {
-    return ToggleToolButton(
+    return PressScaleIconButton(
       icon: icon,
       tooltip: tooltip,
       isSelected: currentLevel == level,
       size: _buttonSize,
-      iconSize: _iconSize,
-      onChanged: (selected) {
-        if (selected) _runAction(() => target.setHeadingLevel(level));
+      iconSize: iconSize,
+      onPressed: () {
+        if (currentLevel != level) _runAction(() => target.setHeadingLevel(level));
       },
     );
   }
@@ -766,13 +773,13 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
     required bool isSelected,
     required TextStyleFlags Function(TextStyleFlags) toggleFn,
   }) {
-    return ToggleToolButton(
+    return PressScaleIconButton(
       icon: icon,
       tooltip: tooltip,
       isSelected: isSelected,
       size: _buttonSize,
       iconSize: _iconSize,
-      onChanged: (_) => _runAction(() => target.toggleTextStyle(toggleFn)),
+      onPressed: () => _runAction(() => target.toggleTextStyle(toggleFn)),
     );
   }
 
@@ -837,13 +844,13 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
             (OutlineTableAlignment.center, '居中', Icons.format_align_center),
             (OutlineTableAlignment.right, '右对齐', Icons.format_align_right),
           ])
-            ToggleToolButton(
+            PressScaleIconButton(
               icon: icon,
               tooltip: label,
               isSelected: table.alignment == alignment,
               size: _buttonSize,
               iconSize: _iconSize,
-              onChanged: (_) => _runAction(() => table.setAlignment(alignment)),
+              onPressed: () => _runAction(() => table.setAlignment(alignment)),
             ),
         ],
       ),
@@ -890,7 +897,7 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
             tooltip: '批量选择单元格',
             onPressed: table.enterBatchMode,
           ),
-          _buildDivider(Theme.of(context).colorScheme),
+          _buildDivider(Theme.of(context).colorScheme, height: _panelDividerHeight),
           _buildActionButton(
             icon: Icons.backspace_outlined,
             tooltip: '清空单元格',
@@ -954,13 +961,13 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
         padding: const EdgeInsets.only(left: _iconListLeftPadding, right: 4),
         children: [
           // 默认色：清除当前颜色
-          ToggleToolButton(
+          PressScaleIconButton(
             icon: MaterialIcons.ink_eraser,
             tooltip: '默认',
             isSelected: current.isUniform && current.color == null,
             size: _buttonSize,
             iconSize: _iconSize,
-            onChanged: (_) => _runAction(
+            onPressed: () => _runAction(
               () => isForeground
                   ? target.applyColor(clearForeground: true)
                   : target.applyColor(clearBackground: true),
@@ -968,7 +975,7 @@ class _MobileOutlineToolbarState extends State<MobileOutlineToolbar> with Widget
           ),
 
           // 默认色与调色板之间分隔线
-          _buildDivider(Theme.of(context).colorScheme),
+          _buildDivider(Theme.of(context).colorScheme, height: _panelDividerHeight),
 
           for (final item in OutlineColorPalette.colors)
             _ColorSwatchButton(
@@ -1055,40 +1062,34 @@ class _ColorSwatchButton extends StatelessWidget {
         ? Colors.white
         : Colors.black87;
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        // 按钮不参与焦点争夺，避免点击时输入法收起
-        canRequestFocus: false,
-        onTap: onTap,
-        highlightColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.12),
-        splashColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.08),
-        child: SizedBox(
-          width: _buttonSize,
-          height: _buttonSize,
-          child: Center(
-            // 选中时描主色外环，未选中时外环透明，保证色块位置不随状态变化
-            child: Container(
-              width: 30,
-              height: 30,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: isSelected ? colorScheme.primary : Colors.transparent,
-                  width: 2,
-                ),
+    return PressScale(
+      pressedScale: 0.82,
+      onTap: onTap,
+      child: SizedBox(
+        width: _buttonSize,
+        height: _buttonSize,
+        child: Center(
+          // 选中时描主色外环，未选中时外环透明，保证色块位置不随状态变化
+          child: Container(
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: isSelected ? colorScheme.primary : Colors.transparent,
+                width: 2,
               ),
-              child: Center(
-                child: Container(
-                  width: 22,
-                  height: 22,
-                  decoration: BoxDecoration(
-                    color: color,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: colorScheme.outlineVariant, width: 0.5),
-                  ),
-                  child: isSelected ? Icon(Icons.check, size: 14, color: checkColor) : null,
+            ),
+            child: Center(
+              child: Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  color: color,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: colorScheme.outlineVariant, width: 0.5),
                 ),
+                child: isSelected ? Icon(Icons.check, size: 12, color: checkColor) : null,
               ),
             ),
           ),
