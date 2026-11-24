@@ -24,6 +24,11 @@ class OutlineTreeSnapshot {
   /// 选区锚点索引（Shift+click 扩展选区时的起始点）
   final int? selectionAnchorIndex;
 
+  /// 正在编辑备注的节点 ID（null 表示没有备注输入框处于编辑状态）
+  ///
+  /// 撤销/恢复据此把视口、焦点和光标交还给当时正在编辑的备注区。
+  final String? noteEditingNodeId;
+
   OutlineTreeSnapshot({
     required this.roots,
     this.focusedNodeId,
@@ -31,6 +36,7 @@ class OutlineTreeSnapshot {
     required this.selectedNodeIds,
     required this.selectAllLevel,
     this.selectionAnchorIndex,
+    this.noteEditingNodeId,
   });
 }
 
@@ -58,12 +64,16 @@ class OutlineUndoAction {
   /// 被编辑的节点 ID（仅文本编辑合并判断时使用，结构操作为 null）
   final String? editedNodeId;
 
+  /// 被编辑备注的节点 ID（仅备注编辑合并判断时使用，其余操作为 null）
+  final String? editedNoteNodeId;
+
   OutlineUndoAction({
     required this.before,
     required this.after,
     required this.description,
     required this.timestamp,
     this.editedNodeId,
+    this.editedNoteNodeId,
   });
 }
 
@@ -229,6 +239,38 @@ class OutlineUndoManager {
     _refreshLastValues();
   }
 
+  /// 记录一次备注编辑
+  ///
+  /// 备注输入框不属于节点文本控制器，由编辑器在内容变化回调中
+  /// 分别捕获修改前后的快照后交给此方法；同一节点 1 秒内的连续输入合并为一条记录。
+  void recordNoteEdit({
+    required String nodeId,
+    required OutlineTreeSnapshot before,
+    required OutlineTreeSnapshot after,
+  }) {
+    final now = DateTime.now();
+    final lastAction = _undoStack.isEmpty ? null : _undoStack.last;
+    if (lastAction != null &&
+        lastAction.editedNoteNodeId == nodeId &&
+        now.difference(lastAction.timestamp).inMilliseconds < 1000) {
+      // 连续输入合并：before 保持不变，after 更新为当前状态
+      lastAction.after = after;
+      lastAction.timestamp = now;
+    } else {
+      _undoStack.add(OutlineUndoAction(
+        before: before,
+        after: after,
+        description: '编辑备注',
+        timestamp: now,
+        editedNoteNodeId: nodeId,
+      ));
+      if (_undoStack.length > maxLevels) {
+        _undoStack.removeAt(0);
+      }
+    }
+    _redoStack.clear();
+  }
+
   /// 撤销
   ///
   /// 返回值：true 表示成功执行了撤销；false 表示撤销栈为空
@@ -338,6 +380,7 @@ class OutlineUndoManager {
         selectedNodeIds: after.selectedNodeIds,
         selectAllLevel: after.selectAllLevel,
         selectionAnchorIndex: after.selectionAnchorIndex,
+        noteEditingNodeId: after.noteEditingNodeId,
       );
     }
 

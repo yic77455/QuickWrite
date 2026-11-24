@@ -94,10 +94,10 @@ class OutlineNodeAttachment extends StatefulWidget {
   });
 
   @override
-  State<OutlineNodeAttachment> createState() => _OutlineNodeAttachmentState();
+  State<OutlineNodeAttachment> createState() => OutlineNodeAttachmentState();
 }
 
-class _OutlineNodeAttachmentState extends State<OutlineNodeAttachment> {
+class OutlineNodeAttachmentState extends State<OutlineNodeAttachment> {
   /// 图片缩略图的最大宽度
   static const double _thumbnailMaxWidth = 200.0;
 
@@ -146,6 +146,9 @@ class _OutlineNodeAttachmentState extends State<OutlineNodeAttachment> {
   /// 进入编辑状态后据此把光标放到点击位置，而不是固定放在文末。
   Offset? _pendingCaretGlobalPosition;
 
+  /// 撤销/恢复定位时待设置的光标偏移
+  int? _pendingCaretOffset;
+
   /// 备注是否因右键菜单临时失焦
   ///
   /// 菜单接管焦点期间保持编辑状态与选区，等焦点真正移走后再结束编辑。
@@ -182,11 +185,9 @@ class _OutlineNodeAttachmentState extends State<OutlineNodeAttachment> {
   void didUpdateWidget(covariant OutlineNodeAttachment oldWidget) {
     super.didUpdateWidget(oldWidget);
 
-    // 外部内容变化（如撤销恢复）时同步输入框，编辑中的输入不被覆盖
-    if (!_noteFocusNode.hasFocus &&
-        widget.note != oldWidget.note &&
-        _noteController.text != widget.note) {
-      _noteController.text = widget.note;
+    // 外部内容变化（撤销恢复等）时同步输入框，正在输入的内容与外部一致时不受影响
+    if (_noteController.text != widget.note) {
+      _applyExternalNote(widget.note);
     }
 
     // 进入编辑状态时补全输入框内容并把焦点交给输入框
@@ -264,6 +265,46 @@ class _OutlineNodeAttachmentState extends State<OutlineNodeAttachment> {
     _imageStreamListener = null;
   }
 
+  /// 用外部备注内容刷新输入框（撤销/恢复）
+  ///
+  /// 光标按文本差异平移：恢复删除的文字时回到改动位置，
+  /// 只做长度截断会因为后面的段落仍在而落到错误的位置。
+  void _applyExternalNote(String note) {
+    final String oldNote = _noteController.text;
+    final TextSelection selection = _noteController.selection;
+    final int caret = selection.isValid ? selection.baseOffset : oldNote.length;
+    _noteController.value = TextEditingValue(
+      text: note,
+      selection: TextSelection.collapsed(offset: _shiftCaretAfterTextChange(oldNote, note, caret)),
+    );
+  }
+
+  /// 计算文本变化后光标应处的偏移
+  ///
+  /// 光标位于改动点之前时不变，位于改动点之后时按长度差平移，
+  /// 落在被修改的区间内时收敛到改动起点。
+  int _shiftCaretAfterTextChange(String oldText, String newText, int caret) {
+    if (oldText == newText) return caret.clamp(0, newText.length);
+
+    final int minLength = oldText.length < newText.length ? oldText.length : newText.length;
+    int prefixLength = 0;
+    while (prefixLength < minLength && oldText[prefixLength] == newText[prefixLength]) {
+      prefixLength++;
+    }
+    int suffixLength = 0;
+    while (suffixLength < minLength - prefixLength &&
+        oldText[oldText.length - 1 - suffixLength] == newText[newText.length - 1 - suffixLength]) {
+      suffixLength++;
+    }
+
+    final int delta = newText.length - oldText.length;
+    if (caret < prefixLength) return caret;
+    // 光标正好落在改动点：恢复新增文字时移到新增内容之后，删除时留在原处
+    if (caret == prefixLength) return prefixLength + (delta > 0 ? delta : 0);
+    if (caret >= oldText.length - suffixLength) return caret + delta;
+    return prefixLength;
+  }
+
   /// 备注输入框失焦时结束编辑
   ///
   /// 焦点事件中直接通知父级重建可能触发重复布局，延后到帧末处理。
@@ -306,7 +347,7 @@ class _OutlineNodeAttachmentState extends State<OutlineNodeAttachment> {
   /// 把焦点交给备注输入框，并把光标放到点击位置
   ///
   /// 从收起状态点击进入编辑时，优先按点击坐标换算文字偏移量；
-  /// 通过右键菜单进入编辑等没有点击位置的情况，光标落在文本末尾。
+  /// 撤销/恢复定位时使用外部指定的偏移；其余情况光标落在文本末尾。
   void _focusNoteEditor() {
     if (!mounted || !widget.isEditingNote) return;
     _noteFocusNode.requestFocus();
@@ -319,10 +360,20 @@ class _OutlineNodeAttachmentState extends State<OutlineNodeAttachment> {
       if (renderEditable != null && renderEditable.attached) {
         offset = renderEditable.getPositionForPoint(caretPosition).offset;
       }
+    } else if (_pendingCaretOffset != null) {
+      offset = _pendingCaretOffset!;
+      _pendingCaretOffset = null;
     }
 
     offset = offset.clamp(0, _noteController.text.length);
     _noteController.selection = TextSelection.collapsed(offset: offset);
+  }
+
+  /// 把焦点交给备注输入框并定位光标（撤销/恢复时由编辑器调用）
+  void focusNoteAt(int offset) {
+    if (!mounted || !widget.isEditingNote) return;
+    _pendingCaretOffset = offset;
+    _focusNoteEditor();
   }
 
   /// 图片区域失焦时取消选中

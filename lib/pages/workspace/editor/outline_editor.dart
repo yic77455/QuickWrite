@@ -50,6 +50,7 @@ import 'widgets/outline_color_swatch_menu.dart';
 import 'widgets/outline_connection_painter.dart';
 import 'widgets/outline_keyword_card.dart';
 import 'widgets/outline_link_dialog.dart';
+import 'widgets/outline_node_attachment.dart';
 import 'widgets/outline_node_widgets.dart';
 import 'widgets/outline_editor_widgets.dart';
 import 'widgets/outline_settings_card.dart';
@@ -2262,7 +2263,14 @@ class OutlineEditorState extends State<OutlineEditor>
     if (widget.readOnly) return;
     final OutlineNode? node = _findNode(nodeId);
     if (node == null || node.note == note) return;
+    // 备注不在节点文本控制器中，需在修改前后各捕获一次快照以记录撤销项
+    final TextSelection caret = _selectionAtEnd(nodeId);
+    final OutlineTreeSnapshot before =
+        captureUndoSnapshot(focusNodeId: nodeId, focusSelection: caret);
     node.note = note;
+    final OutlineTreeSnapshot after =
+        captureUndoSnapshot(focusNodeId: nodeId, focusSelection: caret);
+    _undoManager.recordNoteEdit(nodeId: nodeId, before: before, after: after);
     _notifyContentChanged();
   }
 
@@ -2620,6 +2628,7 @@ class OutlineEditorState extends State<OutlineEditor>
       selectedNodeIds: Set<String>.from(_selectedNodeIds),
       selectAllLevel: _selectAllLevel,
       selectionAnchorIndex: _selectionAnchorIndex,
+      noteEditingNodeId: _noteEditingNodeId,
     );
   }
 
@@ -2629,6 +2638,10 @@ class OutlineEditorState extends State<OutlineEditor>
   /// 然后恢复焦点、选区和文字样式状态。
   /// 同步执行焦点和选区恢复，避免 post-frame 回调交叉导致状态错乱。
   void applyUndoSnapshot(OutlineTreeSnapshot snapshot) {
+    // 备注内容变化时，撤销/恢复的落点应是备注区；记录变化前的备注文本用于定位光标
+    final String? noteNodeId = snapshot.noteEditingNodeId;
+    final String noteBefore = noteNodeId == null ? '' : (_findNode(noteNodeId)?.note ?? '');
+
     // 深拷贝快照中的树，避免后续修改污染原快照
     // （applyUndoSnapshot 后，_roots 会持有节点引用，onChanged 等回调会直接修改节点，
     //   若不深拷贝，这些修改会污染撤销栈中已保存的快照，导致循环撤销时状态错乱）
@@ -2650,23 +2663,82 @@ class OutlineEditorState extends State<OutlineEditor>
     if (_focusNodeId != null && _findNode(_focusNodeId!) == null) {
       _focusNodeId = null;
     }
-    // 撤销后正在编辑备注的节点可能已不存在，退出备注编辑
-    if (_noteEditingNodeId != null && _findNode(_noteEditingNodeId!) == null) {
-      _noteEditingNodeId = null;
-    }
+
+    // 快照记录着备注编辑状态且备注文本确实变化时，把焦点交还给该备注区；
+    // 其余情况收起备注，焦点跟随正文节点
+    final OutlineNode? noteNode = noteNodeId == null ? null : _findNode(noteNodeId);
+    final bool focusNote = noteNode != null && noteNode.note != noteBefore;
+    final bool noteEditorSwitched = _noteEditingNodeId != (focusNote ? noteNodeId : null);
+    _noteEditingNodeId = focusNote ? noteNodeId : null;
 
     setState(() {});
 
     // 撤销/重做可能恢复关键词，同步刷新书籍级索引
     _syncKeywordsToService();
 
-    // 同步恢复焦点和选区，不依赖 post-frame，避免多次撤销/重做时回调交叉
-    _restoreFocusFromSnapshot(snapshot);
+    if (focusNote) {
+      _focusNoteNode(
+        noteNodeId!,
+        _noteCaretAtChange(noteBefore, noteNode.note),
+        correctAfterOpen: noteEditorSwitched,
+      );
+    } else {
+      // 同步恢复焦点和选区，不依赖 post-frame，避免多次撤销/重做时回调交叉
+      _restoreFocusFromSnapshot(snapshot);
+    }
     // 撤销可能移除正在编辑的表格等控件，焦点丢失时交还编辑器保证快捷键可用
     _restoreEditorFocusIfIdle();
 
     // 通知统计信息更新（撤销/重做后内容已变化）
     _notifyStatsChanged();
+  }
+
+  /// 把视口、焦点和光标定位到指定节点的备注区
+  ///
+  /// 目标节点可能尚未构建，等滚动定位完成后取备注区状态再设置光标；
+  /// [correctAfterOpen] 为 true 时表示备注区刚展开，其自身会在帧末聚焦并把光标
+  /// 放到末尾，需要下一帧再校正一次。
+  void _focusNoteNode(String nodeId, int caretOffset, {required bool correctAfterOpen}) {
+    _scrollToNode(nodeId, onDone: () {
+      if (!mounted) return;
+      void apply() {
+        final state = _attachmentKeys[nodeId]?.currentState;
+        if (state is OutlineNodeAttachmentState) state.focusNoteAt(caretOffset);
+      }
+
+      void tryFocus(int retry) {
+        if (!mounted) return;
+        if (_attachmentKeys[nodeId]?.currentState is OutlineNodeAttachmentState) {
+          apply();
+          if (!correctAfterOpen) return;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) apply();
+          });
+          return;
+        }
+        if (retry <= 0) return;
+        WidgetsBinding.instance.addPostFrameCallback((_) => tryFocus(retry - 1));
+      }
+
+      WidgetsBinding.instance.addPostFrameCallback((_) => tryFocus(3));
+    });
+  }
+
+  /// 计算撤销/恢复后备注光标应处的位置
+  ///
+  /// 取改动区间在恢复后文本中的结束位置：撤销删除时回到删除点，恢复插入时停在新增内容之后。
+  int _noteCaretAtChange(String beforeText, String afterText) {
+    final int minLength = beforeText.length < afterText.length ? beforeText.length : afterText.length;
+    int prefixLength = 0;
+    while (prefixLength < minLength && beforeText[prefixLength] == afterText[prefixLength]) {
+      prefixLength++;
+    }
+    int suffixLength = 0;
+    while (suffixLength < minLength - prefixLength &&
+        beforeText[beforeText.length - 1 - suffixLength] == afterText[afterText.length - 1 - suffixLength]) {
+      suffixLength++;
+    }
+    return afterText.length - suffixLength;
   }
 
   /// 从快照恢复焦点和文本选区
