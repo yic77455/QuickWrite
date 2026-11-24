@@ -184,8 +184,7 @@ class BookExportService {
 
     // ========== 导出正文合并文件 ==========
     if (chapters.isNotEmpty) {
-      // 未分卷章节放到最后
-      final sortedChapters = [...chapters.where((c) => c.volumeUuid.isNotEmpty), ...chapters.where((c) => c.volumeUuid.isEmpty)];
+      final sortedChapters = _sortChaptersForMerged(chapters, volumes.map((v) => v.uuid).toList());
       final chapterFileName = _sanitizeFileName(book.title) + extension;
       final chapterFilePath = p.join(exportDir, chapterFileName);
 
@@ -263,8 +262,7 @@ class BookExportService {
 
     // ========== 导出设定合并文件 ==========
     if (settingItems.isNotEmpty) {
-      // 未分组设定项放到最后
-      final sortedSettings = [...settingItems.where((i) => i.groupUuid.isNotEmpty), ...settingItems.where((i) => i.groupUuid.isEmpty)];
+      final sortedSettings = _sortSettingsForMerged(settingItems, groupMap.keys.toList());
       final settingBaseName = _sanitizeFileName('${book.title}（设定）');
       final settingFileName = settingBaseName + extension;
       final settingFilePath = p.join(exportDir, settingFileName);
@@ -479,6 +477,65 @@ class BookExportService {
     );
   }
 
+  /// 合并导出时按分卷顺序、卷内序号排列章节，未分卷置于末尾
+  List<ChapterModel> _sortChaptersForMerged(
+    List<ChapterModel> chapters,
+    List<String> volumeUuids,
+  ) {
+    final groups = <String, List<ChapterModel>>{};
+    for (final chapter in chapters) {
+      groups.putIfAbsent(chapter.volumeUuid, () => []).add(chapter);
+    }
+    for (final group in groups.values) {
+      group.sort((a, b) {
+        final result = a.volumeOrderIndex.compareTo(b.volumeOrderIndex);
+        return result != 0 ? result : a.orderIndex.compareTo(b.orderIndex);
+      });
+    }
+
+    final unassigned = groups.remove('');
+    final sorted = <ChapterModel>[];
+    for (final uuid in volumeUuids) {
+      final group = groups.remove(uuid);
+      if (group != null) sorted.addAll(group);
+    }
+    // 卷已删除等情况下的孤立章节
+    for (final group in groups.values) {
+      sorted.addAll(group);
+    }
+    if (unassigned != null) sorted.addAll(unassigned);
+    return sorted;
+  }
+
+  /// 合并导出时按分组顺序、组内序号排列设定项，未分组置于末尾
+  List<SettingItemModel> _sortSettingsForMerged(
+    List<SettingItemModel> items,
+    List<String> groupUuids,
+  ) {
+    final groups = <String, List<SettingItemModel>>{};
+    for (final item in items) {
+      groups.putIfAbsent(item.groupUuid, () => []).add(item);
+    }
+    for (final group in groups.values) {
+      group.sort((a, b) {
+        final result = a.groupOrderIndex.compareTo(b.groupOrderIndex);
+        return result != 0 ? result : a.orderIndex.compareTo(b.orderIndex);
+      });
+    }
+
+    final ungrouped = groups.remove('');
+    final sorted = <SettingItemModel>[];
+    for (final uuid in groupUuids) {
+      final group = groups.remove(uuid);
+      if (group != null) sorted.addAll(group);
+    }
+    for (final group in groups.values) {
+      sorted.addAll(group);
+    }
+    if (ungrouped != null) sorted.addAll(ungrouped);
+    return sorted;
+  }
+
   /// 读取章节内容
   ///
   /// [bookFolderPath] 书籍文件夹路径
@@ -670,8 +727,7 @@ class BookExportService {
   }) async {
     onProgress?.call(0, chapters.length, '正在准备导出...');
 
-    // 未分卷章节放到最后
-    final sortedChapters = [...chapters.where((c) => c.volumeUuid.isNotEmpty), ...chapters.where((c) => c.volumeUuid.isEmpty)];
+    final sortedChapters = _sortChaptersForMerged(chapters, volumeMap.keys.toList());
 
     // 确定导出文件名
     final fileName = _sanitizeFileName(volumeName ?? bookTitle) + extension;
@@ -1002,8 +1058,7 @@ class BookExportService {
   }) async {
     onProgress?.call(0, settingItems.length, '正在准备导出...');
 
-    // 未分组设定项放到最后
-    final sortedSettings = [...settingItems.where((i) => i.groupUuid.isNotEmpty), ...settingItems.where((i) => i.groupUuid.isEmpty)];
+    final sortedSettings = _sortSettingsForMerged(settingItems, groupMap.keys.toList());
 
     final mergedBaseName = _sanitizeFileName(groupName != null ? '$groupName（设定）' : '$bookTitle（设定）');
     final filePath = p.join(exportDir, mergedBaseName + extension);
