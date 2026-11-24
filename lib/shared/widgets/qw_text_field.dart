@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:quick_write/core/utils/find_match_highlighter.dart';
 import 'package:quick_write/core/utils/persistent_selection.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
+import 'package:quick_write/shared/widgets/context_menu.dart';
 import 'package:quick_write/shared/widgets/qw_text_field_painter.dart';
 
 Widget _qwDefaultContextMenuBuilder(
@@ -13,7 +15,66 @@ Widget _qwDefaultContextMenuBuilder(
   if (SystemContextMenu.isSupportedByField(state)) {
     return SystemContextMenu.editableText(editableTextState: state);
   }
+  if (PlatformCapabilities.isDesktop) {
+    return _QwTextContextMenu(state: state);
+  }
   return AdaptiveTextSelectionToolbar.editableText(editableTextState: state);
+}
+
+/// 桌面端输入框右键菜单，复用应用统一的 ContextMenu 样式
+class _QwTextContextMenu extends StatefulWidget {
+  const _QwTextContextMenu({required this.state});
+
+  final EditableTextState state;
+
+  @override
+  State<_QwTextContextMenu> createState() => _QwTextContextMenuState();
+}
+
+class _QwTextContextMenuState extends State<_QwTextContextMenu> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final EditableTextState state = widget.state;
+      ContextMenu.showMenuAt(
+        context: context,
+        position: state.contextMenuAnchors.primaryAnchor,
+        fontSize: 13,
+        menuItems: [
+          ContextMenuItem(
+            labelText: '剪切',
+            icon: Icons.cut,
+            enabled: state.cutEnabled,
+            onTap: () => state.cutSelection(SelectionChangedCause.toolbar),
+          ),
+          ContextMenuItem(
+            labelText: '复制',
+            icon: Icons.copy,
+            enabled: state.copyEnabled,
+            onTap: () => state.copySelection(SelectionChangedCause.toolbar),
+          ),
+          ContextMenuItem(
+            labelText: '粘贴',
+            icon: Icons.paste,
+            enabled: state.pasteEnabled,
+            onTap: () => state.pasteText(SelectionChangedCause.toolbar),
+          ),
+          ContextMenuItem.divider(),
+          ContextMenuItem(
+            labelText: '全选',
+            icon: Icons.select_all,
+            enabled: state.selectAllEnabled,
+            onTap: () => state.selectAll(SelectionChangedCause.toolbar),
+          ),
+        ],
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
 }
 
 /// 带统一选区与字底色绘制的 TextField 封装

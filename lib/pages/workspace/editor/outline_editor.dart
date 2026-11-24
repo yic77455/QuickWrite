@@ -8370,7 +8370,7 @@ class OutlineEditorState extends State<OutlineEditor>
       itemBuilder: (context, index) => ContextMenu(
         getMenuItems: _buildContextMenuItems,
         onSecondaryTapDown: _handleSecondaryTapDown,
-        // 备注输入框编辑时右键交还输入框自身，使用默认的文字编辑菜单；
+        // 备注输入框编辑时右键交还输入框自身，使用输入框的文字右键菜单；
         // 表格拥有单元格格式栏，同样不让节点菜单接管
         shouldHandleSecondaryTap: (position) {
           final String? editingNoteNodeId = _noteEditingNodeId;
