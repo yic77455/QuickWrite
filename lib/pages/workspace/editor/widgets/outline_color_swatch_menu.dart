@@ -17,7 +17,7 @@ typedef OutlinePresetSwatch = ({Color color, String name});
 
 /// 大纲颜色子菜单的横向色块面板
 ///
-/// 第一行固定为无颜色色块与内置颜色，其后为自定义颜色行：
+/// 首行可含无颜色色块（由 [showNoneSwatch] 控制）与内置颜色，其后为自定义颜色行：
 /// 自定义色块以第一行宽度为准换行，行末始终保留打开颜色选择器的入口；
 /// 鼠标悬停自定义色块时按 Delete 或 X 可将其从缓存中移除。
 class OutlineColorSwatchMenu extends StatefulWidget {
@@ -45,6 +45,9 @@ class OutlineColorSwatchMenu extends StatefulWidget {
   /// 选择回调，null 表示恢复默认颜色
   final ValueChanged<Color?> onSelected;
 
+  /// 是否显示「无颜色」色块（字体、字底色需要清空，关键词色不需要）
+  final bool showNoneSwatch;
+
   const OutlineColorSwatchMenu({
     super.key,
     required this.scene,
@@ -55,6 +58,7 @@ class OutlineColorSwatchMenu extends StatefulWidget {
     required this.pickerTitle,
     required this.onSelected,
     this.isMixed = false,
+    this.showNoneSwatch = true,
   });
 
   @override
@@ -81,17 +85,32 @@ class _OutlineColorSwatchMenuState extends State<OutlineColorSwatchMenu> {
   /// 一行最多显示的色块数量对应的宽度，所有行按该宽度换行
   double get _trackWidth => _maxPerRow * _swatchSize + (_maxPerRow - 1) * _swatchGap;
 
+  /// 展示的自定义色：排除与内置色相同及重复的历史缓存项
+  List<Color> get _visibleCustomColors {
+    final Set<Color> presets = widget.presetSwatches.map((swatch) => swatch.color).toSet();
+    final Set<Color> seen = <Color>{};
+    return _customColors.where((color) => !presets.contains(color) && seen.add(color)).toList();
+  }
+
   @override
   void initState() {
     super.initState();
     _customColors = CustomColorCacheService.instance.getColors(widget.scene);
+    CustomColorCacheService.instance.revision.addListener(_refreshCustomColors);
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
   }
 
   @override
   void dispose() {
+    CustomColorCacheService.instance.revision.removeListener(_refreshCustomColors);
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     super.dispose();
+  }
+
+  /// 缓存增删后同步色块
+  void _refreshCustomColors() {
+    if (!mounted) return;
+    setState(() => _customColors = CustomColorCacheService.instance.getColors(widget.scene));
   }
 
   /// 悬停自定义色块时按 Delete 或 X 删除该色块
@@ -134,6 +153,7 @@ class _OutlineColorSwatchMenuState extends State<OutlineColorSwatchMenu> {
     final ValueChanged<Color?> onSelected = widget.onSelected;
     final String scene = widget.scene;
     final String title = widget.pickerTitle;
+    final List<OutlinePresetSwatch> presets = widget.presetSwatches;
     final String initialHex = ColorUtils.toHex(widget.currentColor ?? widget.pickerInitialColor);
     // 菜单收起后当前组件会被销毁，提前取好窗口上下文
     final BuildContext dialogContext = Navigator.of(context, rootNavigator: true).context;
@@ -147,7 +167,9 @@ class _OutlineColorSwatchMenuState extends State<OutlineColorSwatchMenu> {
       initialColorHex: initialHex,
       onColorSelected: (String hex) async {
         final Color color = ColorUtils.parseHex(hex);
-        await CustomColorCacheService.instance.addColor(scene, color);
+        if (!presets.any((preset) => preset.color == color)) {
+          await CustomColorCacheService.instance.addColor(scene, color);
+        }
         onSelected(color);
       },
     );
@@ -166,11 +188,12 @@ class _OutlineColorSwatchMenuState extends State<OutlineColorSwatchMenu> {
             spacing: _swatchGap,
             runSpacing: _runGap,
             children: [
-              _buildSwatch(
-                selected: !widget.isMixed && widget.currentColor == null,
-                onTap: () => _selectColor(null),
-                showNoneIcon: true,
-              ),
+              if (widget.showNoneSwatch)
+                _buildSwatch(
+                  selected: !widget.isMixed && widget.currentColor == null,
+                  onTap: () => _selectColor(null),
+                  showNoneIcon: true,
+                ),
               for (final preset in widget.presetSwatches)
                 _buildSwatch(
                   fillColor: preset.color,
@@ -178,7 +201,7 @@ class _OutlineColorSwatchMenuState extends State<OutlineColorSwatchMenu> {
                   selected: !widget.isMixed && widget.currentColor == preset.color,
                   onTap: () => _selectColor(preset.color),
                 ),
-              for (final color in _customColors)
+              for (final color in _visibleCustomColors)
                 _buildSwatch(
                   fillColor: color,
                   tooltip: '按下 Delete 或 X 删除',
@@ -255,7 +278,7 @@ class _OutlineColorSwatchMenuState extends State<OutlineColorSwatchMenu> {
                 shape: BoxShape.circle,
                 border: Border.all(color: baseColor.withValues(alpha: 0.28), width: 1.5),
               ),
-              child: Icon(Icons.add_rounded, size: 15, color: baseColor.withValues(alpha: 0.6)),
+              child: Icon(Icons.add_rounded, size: 14, color: baseColor.withValues(alpha: 0.6)),
             ),
           ),
         ),

@@ -1,10 +1,11 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/models/outline_keyword.dart';
+import 'package:quick_write/core/services/cache_services/custom_color_cache_service.dart';
 import 'package:quick_write/core/utils/color_utils.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_color_palette.dart';
-import 'package:quick_write/shared/widgets/color_swatch_option.dart';
+import 'package:quick_write/pages/workspace/editor/widgets/outline_color_swatch_menu.dart';
 import 'package:quick_write/shared/widgets/press_scale.dart';
 import 'package:quick_write/shared/widgets/qw_dialogs.dart';
 import 'package:quick_write/shared/widgets/qw_tooltip.dart';
@@ -210,7 +211,7 @@ class _OutlineKeywordCardState extends State<OutlineKeywordCard> {
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
-          child: _buildColorRow(colorScheme),
+          child: _buildColorRow(),
         ),
         if (_message != null)
           Padding(
@@ -289,20 +290,23 @@ class _OutlineKeywordCardState extends State<OutlineKeywordCard> {
     );
   }
 
-  /// 构建颜色选择行
-  Widget _buildColorRow(ColorScheme colorScheme) {
-    return Wrap(
-      spacing: 10,
-      runSpacing: 8,
-      children: [
+  /// 构建新关键词的默认色面板（与字体、字底色选单一致）
+  Widget _buildColorRow() {
+    return OutlineColorSwatchMenu(
+      scene: CustomColorCacheService.sceneOutlineKeyword,
+      presetSwatches: [
         for (final color in OutlineColorPalette.colors)
-          ColorSwatchOption(
-            color: color.foreground,
-            tooltip: color.name,
-            selected: color.foreground == _selectedColor,
-            onTap: () => setState(() => _selectedColor = color.foreground),
-          ),
+          (color: color.foreground, name: color.name),
       ],
+      pickerInitialColor: _selectedColor,
+      currentColor: _selectedColor,
+      enabled: true,
+      pickerTitle: '自定义关键词颜色',
+      showNoneSwatch: false,
+      onSelected: (Color? color) {
+        if (color == null) return;
+        setState(() => _selectedColor = color);
+      },
     );
   }
 
@@ -395,7 +399,7 @@ class _OutlineKeywordCardState extends State<OutlineKeywordCard> {
 
   /// 弹出颜色选择卡片
   ///
-  /// 卡片以颜色圆点为锚点向上展开，横向排列调色板色块，点击色块即选定颜色并关闭。
+  /// 卡片以颜色圆点为锚点向上展开，使用与字体、字底色一致的颜色选单。
   void _showColorPicker(BuildContext dotContext, OutlineKeyword keyword, int index) {
     final RenderBox dotBox = dotContext.findRenderObject() as RenderBox;
     final Rect anchor = dotBox.localToGlobal(Offset.zero) & dotBox.size;
@@ -434,23 +438,22 @@ class _OutlineKeywordCardState extends State<OutlineKeywordCard> {
       borderRadius: BorderRadius.circular(16),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (int i = 0; i < OutlineColorPalette.colors.length; i++) ...[
-              if (i > 0) const SizedBox(width: 10),
-              ColorSwatchOption(
-                color: OutlineColorPalette.colors[i].foreground,
-                tooltip: OutlineColorPalette.colors[i].name,
-                selected: OutlineColorPalette.colors[i].foreground == keyword.color,
-                size: 24,
-                onTap: () {
-                  _updateColor(index, OutlineColorPalette.colors[i].foreground);
-                  Navigator.of(dialogContext).pop();
-                },
-              ),
-            ],
+        child: OutlineColorSwatchMenu(
+          scene: CustomColorCacheService.sceneOutlineKeyword,
+          presetSwatches: [
+            for (final color in OutlineColorPalette.colors)
+              (color: color.foreground, name: color.name),
           ],
+          pickerInitialColor: keyword.color,
+          currentColor: keyword.color,
+          enabled: true,
+          pickerTitle: '自定义关键词颜色',
+          showNoneSwatch: false,
+          onSelected: (Color? color) {
+            if (color == null || !dialogContext.mounted) return;
+            _updateColor(index, color);
+            Navigator.of(dialogContext).pop();
+          },
         ),
       ),
     );

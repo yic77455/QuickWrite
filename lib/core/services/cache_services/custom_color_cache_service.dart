@@ -23,6 +23,14 @@ class CustomColorCacheService extends CacheService<CustomColorCacheData> {
   /// 大纲字底颜色场景
   static const String sceneOutlineBackground = 'outlineBackground';
 
+  /// 大纲关键词颜色场景
+  static const String sceneOutlineKeyword = 'outlineKeyword';
+
+  // ================= 变更通知 =================
+
+  /// 自定义颜色增删后自增，供已打开的颜色选单同步
+  final ValueNotifier<int> revision = ValueNotifier<int>(0);
+
   // ================= 状态属性 =================
 
   /// 当前缓存数据（内存中的副本）
@@ -81,6 +89,7 @@ class CustomColorCacheService extends CacheService<CustomColorCacheData> {
     final updated = Map<String, List<String>>.from(_data.colorsByScene);
     updated[scene] = [...current, hex];
     _data = _data.copyWith(colorsByScene: updated);
+    revision.value++;
     return save(_data);
   }
 
@@ -98,6 +107,7 @@ class CustomColorCacheService extends CacheService<CustomColorCacheData> {
       updated[scene] = remaining;
     }
     _data = _data.copyWith(colorsByScene: updated);
+    revision.value++;
     return save(_data);
   }
 }

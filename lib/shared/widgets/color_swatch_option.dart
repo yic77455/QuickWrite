@@ -61,9 +61,20 @@ class ColorSwatchOption extends StatelessWidget {
     final Color fillColor = isNone ? colorScheme.surfaceContainerHighest : color!;
     final bool useLightCheck = ThemeData.estimateBrightnessForColor(fillColor) == Brightness.dark;
 
-    final Widget inner = Container(
-      width: innerSize,
-      height: innerSize,
+    // 选中态微调：外圈直径 = innerSize + ringExtra，色圆直径 = innerSize - innerShrink
+    const double ringWidth = 2;
+    const double ringExtra = 3;
+    const double innerShrink = 6;
+    const Duration animationDuration = Duration(milliseconds: 120);
+    final double outerSize = selected ? innerSize + ringExtra : size;
+    final double effectiveInnerSize = selected ? innerSize - innerShrink : innerSize;
+    final double effectiveCheckSize = selected ? checkSize - 4 : checkSize;
+
+    final Widget inner = AnimatedContainer(
+      duration: animationDuration,
+      curve: Curves.easeOut,
+      width: effectiveInnerSize,
+      height: effectiveInnerSize,
       decoration: BoxDecoration(
         color: fillColor,
         shape: BoxShape.circle,
@@ -82,22 +93,22 @@ class ColorSwatchOption extends StatelessWidget {
           : selected
           ? Icon(
               Icons.check_rounded,
-              size: checkSize,
+              size: effectiveCheckSize,
               color: useLightCheck ? Colors.white : Colors.black87,
             )
           : null,
     );
 
     final Widget visual = AnimatedContainer(
-      duration: const Duration(milliseconds: 120),
+      duration: animationDuration,
       curve: Curves.easeOut,
-      width: size,
-      height: size,
+      width: outerSize,
+      height: outerSize,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         border: Border.all(
           color: selected ? colorScheme.primary : Colors.transparent,
-          width: 2,
+          width: ringWidth,
         ),
       ),
       child: Center(child: inner),
