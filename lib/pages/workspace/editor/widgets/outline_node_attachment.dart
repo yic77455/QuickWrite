@@ -146,6 +146,11 @@ class _OutlineNodeAttachmentState extends State<OutlineNodeAttachment> {
   /// 进入编辑状态后据此把光标放到点击位置，而不是固定放在文末。
   Offset? _pendingCaretGlobalPosition;
 
+  /// 备注是否因右键菜单临时失焦
+  ///
+  /// 菜单接管焦点期间保持编辑状态与选区，等焦点真正移走后再结束编辑。
+  bool _focusLostToMenu = false;
+
   /// 备注文字样式
   TextStyle get _noteTextStyle => TextStyle(
         fontFamily: SettingsService.instance.outlineFontFamily,
@@ -160,6 +165,7 @@ class _OutlineNodeAttachmentState extends State<OutlineNodeAttachment> {
     _noteController.text = widget.note;
     _noteFocusNode.addListener(_handleNoteFocusChanged);
     _imageFocusNode.addListener(_handleImageFocusChanged);
+    FocusManager.instance.addListener(_handleGlobalFocusChanged);
     // 备注区可能因进入编辑状态才首次创建，需要在挂载后主动获取焦点
     if (widget.isEditingNote) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _focusNoteEditor());
@@ -192,6 +198,7 @@ class _OutlineNodeAttachmentState extends State<OutlineNodeAttachment> {
     // 退出编辑状态时收起输入法焦点
     if (!widget.isEditingNote && oldWidget.isEditingNote) {
       _pendingCaretGlobalPosition = null;
+      _focusLostToMenu = false;
       if (_noteFocusNode.hasFocus) _noteFocusNode.unfocus();
     }
 
@@ -207,6 +214,7 @@ class _OutlineNodeAttachmentState extends State<OutlineNodeAttachment> {
   @override
   void dispose() {
     _disposeImageStream();
+    FocusManager.instance.removeListener(_handleGlobalFocusChanged);
     _noteFocusNode.removeListener(_handleNoteFocusChanged);
     _imageFocusNode.removeListener(_handleImageFocusChanged);
     _noteController.dispose();
@@ -260,9 +268,38 @@ class _OutlineNodeAttachmentState extends State<OutlineNodeAttachment> {
   ///
   /// 焦点事件中直接通知父级重建可能触发重复布局，延后到帧末处理。
   void _handleNoteFocusChanged() {
-    if (_noteFocusNode.hasFocus || !widget.isEditingNote) return;
+    if (_noteFocusNode.hasFocus) {
+      _focusLostToMenu = false;
+      return;
+    }
+    if (!widget.isEditingNote) return;
+    // 右键菜单会接管焦点，属临时失焦：保留编辑状态与选区，等焦点真正移走再结束
+    if (ContextMenu.isMenuShowing()) {
+      _focusLostToMenu = true;
+      return;
+    }
+    _stopEditingSoon();
+  }
+
+  /// 焦点真正落到其他控件时结束编辑
+  ///
+  /// 菜单关闭后焦点可能先回到根焦点作用域，此时保持编辑状态；
+  /// 只有焦点被其他控件接过才结束，避免选中文字后点菜单项把备注收起。
+  void _handleGlobalFocusChanged() {
+    if (!_focusLostToMenu || !widget.isEditingNote || _noteFocusNode.hasFocus) return;
+    if (ContextMenu.isMenuShowing()) return;
+    final FocusNode? primary = FocusManager.instance.primaryFocus;
+    if (primary == null || primary is FocusScopeNode) return;
+    _focusLostToMenu = false;
+    _stopEditingSoon();
+  }
+
+  /// 延后到帧末结束编辑，避免在焦点回调中直接重建
+  void _stopEditingSoon() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) widget.onStopNoteEdit();
+      if (mounted && widget.isEditingNote && !_noteFocusNode.hasFocus) {
+        widget.onStopNoteEdit();
+      }
     });
   }
 
@@ -429,8 +466,7 @@ class _OutlineNodeAttachmentState extends State<OutlineNodeAttachment> {
                 clipBehavior: Clip.none,
                 children: [
                   // 选中时显示主题色描边，未选中时描边透明，尺寸保持一致避免跳动
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 120),
+                  Container(
                     padding: const EdgeInsets.all(2),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(8),
