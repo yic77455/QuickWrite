@@ -1021,8 +1021,6 @@ class _ChapterPanelState extends State<ChapterPanel>
       anchorSize: anchorSize,
       showIcons: false,
       fontSize: 13,
-      itemPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      menuPadding: const EdgeInsets.symmetric(vertical: 6),
       consumeOutsideClicks: true,
       onDismissed: () {
         if (mounted && _menuOpenedVolumeUuid != null) {
@@ -1301,8 +1299,6 @@ class _ChapterPanelState extends State<ChapterPanel>
       anchorSize: anchorSize,
       showIcons: false,
       fontSize: 13,
-      itemPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      menuPadding: const EdgeInsets.symmetric(vertical: 6),
       consumeOutsideClicks: true,
       onDismissed: () {
         if (mounted && _menuOpenedChapterId != null) {
@@ -1821,8 +1817,6 @@ class _ChapterPanelState extends State<ChapterPanel>
       type: ContextMenuType.dropdown,
       showIcons: false,
       fontSize: 13,
-      itemPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      menuPadding: const EdgeInsets.symmetric(vertical: 6),
       consumeOutsideClicks: true,
       menuItems: menuItems,
     );

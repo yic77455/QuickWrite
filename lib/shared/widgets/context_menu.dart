@@ -4,6 +4,27 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 
+/// 通用菜单的间距与尺寸基准，主菜单和子菜单共用。
+class ContextMenuMetrics {
+  static const double minWidth = 170;
+  static const double menuPaddingVertical = 4;
+  static const double itemPaddingHorizontal = 16;
+  static const double itemPaddingVertical = 7;
+  static const double dividerPaddingVertical = 3;
+  static const double iconSize = 18;
+  static const double iconGap = 12;
+
+  static const EdgeInsets menuPadding = EdgeInsets.symmetric(vertical: menuPaddingVertical);
+  static const EdgeInsets itemPadding = EdgeInsets.symmetric(
+    horizontal: itemPaddingHorizontal,
+    vertical: itemPaddingVertical,
+  );
+  static const EdgeInsets dividerPadding = EdgeInsets.symmetric(
+    horizontal: itemPaddingHorizontal,
+    vertical: dividerPaddingVertical,
+  );
+}
+
 // ============================================================================
 // 右键菜单实现说明
 // ============================================================================
@@ -77,6 +98,9 @@ class ContextMenuItem {
   /// 会自动包装为 Text 组件，与 [label] 二选一
   final String? labelText;
 
+  /// 自定义内容的内边距（可选，覆盖菜单项内边距）
+  final EdgeInsets? labelPadding;
+
   /// 菜单项图标（可选）
   final IconData? icon;
 
@@ -122,6 +146,7 @@ class ContextMenuItem {
   const ContextMenuItem({
     this.label,
     this.labelText,
+    this.labelPadding,
     this.icon,
     this.iconBuilder,
     this.labelColor,
@@ -139,6 +164,7 @@ class ContextMenuItem {
       : isDivider = true,
         label = null,
         labelText = null,
+        labelPadding = null,
         icon = null,
         iconBuilder = null,
         labelColor = null,
@@ -152,7 +178,7 @@ class ContextMenuItem {
 
   /// 获取实际显示的内容
   ///
-  /// [isHovered] 是否处于悬停状态，用于改变文字颜色
+  /// [isHovered] 是否使用悬停色，菜单内部悬停只改背景不改文字
   /// [theme] 当前主题，用于获取颜色
   /// [fontSize] 字体大小（可选，覆盖主题默认值）
   Widget displayLabel({bool isHovered = false, required ThemeData theme, double? fontSize}) {
@@ -356,7 +382,7 @@ class ContextMenu extends StatefulWidget {
   /// 菜单项字体大小（可选，默认为 null，使用主题默认值）
   final double? fontSize;
 
-  /// 菜单项内边距（可选，默认为 null，使用 EdgeInsets.symmetric(horizontal: 12, vertical: 8)）
+  /// 菜单项内边距（可选，默认使用 [ContextMenuMetrics.itemPadding]）
   final EdgeInsets? itemPadding;
 
   /// 菜单类型（可选，默认为 ContextMenuType.contextMenu）
@@ -366,7 +392,7 @@ class ContextMenu extends StatefulWidget {
   /// - [ContextMenuType.dropdown]：下拉菜单
   final ContextMenuType type;
 
-  /// 菜单外层内边距（可选，默认为 null，使用 EdgeInsets.symmetric(vertical: 8)）
+  /// 菜单外层内边距（可选，默认使用 [ContextMenuMetrics.menuPadding]）
   final EdgeInsets? menuPadding;
 
   /// 点击菜单外部时是否仅关闭菜单而不响应点击（可选，默认为 null）
@@ -653,7 +679,7 @@ class _MenuOverlay extends StatefulWidget {
   /// - 翻转显示：菜单出现在锚点上方
   final Size? anchorSize;
 
-  /// 菜单外层内边距（可选，默认为 null，使用 EdgeInsets.symmetric(vertical: 8)）
+  /// 菜单外层内边距（可选，默认使用 [ContextMenuMetrics.menuPadding]）
   final EdgeInsets? menuPadding;
 
   /// 点击菜单外部时是否仅关闭菜单而不响应点击（可选，默认为 null）
@@ -1432,9 +1458,9 @@ class _MenuBody extends StatelessWidget {
         // 同时 ConstrainedBox 保证最小宽度
         child: IntrinsicWidth(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(minWidth: 160),
+            constraints: const BoxConstraints(minWidth: ContextMenuMetrics.minWidth),
             child: Padding(
-              padding: menuPadding ?? const EdgeInsets.symmetric(vertical: 8),
+              padding: menuPadding ?? ContextMenuMetrics.menuPadding,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1443,7 +1469,7 @@ class _MenuBody extends StatelessWidget {
                   // 分隔线渲染为 Divider
                   if (item.isDivider) {
                     return const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      padding: ContextMenuMetrics.dividerPadding,
                       child: Divider(height: 1),
                     );
                   }
@@ -1467,6 +1493,34 @@ class _MenuBody extends StatelessWidget {
                   );
                 }),
               ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 菜单项选中态：内缩圆角灰色底色。
+class _MenuItemHighlight extends StatelessWidget {
+  const _MenuItemHighlight({required this.active});
+
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = Theme.of(context).colorScheme.onSurface;
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 60),
+          curve: Curves.easeOutCubic,
+          margin: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+          decoration: BoxDecoration(
+            color: active ? color.withValues(alpha: 0.06) : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(
+              color: active ? color.withValues(alpha: 0.02) : Colors.transparent,
             ),
           ),
         ),
@@ -1609,52 +1663,49 @@ class _MenuItemState extends State<_MenuItem> {
                     widget.onDismiss();
                     widget.item.onTap?.call();
                   }),
-        child: Container(
-          padding: widget.itemPadding ?? const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          // 键盘选中或鼠标悬停时显示高亮背景
-          color: shouldHighlight
-              ? theme.colorScheme.primary.withValues(alpha: 0.1)
-              : null,
-          child: Row(
-            children: [
-              if (widget.showIcons && (widget.item.icon != null || widget.item.iconBuilder != null)) ...[
-                // 图标颜色：禁用时变灰，否则根据悬停/选中状态变化
-                widget.item.iconBuilder != null
-                    ? widget.item.iconBuilder!(
-                        !isEnabled
-                            ? theme.colorScheme.onSurface.withValues(alpha: 0.38)
-                            : widget.item.labelColor ??
-                                (shouldHighlight
-                                    ? theme.colorScheme.primary
-                                    : theme.colorScheme.onSurface.withValues(alpha: 0.7)),
-                      )
-                    : Icon(
-                        widget.item.icon,
-                        size: 18,
-                        color: !isEnabled
-                            ? theme.colorScheme.onSurface.withValues(alpha: 0.38)
-                            : widget.item.labelColor ??
-                                (shouldHighlight
-                                    ? theme.colorScheme.primary
-                                    : theme.colorScheme.onSurface.withValues(alpha: 0.7)),
-                      ),
-                const SizedBox(width: 12),
-              ],
-              Expanded(
-                  child: widget.item.displayLabel(
-                      isHovered: shouldHighlight, theme: theme, fontSize: widget.fontSize)),
-              if (hasChildren)
-                Icon(
-                  Icons.chevron_right,
-                  size: 18,
-                  color: !isEnabled
-                      ? theme.colorScheme.onSurface.withValues(alpha: 0.38)
-                      : (shouldHighlight
-                          ? theme.colorScheme.primary
-                          : theme.colorScheme.onSurface.withValues(alpha: 0.5)),
-                ),
-            ],
-          ),
+        child: Stack(
+          children: [
+            _MenuItemHighlight(active: shouldHighlight),
+            Padding(
+              padding: widget.item.labelPadding ??
+                  widget.itemPadding ??
+                  ContextMenuMetrics.itemPadding,
+              child: Row(
+                children: [
+                  if (widget.showIcons && (widget.item.icon != null || widget.item.iconBuilder != null)) ...[
+                    // 图标颜色：禁用时变灰，否则按项配置或默认色
+                    widget.item.iconBuilder != null
+                        ? widget.item.iconBuilder!(
+                            !isEnabled
+                                ? theme.colorScheme.onSurface.withValues(alpha: 0.38)
+                                : widget.item.labelColor ??
+                                    theme.colorScheme.onSurface.withValues(alpha: 0.7),
+                          )
+                        : Icon(
+                            widget.item.icon,
+                            size: ContextMenuMetrics.iconSize,
+                            color: !isEnabled
+                                ? theme.colorScheme.onSurface.withValues(alpha: 0.38)
+                                : widget.item.labelColor ??
+                                    theme.colorScheme.onSurface.withValues(alpha: 0.7),
+                          ),
+                    const SizedBox(width: ContextMenuMetrics.iconGap),
+                  ],
+                  Expanded(
+                      child: widget.item.displayLabel(
+                          isHovered: false, theme: theme, fontSize: widget.fontSize)),
+                  if (hasChildren)
+                    Icon(
+                      Icons.chevron_right,
+                      size: ContextMenuMetrics.iconSize,
+                      color: !isEnabled
+                          ? theme.colorScheme.onSurface.withValues(alpha: 0.38)
+                          : theme.colorScheme.onSurface.withValues(alpha: 0.5),
+                    ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1846,9 +1897,9 @@ class _SubMenuBody extends StatelessWidget {
       color: theme.colorScheme.surfaceContainerHigh,
       child: IntrinsicWidth(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(minWidth: 160),
+          constraints: const BoxConstraints(minWidth: ContextMenuMetrics.minWidth),
           child: Padding(
-            padding: menuPadding ?? const EdgeInsets.symmetric(vertical: 8),
+            padding: menuPadding ?? ContextMenuMetrics.menuPadding,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1856,7 +1907,7 @@ class _SubMenuBody extends StatelessWidget {
                 final item = menuItems[index];
                 if (item.isDivider) {
                   return const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: ContextMenuMetrics.dividerPadding,
                     child: Divider(height: 1),
                   );
                 }
@@ -1935,53 +1986,51 @@ class _SubMenuItem extends StatelessWidget {
                     onDismiss();
                     item.onTap?.call();
                   },
-            child: Container(
-              padding: itemPadding ?? const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              color: isSelected
-                  ? theme.colorScheme.primary.withValues(alpha: 0.1)
-                  : null,
-              child: Row(
-                children: [
-                  // 图标
-                  if (showIcons && (item.icon != null || item.iconBuilder != null)) ...[
-                    item.iconBuilder != null
-                        ? item.iconBuilder!(
-                            !isEnabled
-                                ? theme.colorScheme.onSurface.withValues(alpha: 0.38)
-                                : isSelected
-                                    ? theme.colorScheme.primary
+            child: Stack(
+              children: [
+                _MenuItemHighlight(active: isSelected),
+                Padding(
+                  padding: item.labelPadding ??
+                      itemPadding ??
+                      ContextMenuMetrics.itemPadding,
+                  child: Row(
+                    children: [
+                      // 图标
+                      if (showIcons && (item.icon != null || item.iconBuilder != null)) ...[
+                        item.iconBuilder != null
+                            ? item.iconBuilder!(
+                                !isEnabled
+                                    ? theme.colorScheme.onSurface.withValues(alpha: 0.38)
                                     : theme.colorScheme.onSurface,
-                          )
-                        : Icon(
-                            item.icon,
-                            size: 18,
-                            color: !isEnabled
-                                ? theme.colorScheme.onSurface.withValues(alpha: 0.38)
-                                : isSelected
-                                    ? theme.colorScheme.primary
+                              )
+                            : Icon(
+                                item.icon,
+                                size: ContextMenuMetrics.iconSize,
+                                color: !isEnabled
+                                    ? theme.colorScheme.onSurface.withValues(alpha: 0.38)
                                     : theme.colorScheme.onSurface,
-                          ),
-                    const SizedBox(width: 8),
-                  ],
-                  // 标签
-                  Expanded(
-                    child: item.displayLabel(isHovered: isSelected, theme: theme, fontSize: fontSize),
-                  ),
-                  // 子菜单箭头
-                  if (hasChildren) ...[
-                    const SizedBox(width: 8),
-                    Icon(
-                      Icons.arrow_right,
-                      size: 18,
-                      color: !isEnabled
-                          ? theme.colorScheme.onSurface.withValues(alpha: 0.38)
-                          : isSelected
-                              ? theme.colorScheme.primary
+                              ),
+                        const SizedBox(width: ContextMenuMetrics.iconGap),
+                      ],
+                      // 标签
+                      Expanded(
+                        child: item.displayLabel(isHovered: false, theme: theme, fontSize: fontSize),
+                      ),
+                      // 子菜单箭头
+                      if (hasChildren) ...[
+                        const SizedBox(width: 8),
+                        Icon(
+                          Icons.arrow_right,
+                          size: ContextMenuMetrics.iconSize,
+                          color: !isEnabled
+                              ? theme.colorScheme.onSurface.withValues(alpha: 0.38)
                               : theme.colorScheme.onSurface.withValues(alpha: 0.5),
-                    ),
-                  ],
-                ],
-              ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
         );

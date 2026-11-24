@@ -1008,8 +1008,6 @@ class _SettingPanelState extends State<SettingPanel>
       anchorSize: anchorSize,
       showIcons: false,
       fontSize: 13,
-      itemPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      menuPadding: const EdgeInsets.symmetric(vertical: 6),
       consumeOutsideClicks: true,
       onDismissed: () {
         if (mounted && _menuOpenedGroupUuid != null) {
@@ -1160,8 +1158,6 @@ class _SettingPanelState extends State<SettingPanel>
       anchorSize: anchorSize,
       showIcons: false,
       fontSize: 13,
-      itemPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      menuPadding: const EdgeInsets.symmetric(vertical: 6),
       consumeOutsideClicks: true,
       onDismissed: () {
         if (mounted && _menuOpenedItemId != null) {
@@ -1737,8 +1733,6 @@ class _SettingPanelState extends State<SettingPanel>
       type: ContextMenuType.dropdown,
       showIcons: false,
       fontSize: 13,
-      itemPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      menuPadding: const EdgeInsets.symmetric(vertical: 6),
       consumeOutsideClicks: true,
       menuItems: menuItems,
     );

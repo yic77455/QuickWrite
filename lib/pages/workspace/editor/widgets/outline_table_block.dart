@@ -1801,6 +1801,7 @@ class _OutlineTableBlockState extends State<OutlineTableBlock>
           initialLevel: _commonHeadingLevel,
           onLevelChanged: (level) => _applyCellStyles((cell) => cell.headingLevel = level),
         ),
+        labelPadding: outlineFormatItemPadding,
         enabled: false,
       ),
       // 文字样式行
@@ -1809,6 +1810,7 @@ class _OutlineTableBlockState extends State<OutlineTableBlock>
           initialFlags: mergedFlags,
           onToggle: _toggleCellTextStyle,
         ),
+        labelPadding: outlineFormatItemPadding,
         enabled: false,
       ),
 

@@ -6262,9 +6262,17 @@ class OutlineEditorState extends State<OutlineEditor>
 
     return [
       // 标题/正文格式行
-      ContextMenuItem(label: _buildHeadingRow(nodeId), enabled: false),
+      ContextMenuItem(
+        label: _buildHeadingRow(nodeId),
+        labelPadding: outlineFormatItemPadding,
+        enabled: false,
+      ),
       // 文字样式行
-      ContextMenuItem(label: _buildFormatRow(nodeId), enabled: false),
+      ContextMenuItem(
+        label: _buildFormatRow(nodeId),
+        labelPadding: outlineFormatItemPadding,
+        enabled: false,
+      ),
 
       ContextMenuItem.divider(),
 

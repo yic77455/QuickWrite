@@ -232,8 +232,6 @@ class _TabItemState extends State<TabItem> {
       getMenuItems: () => _buildContextMenuItems(),
       showIcons: false,
       fontSize: 13,
-      itemPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      menuPadding: const EdgeInsets.symmetric(vertical: 6),
       // 移动端不弹出标签页菜单：长按手势交由标签栏用于拖拽排序
       enableMobileLongPress: false,
       child: MouseRegion(

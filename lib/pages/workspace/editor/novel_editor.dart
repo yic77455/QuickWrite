@@ -1293,8 +1293,6 @@ class NovelEditorState extends State<NovelEditor> with WidgetsBindingObserver {
         context: context,
         position: position,
         menuItems: _buildContextMenuItems(),
-        itemPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        menuPadding: const EdgeInsets.symmetric(vertical: 6),
         onDismissed: () {
           if (mounted && !_focusNode.hasFocus) _focusEditor();
         },

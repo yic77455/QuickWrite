@@ -12,6 +12,9 @@ import 'package:quick_write/pages/workspace/editor/utils/shortcut_catalog.dart';
 import 'package:quick_write/shared/widgets/toolbar_button.dart';
 import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
+/// 右键菜单中格式按钮行的紧凑内边距。
+const EdgeInsets outlineFormatItemPadding = EdgeInsets.symmetric(horizontal: 14, vertical: 6);
+
 /// 大纲编辑器顶部工具栏
 ///
 /// 标题后提供布局设置入口，右侧提供展开全部、折叠全部、添加节点等操作入口
