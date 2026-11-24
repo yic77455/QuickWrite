@@ -212,17 +212,28 @@ class _DraggableDialogState extends State<_DraggableDialog> {
   void initState() {
     super.initState();
     widget.dialogInteractiveNotifier?.addListener(_onInteractiveChanged);
+    // 焦点变化不会引起度量变化，需自行监听才能及时识别输入法已归属本弹窗
+    _dialogFocusNode.addListener(_onDialogFocusChanged);
   }
 
   @override
   void dispose() {
     widget.dialogInteractiveNotifier?.removeListener(_onInteractiveChanged);
+    _dialogFocusNode.removeListener(_onDialogFocusChanged);
     _dialogFocusNode.dispose();
     super.dispose();
   }
 
   void _onInteractiveChanged() {
     setState(() {});
+  }
+
+  /// 弹窗内焦点变化时重建，重新评估输入法避让
+  ///
+  /// 输入法已在弹窗弹出前弹出时（如从键盘工具栏打开弹窗）不会产生度量变化通知，
+  /// 只有弹窗内输入框获得焦点后重建，避让偏移才会按当前输入法高度生效
+  void _onDialogFocusChanged() {
+    if (mounted) setState(() {});
   }
 
   /// 键盘弹出时输入法占用的底部高度
@@ -423,7 +434,13 @@ class _DraggableDialogState extends State<_DraggableDialog> {
                           const SizedBox(height: 2),
                           Text(
                             widget.subtitle!,
-                            style: TextStyle(fontSize: 11.5, color: colorScheme.onSurfaceVariant),
+                            // 固定字重与装饰线，避免继承上层样式出现意料之外的变化
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: colorScheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w400,
+                              decoration: TextDecoration.none,
+                            ),
                           ),
                         ],
                       ],
