@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
@@ -445,6 +446,83 @@ class _CursorTooltipTargetState extends State<CursorTooltipTarget> {
       // 监听原始指针事件，不会被按钮等组件拦截
       onPointerDown: (_) => _handleTap(),
       child: content,
+    );
+  }
+}
+
+/// 点击切换显示的提示框（移动端用）
+class TapTooltipTarget extends StatefulWidget {
+  const TapTooltipTarget({
+    super.key,
+    required this.child,
+    required this.tooltipContent,
+    this.showTooltip = true,
+  });
+
+  final Widget child;
+  final Widget tooltipContent;
+  final bool showTooltip;
+
+  @override
+  State<TapTooltipTarget> createState() => _TapTooltipTargetState();
+}
+
+class _TapTooltipTargetState extends State<TapTooltipTarget> {
+  bool _isShown = false;
+
+  @override
+  void initState() {
+    super.initState();
+    GestureBinding.instance.pointerRouter.addGlobalRoute(_handleOutsidePointer);
+  }
+
+  @override
+  void didUpdateWidget(TapTooltipTarget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.showTooltip && _isShown) _hide();
+  }
+
+  @override
+  void dispose() {
+    GestureBinding.instance.pointerRouter.removeGlobalRoute(_handleOutsidePointer);
+    if (_isShown) CursorTooltip.hide();
+    super.dispose();
+  }
+
+  // 点击目标之外时关闭提示
+  void _handleOutsidePointer(PointerEvent event) {
+    if (!_isShown || event is! PointerDownEvent) return;
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+    final rect = box.localToGlobal(Offset.zero) & box.size;
+    if (!rect.contains(event.position)) _hide();
+  }
+
+  void _hide() {
+    CursorTooltip.hide();
+    _isShown = false;
+  }
+
+  void _toggle(Offset position) {
+    if (_isShown) {
+      _hide();
+      return;
+    }
+    CursorTooltip.show(
+      context: context,
+      content: widget.tooltipContent,
+      cursorOffset: position,
+      offsetY: 24,
+    );
+    _isShown = true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapUp: widget.showTooltip ? (details) => _toggle(details.globalPosition) : null,
+      child: widget.child,
     );
   }
 }

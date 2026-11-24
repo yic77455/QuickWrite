@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
+import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/search_query_parser.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/shared/widgets/qw_tooltip.dart';
@@ -113,18 +114,8 @@ class _SearchPanelState extends State<SearchPanel> {
                 suffixIcon: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // 多关键词搜索提示图标，悬停查看用法说明
-                    Padding(
-                      padding: const EdgeInsets.only(right: 4),
-                      child: Tooltip(
-                        message: '可用 && 连接多个关键词进行交集搜索\n例如：张三 && 李四\n表示搜索同时包含"张三"和"李四"的文件',
-                        child: Icon(
-                          Icons.info_outline_rounded,
-                          size: 16,
-                          color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
-                        ),
-                      ),
-                    ),
+                    // 多关键词搜索提示图标：桌面悬停显示，移动端点击切换显示
+                    _buildMultiKeywordHint(colorScheme),
                     // 清空按钮（仅有输入内容时显示）
                     if (_searchController.text.isNotEmpty)
                       Padding(
@@ -179,6 +170,33 @@ class _SearchPanelState extends State<SearchPanel> {
         ],
       ),
     );
+  }
+
+  /// 构建多关键词提示图标
+  Widget _buildMultiKeywordHint(ColorScheme colorScheme) {
+    final hintMessage = '可用 && 连接多个关键词进行交集搜索\n例如：张三 && 李四\n表示搜索同时包含"张三"和"李四"的文件';
+    final isMobile = PlatformCapabilities.isMobile;
+    final icon = Icon(
+      Icons.info_outline_rounded,
+      size: isMobile ? 18 : 16,
+      color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+    );
+    final child = Padding(
+      padding: EdgeInsets.only(right: isMobile ? 0 : 4),
+      child: SizedBox(
+        width: isMobile ? 32 : 16,
+        height: isMobile ? 32 : 16,
+        child: Center(child: icon),
+      ),
+    );
+
+    if (isMobile) {
+      return TapTooltipTarget(
+        tooltipContent: Text(hintMessage),
+        child: child,
+      );
+    }
+    return Tooltip(message: hintMessage, child: child);
   }
 
   /// 构建搜索范围复选框（是否包含设定文件）
