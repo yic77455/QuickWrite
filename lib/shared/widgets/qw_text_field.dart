@@ -249,7 +249,9 @@ class _QwTextFieldState extends State<QwTextField> {
       unfocusedColor: Colors.transparent,
       matchColor: Colors.transparent,
       currentMatchColor: Colors.transparent,
+      showUnfocusedSelection: ContextMenu.showingListenable.value,
     );
+    ContextMenu.showingListenable.addListener(_syncUnfocusedSelection);
   }
 
   @override
@@ -271,11 +273,50 @@ class _QwTextFieldState extends State<QwTextField> {
       unfocusedColor: _unfocusedColor(context),
       matchColor: FindMatchHighlighter.getMatchColor(context),
       currentMatchColor: FindMatchHighlighter.getCurrentMatchColor(context),
+      showUnfocusedSelection: ContextMenu.showingListenable.value,
+    );
+  }
+
+  /// 菜单开合时刷新失焦选区的绘制状态
+  ///
+  /// 失焦选区只在菜单显示期间可见，菜单关闭后立即消失。
+  void _syncUnfocusedSelection() {
+    _painter.update(
+      showUnfocusedSelection: ContextMenu.showingListenable.value,
+    );
+  }
+
+  /// 框外点击：先取消选区，再沿用默认失焦行为
+  ///
+  /// 右键保留选区，供上下文菜单复制/剪切；移动端触摸由平台管理焦点，不处理。
+  void _handleTapOutside(PointerDownEvent event) {
+    final bool ignoreTouch =
+        event.kind == PointerDeviceKind.touch && PlatformCapabilities.isMobile;
+    if (!ignoreTouch && (event.buttons & kSecondaryButton) == 0) {
+      _collapseSelection();
+    }
+    final TapRegionCallback? onTapOutside = widget.onTapOutside;
+    if (onTapOutside != null) {
+      onTapOutside(event);
+    } else if (!ignoreTouch) {
+      FocusManager.instance.primaryFocus?.unfocus();
+    }
+  }
+
+  /// 将非折叠选区折叠为光标，取消选区高亮
+  void _collapseSelection() {
+    final TextEditingController? controller = widget.controller;
+    if (controller == null) return;
+    final TextSelection selection = controller.selection;
+    if (!selection.isValid || selection.isCollapsed) return;
+    controller.selection = TextSelection.collapsed(
+      offset: selection.baseOffset.clamp(0, controller.text.length),
     );
   }
 
   @override
   void dispose() {
+    ContextMenu.showingListenable.removeListener(_syncUnfocusedSelection);
     _painter.dispose();
     _caretPainter.dispose();
     super.dispose();
@@ -352,7 +393,7 @@ class _QwTextFieldState extends State<QwTextField> {
           selectionControls: widget.selectionControls,
           onTap: widget.onTap,
           onTapAlwaysCalled: widget.onTapAlwaysCalled,
-          onTapOutside: widget.onTapOutside,
+          onTapOutside: _handleTapOutside,
           onTapUpOutside: widget.onTapUpOutside,
           mouseCursor: widget.mouseCursor,
           buildCounter: widget.buildCounter,

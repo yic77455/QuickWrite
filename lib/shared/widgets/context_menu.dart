@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -224,7 +225,7 @@ class ContextMenuItem {
 /// - 通过全局状态，只有第一个响应的组件能显示菜单
 ///
 /// 实现原理：
-/// - _isShowing：标记当前是否有菜单显示中
+/// - showing：标记当前是否有菜单显示中，并对外提供变化通知
 /// - _currentEntry：保存当前显示的 OverlayEntry 引用，用于关闭
 class _ContextMenuController {
   /// 当前显示的菜单 Overlay 条目
@@ -235,8 +236,8 @@ class _ContextMenuController {
   static VoidCallback? _currentDismiss;
 
   /// 是否有菜单正在显示
-  /// 用于快速判断，避免重复创建菜单
-  static bool _isShowing = false;
+  /// 用于快速判断，避免重复创建菜单；同时对外提供变化通知
+  static final ValueNotifier<bool> showing = ValueNotifier<bool>(false);
 
   /// 上次菜单关闭的时间戳
   static int _lastClosedTime = 0;
@@ -253,10 +254,10 @@ class _ContextMenuController {
   /// 返回 true 表示可以显示，false 表示已有菜单显示中
   static bool tryShow(OverlayEntry entry, VoidCallback onDismiss) {
     // 已有菜单显示中，拒绝新的菜单
-    if (_isShowing) return false;
+    if (showing.value) return false;
 
     // 标记为显示中
-    _isShowing = true;
+    showing.value = true;
 
     // 移除之前的菜单（如果有）
     _currentEntry?.remove();
@@ -276,7 +277,7 @@ class _ContextMenuController {
     _currentEntry?.remove();
     _currentEntry = null;
     _currentDismiss = null;
-    _isShowing = false;
+    showing.value = false;
   }
 
   /// 关闭当前菜单并触发其关闭回调
@@ -293,14 +294,14 @@ class _ContextMenuController {
   static void markClosed() {
     _currentEntry = null;
     _currentDismiss = null;
-    _isShowing = false;
+    showing.value = false;
     _lastClosedTime = DateTime.now().millisecondsSinceEpoch;
   }
 
   /// 检查当前是否有菜单正在显示
   ///
   /// 用于外部判断是否需要显示空白区域的菜单
-  static bool isShowing() => _isShowing;
+  static bool isShowing() => showing.value;
 
   /// 检查菜单是否刚刚关闭（在 100 毫秒内）
   ///
@@ -455,6 +456,12 @@ class ContextMenu extends StatefulWidget {
   ///
   /// 用于外部判断是否需要显示其他菜单（如空白区域菜单）
   static bool isMenuShowing() => _ContextMenuController.isShowing();
+
+  /// 菜单显示状态（可监听）
+  ///
+  /// 供需要随菜单开合刷新界面或绘制的组件使用
+  static ValueListenable<bool> get showingListenable =>
+      _ContextMenuController.showing;
 
   /// 检查右键菜单是否刚刚关闭（100毫秒内）
   ///

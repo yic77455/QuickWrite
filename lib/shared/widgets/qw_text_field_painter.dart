@@ -1,12 +1,11 @@
 import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:quick_write/core/utils/rich_text_controller.dart';
 
 /// QwTextField 的统一背景绘制器
 ///
-/// 依次绘制字底色、普通查找匹配、选区、当前匹配；选区颜色按焦点自动切换。
+/// 依次绘制字底色、普通查找匹配、选区、当前匹配；选区颜色按焦点自动切换，失焦选区仅在上下文菜单显示期间绘制。
 /// 所有矩形合并进 Path 一次填充，避免半透明重叠与行间 1px 细缝。
 /// 在 foreground 层补画光标
 ///
@@ -73,6 +72,7 @@ class QwTextFieldPainter extends RenderEditablePainter {
     required this.unfocusedColor,
     required this.matchColor,
     required this.currentMatchColor,
+    required this.showUnfocusedSelection,
   });
 
   TextEditingController? controller;
@@ -81,18 +81,24 @@ class QwTextFieldPainter extends RenderEditablePainter {
   Color matchColor;
   Color currentMatchColor;
 
+  /// 是否绘制失焦选区
+  bool showUnfocusedSelection;
+
   void update({
     TextEditingController? controller,
     Color? focusedColor,
     Color? unfocusedColor,
     Color? matchColor,
     Color? currentMatchColor,
+    bool? showUnfocusedSelection,
   }) {
     this.controller = controller ?? this.controller;
     this.focusedColor = focusedColor ?? this.focusedColor;
     this.unfocusedColor = unfocusedColor ?? this.unfocusedColor;
     this.matchColor = matchColor ?? this.matchColor;
     this.currentMatchColor = currentMatchColor ?? this.currentMatchColor;
+    this.showUnfocusedSelection =
+        showUnfocusedSelection ?? this.showUnfocusedSelection;
     notifyListeners();
   }
 
@@ -154,25 +160,27 @@ class QwTextFieldPainter extends RenderEditablePainter {
 
     final TextSelection? selection = renderEditable.selection;
     if (selection != null && selection.isValid && !selection.isCollapsed) {
-      final Path path = Path();
-      _addRangeToPath(
-        path,
-        renderEditable,
-        selection.start,
-        selection.end,
-        textLength,
-        0.2,
-        1.0,
-      );
-      if (renderEditable.selectionWidthStyle == ui.BoxWidthStyle.tight) {
-        _addNewlineBlocks(path, renderEditable, selection, textLength);
-      }
       final bool active =
           renderEditable.hasFocus || _isCurrentFindMatch(selection, rich);
-      canvas.drawPath(
-        path,
-        Paint()..color = active ? focusedColor : unfocusedColor,
-      );
+      if (active || showUnfocusedSelection) {
+        final Path path = Path();
+        _addRangeToPath(
+          path,
+          renderEditable,
+          selection.start,
+          selection.end,
+          textLength,
+          0.2,
+          1.0,
+        );
+        if (renderEditable.selectionWidthStyle == ui.BoxWidthStyle.tight) {
+          _addNewlineBlocks(path, renderEditable, selection, textLength);
+        }
+        canvas.drawPath(
+          path,
+          Paint()..color = active ? focusedColor : unfocusedColor,
+        );
+      }
     }
 
   }
