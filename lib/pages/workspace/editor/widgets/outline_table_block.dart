@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:quick_write/core/constants/material_icons.dart';
 import 'package:quick_write/core/models/outline_table.dart';
 import 'package:quick_write/core/providers/workspace_provider.dart';
+import 'package:quick_write/core/services/cache_services/custom_color_cache_service.dart';
 import 'package:quick_write/core/services/settings_service.dart';
 import 'package:quick_write/core/utils/clean_scroll.dart';
 import 'package:quick_write/core/utils/ime_cursor_fixer.dart';
@@ -16,6 +17,7 @@ import 'package:quick_write/core/utils/text_style_range.dart';
 import 'package:quick_write/pages/workspace/editor/utils/drag_cursor.dart';
 import 'package:quick_write/pages/workspace/editor/utils/outline_shortcut_keys.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_color_palette.dart';
+import 'package:quick_write/pages/workspace/editor/widgets/outline_color_swatch_menu.dart';
 import 'package:quick_write/pages/workspace/editor/widgets/outline_editor_widgets.dart';
 import 'package:quick_write/pages/workspace/widgets/mobile_table_toolbar_binding.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
@@ -1822,26 +1824,23 @@ class _OutlineTableBlockState extends State<OutlineTableBlock>
         iconBuilder: (color) =>
             OutlineColorPalette.buildColorBarIcon(Icons.format_color_text, color, Colors.red),
         children: [
-          for (final paletteColor in OutlineColorPalette.colors)
-            ContextMenuItem(
-              // 当前颜色与该色板一致时，文字前加 '·' 标记并高亮
-              labelText: foreground.isUniform && foreground.color == paletteColor.foreground
-                  ? '· ${paletteColor.name}'
-                  : paletteColor.name,
-              iconBuilder: (_) => OutlineColorPalette.buildColorSwatchIcon(paletteColor.foreground),
-              labelColor: foreground.isUniform && foreground.color == paletteColor.foreground
-                  ? paletteColor.foreground
-                  : null,
-              labelBold: foreground.isUniform && foreground.color == paletteColor.foreground,
-              onTap: () => _applyCellForegroundColor(paletteColor.foreground),
-            ),
-          // 默认：清除字体颜色
-          ContextMenuItem.divider(),
           ContextMenuItem(
-            labelText: '默认',
-            iconBuilder: (_) =>
-                OutlineColorPalette.buildColorSwatchIcon(widget.colorScheme.onSurface),
-            onTap: () => _applyCellForegroundColor(null),
+            label: OutlineColorSwatchMenu(
+              scene: CustomColorCacheService.sceneOutlineFont,
+              presetSwatches: [
+                for (final paletteColor in OutlineColorPalette.colors)
+                  (color: paletteColor.foreground, name: paletteColor.name),
+              ],
+              pickerInitialColor: widget.colorScheme.onSurface,
+              currentColor: foreground.color,
+              isMixed: !foreground.isUniform,
+              enabled: true,
+              pickerTitle: '自定义字体颜色',
+              onSelected: _applyCellForegroundColor,
+            ),
+            labelPadding: outlineColorSwatchPadding,
+            highlightOnHover: false,
+            enabled: false,
           ),
         ],
       ),
@@ -1852,26 +1851,23 @@ class _OutlineTableBlockState extends State<OutlineTableBlock>
         iconBuilder: (color) =>
             OutlineColorPalette.buildColorBarIcon(Icons.format_color_fill, color, Colors.amber),
         children: [
-          for (final paletteColor in OutlineColorPalette.colors)
-            ContextMenuItem(
-              // 当前字底色与该色板一致时，文字前加 '·' 标记并高亮
-              labelText: background.isUniform && background.color == paletteColor.background
-                  ? '· ${paletteColor.name}'
-                  : paletteColor.name,
-              iconBuilder: (_) => OutlineColorPalette.buildColorSwatchIcon(paletteColor.background),
-              labelColor: background.isUniform && background.color == paletteColor.background
-                  ? paletteColor.background
-                  : null,
-              labelBold: background.isUniform && background.color == paletteColor.background,
-              onTap: () => _applyCellBackgroundColor(paletteColor.background),
-            ),
-          // 默认：清除字底颜色
-          ContextMenuItem.divider(),
           ContextMenuItem(
-            labelText: '默认',
-            iconBuilder: (_) =>
-                OutlineColorPalette.buildColorSwatchIcon(widget.colorScheme.surface),
-            onTap: () => _applyCellBackgroundColor(null),
+            label: OutlineColorSwatchMenu(
+              scene: CustomColorCacheService.sceneOutlineBackground,
+              presetSwatches: [
+                for (final paletteColor in OutlineColorPalette.colors)
+                  (color: paletteColor.background, name: paletteColor.name),
+              ],
+              pickerInitialColor: widget.colorScheme.surface,
+              currentColor: background.color,
+              isMixed: !background.isUniform,
+              enabled: true,
+              pickerTitle: '自定义字底颜色',
+              onSelected: _applyCellBackgroundColor,
+            ),
+            labelPadding: outlineColorSwatchPadding,
+            highlightOnHover: false,
+            enabled: false,
           ),
         ],
       ),

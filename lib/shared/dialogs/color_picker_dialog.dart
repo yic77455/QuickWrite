@@ -1,10 +1,9 @@
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:quick_write/core/utils/color_utils.dart';
 import 'package:quick_write/shared/widgets/qw_dialogs.dart';
-import 'package:quick_write/shared/widgets/qw_tooltip.dart';
+import 'package:quick_write/shared/widgets/qw_text_field.dart';
 
 /// 颜色选择器对话框
 class ColorPickerDialog {
@@ -85,6 +84,8 @@ class _ColorPickerDialogContentState extends State<_ColorPickerDialogContent> {
 
   @override
   Widget build(BuildContext context) {
+    final ColorScheme colorScheme = Theme.of(context).colorScheme;
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
       child: Column(
@@ -107,33 +108,39 @@ class _ColorPickerDialogContentState extends State<_ColorPickerDialogContent> {
             portraitOnly: true,
           ),
           Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: CupertinoTextField(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 20),
+            child: QwTextField(
               controller: _textController,
-              prefix: const Padding(padding: EdgeInsets.only(left: 8), child: Icon(Icons.tag)),
-              suffix: CursorTooltipTarget(
-                tooltipContent: const Text('粘贴颜色'),
-                child: IconButton(
-                  icon: const Icon(Icons.content_paste_rounded),
-                  onPressed: () async {
-                    // 从剪贴板读取颜色值并写入文本框，ColorPicker 会自动监听变化并同步
-                    final data = await Clipboard.getData(Clipboard.kTextPlain);
-                    if (data?.text != null) {
-                      var hex = data!.text!.trim().toUpperCase();
-                      if (hex.startsWith('#')) {
-                        hex = hex.substring(1);
-                      }
-                      _textController.text = hex;
-                    }
-                  },
-                ),
-              ),
               autofocus: false,
+              maxLines: 1,
+              textAlignVertical: TextAlignVertical.center,
               maxLength: 6,
               inputFormatters: [
                 UpperCaseTextFormatter(),
                 FilteringTextInputFormatter.allow(RegExp(kValidHexPattern)),
               ],
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: '颜色值',
+                counterText: '',
+                prefixIcon: const Icon(Icons.tag, size: 18),
+                prefixIconConstraints: const BoxConstraints(minWidth: 40),
+                filled: true,
+                fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none,
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: colorScheme.primary, width: 1.4),
+                ),
+              ),
             ),
           ),
           // 操作按钮：取消 / 确定

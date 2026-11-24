@@ -133,6 +133,11 @@ class ContextMenuItem {
   /// 禁用时菜单项变灰且不可点击
   final bool enabled;
 
+  /// 悬停或键盘选中时是否显示菜单项高亮背景（可选，默认为 true）
+  ///
+  /// 自定义内容自带交互反馈时可关闭，避免叠加菜单项的选框。
+  final bool highlightOnHover;
+
   /// 创建普通菜单项
   ///
   /// [label] 自定义内容 Widget（可选）
@@ -143,6 +148,7 @@ class ContextMenuItem {
   /// [labelBold] 菜单项文字是否加粗（可选，默认 false）
   /// [onTap] 点击时的回调函数（可选）
   /// [enabled] 是否启用，禁用时变灰且不可点击（可选，默认 true）
+  /// [highlightOnHover] 是否显示菜单项高亮背景（可选，默认 true）
   const ContextMenuItem({
     this.label,
     this.labelText,
@@ -154,6 +160,7 @@ class ContextMenuItem {
     this.onTap,
     this.children,
     this.enabled = true,
+    this.highlightOnHover = true,
   }) : isDivider = false;
 
   /// 创建分隔线
@@ -171,7 +178,8 @@ class ContextMenuItem {
         labelBold = false,
         onTap = null,
         children = null,
-        enabled = false;
+        enabled = false,
+        highlightOnHover = false;
 
   /// 是否有子菜单
   bool get hasChildren => children != null && children!.isNotEmpty;
@@ -223,6 +231,9 @@ class _ContextMenuController {
   /// 保存引用是为了在需要时能够关闭它
   static OverlayEntry? _currentEntry;
 
+  /// 当前菜单的关闭回调（包含 onDismissed 通知）
+  static VoidCallback? _currentDismiss;
+
   /// 是否有菜单正在显示
   /// 用于快速判断，避免重复创建菜单
   static bool _isShowing = false;
@@ -238,8 +249,9 @@ class _ContextMenuController {
   /// 3. 如果有，直接返回 false，拒绝显示
   ///
   /// [entry] 要显示的 OverlayEntry
+  /// [onDismiss] 菜单的关闭回调，供 [dismissCurrent] 主动关闭时使用
   /// 返回 true 表示可以显示，false 表示已有菜单显示中
-  static bool tryShow(OverlayEntry entry) {
+  static bool tryShow(OverlayEntry entry, VoidCallback onDismiss) {
     // 已有菜单显示中，拒绝新的菜单
     if (_isShowing) return false;
 
@@ -251,6 +263,7 @@ class _ContextMenuController {
 
     // 保存新菜单的引用
     _currentEntry = entry;
+    _currentDismiss = onDismiss;
 
     return true;
   }
@@ -262,7 +275,15 @@ class _ContextMenuController {
   static void close() {
     _currentEntry?.remove();
     _currentEntry = null;
+    _currentDismiss = null;
     _isShowing = false;
+  }
+
+  /// 关闭当前菜单并触发其关闭回调
+  ///
+  /// 供菜单内部的自定义内容主动收起菜单（如颜色选择完成后）。
+  static void dismissCurrent() {
+    _currentDismiss?.call();
   }
 
   /// 标记菜单已关闭
@@ -271,6 +292,7 @@ class _ContextMenuController {
   /// 只清除状态，不执行 remove 操作（因为菜单已经自己移除了）
   static void markClosed() {
     _currentEntry = null;
+    _currentDismiss = null;
     _isShowing = false;
     _lastClosedTime = DateTime.now().millisecondsSinceEpoch;
   }
@@ -439,6 +461,11 @@ class ContextMenu extends StatefulWidget {
   /// 用于处理菜单关闭时的焦点和手势冲突，例如防止 TextField 光标闪烁
   static bool wasJustClosed() => _ContextMenuController.wasJustClosed();
 
+  /// 关闭当前显示中的菜单（含子菜单），并触发 [onDismissed] 回调
+  ///
+  /// 供菜单内部的自定义内容主动收起菜单，例如颜色色块选择完成后。
+  static void dismissCurrent() => _ContextMenuController.dismissCurrent();
+
   /// 在指定位置显示菜单（静态方法）
   ///
   /// 用于在代码中主动调用显示菜单，而非由右键事件自动触发
@@ -486,7 +513,7 @@ class ContextMenu extends StatefulWidget {
       ),
     );
 
-    if (!_ContextMenuController.tryShow(overlayEntry!)) {
+    if (!_ContextMenuController.tryShow(overlayEntry!, hideMenu)) {
       return;
     }
 
@@ -578,7 +605,7 @@ class _ContextMenuState extends State<ContextMenu> {
 
     // 尝试显示菜单
     // 如果全局已有菜单显示中，则放弃显示
-    if (!_ContextMenuController.tryShow(_overlayEntry!)) {
+    if (!_ContextMenuController.tryShow(_overlayEntry!, _hideMenu)) {
       _overlayEntry = null;
       return;
     }
@@ -1635,7 +1662,10 @@ class _MenuItemState extends State<_MenuItem> {
     // 1. 鼠标悬停或键盘选中
     // 2. 子菜单打开时，母选项也显示高亮
     // 3. 禁用时不显示高亮
-    final shouldHighlight = isEnabled && (widget.isSelected || widget.isSubmenuOpen);
+    // 4. 自定义内容自带反馈时可通过 highlightOnHover 关闭
+    final shouldHighlight = isEnabled &&
+        widget.item.highlightOnHover &&
+        (widget.isSelected || widget.isSubmenuOpen);
 
     return MouseRegion(
       key: _itemKey,
@@ -1988,7 +2018,7 @@ class _SubMenuItem extends StatelessWidget {
                   },
             child: Stack(
               children: [
-                _MenuItemHighlight(active: isSelected),
+                _MenuItemHighlight(active: isSelected && item.highlightOnHover),
                 Padding(
                   padding: item.labelPadding ??
                       itemPadding ??

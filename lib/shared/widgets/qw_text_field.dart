@@ -45,26 +45,22 @@ class _QwTextContextMenuState extends State<_QwTextContextMenu> {
         menuItems: [
           ContextMenuItem(
             labelText: '剪切',
-            icon: Icons.cut,
             enabled: state.cutEnabled,
             onTap: () => state.cutSelection(SelectionChangedCause.toolbar),
           ),
           ContextMenuItem(
             labelText: '复制',
-            icon: Icons.copy,
             enabled: state.copyEnabled,
             onTap: () => state.copySelection(SelectionChangedCause.toolbar),
           ),
           ContextMenuItem(
             labelText: '粘贴',
-            icon: Icons.paste,
             enabled: state.pasteEnabled,
             onTap: () => state.pasteText(SelectionChangedCause.toolbar),
           ),
           ContextMenuItem.divider(),
           ContextMenuItem(
             labelText: '全选',
-            icon: Icons.select_all,
             enabled: state.selectAllEnabled,
             onTap: () => state.selectAll(SelectionChangedCause.toolbar),
           ),
