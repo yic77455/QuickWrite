@@ -1580,13 +1580,11 @@ class _ChapterPanelState extends State<ChapterPanel>
                 const SizedBox(width: 8),
                 // 分卷名称
                 Expanded(
-                  child: Text(
-                    title,
+                  child: OverflowTooltipText(
+                    text: title,
                     style: context.titleSmall?.copyWith(
                       fontWeight: FontWeight.w600,
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 const SizedBox(width: 4),

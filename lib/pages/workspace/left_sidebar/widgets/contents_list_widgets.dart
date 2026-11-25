@@ -140,13 +140,11 @@ class _GroupHeaderState extends State<GroupHeader> {
                   ],
                   // 分组名称
                   Expanded(
-                    child: Text(
-                      widget.title,
+                    child: OverflowTooltipText(
+                      text: widget.title,
                       style: context.titleSmall?.copyWith(
                         fontWeight: FontWeight.w600,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   // 子项数量或悬停操作按钮
@@ -428,8 +426,8 @@ class ListItem extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Text(
-                        title,
+                      OverflowTooltipText(
+                        text: title,
                         style: context.titleSmall?.copyWith(
                           fontWeight: isSelected
                               ? FontWeight.w600
@@ -438,8 +436,6 @@ class ListItem extends StatelessWidget {
                               ? colorScheme.primary
                               : colorScheme.onSurface,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                       ),
                       if (subtitle != null) ...[
                         const SizedBox(height: 2),

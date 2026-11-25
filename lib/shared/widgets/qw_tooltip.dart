@@ -450,6 +450,50 @@ class _CursorTooltipTargetState extends State<CursorTooltipTarget> {
   }
 }
 
+/// 文本被省略时悬停显示完整内容
+class OverflowTooltipText extends StatelessWidget {
+  const OverflowTooltipText({
+    super.key,
+    required this.text,
+    this.style,
+    this.maxLines = 1,
+  });
+
+  final String text;
+  final TextStyle? style;
+  final int maxLines;
+
+  @override
+  Widget build(BuildContext context) {
+    final textWidget = Text(
+      text,
+      style: style,
+      maxLines: maxLines,
+      overflow: TextOverflow.ellipsis,
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth.isInfinite) return textWidget;
+        final painter = TextPainter(
+          text: TextSpan(
+            text: text,
+            style: DefaultTextStyle.of(context).style.merge(style),
+          ),
+          maxLines: maxLines,
+          ellipsis: '…',
+          textDirection: Directionality.of(context),
+        )..layout(maxWidth: constraints.maxWidth);
+        if (!painter.didExceedMaxLines) return textWidget;
+        return CursorTooltipTarget(
+          tooltipContent: Text(text),
+          child: textWidget,
+        );
+      },
+    );
+  }
+}
+
 /// 点击切换显示的提示框（移动端用）
 class TapTooltipTarget extends StatefulWidget {
   const TapTooltipTarget({
