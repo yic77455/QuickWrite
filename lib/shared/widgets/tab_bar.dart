@@ -105,6 +105,8 @@ class _HoverableTabButtonState extends State<HoverableTabButton> {
       onEnter: (_) => setState(() => _isButtonHovered = true),
       onExit: (_) => setState(() => _isButtonHovered = false),
       child: GestureDetector(
+        // 命中整块按钮区域，与外层 MouseRegion 的悬停范围一致
+        behavior: HitTestBehavior.opaque,
         onTap: widget.onClose,
         child: Container(
           width: _buttonSize,
@@ -122,6 +124,8 @@ class _HoverableTabButtonState extends State<HoverableTabButton> {
       onEnter: (_) => setState(() => _isButtonHovered = true),
       onExit: (_) => setState(() => _isButtonHovered = false),
       child: GestureDetector(
+        // 命中整块按钮区域，与外层 MouseRegion 的悬停范围一致
+        behavior: HitTestBehavior.opaque,
         onTap: widget.onClose,
         child: SizedBox(
           width: _buttonSize,
