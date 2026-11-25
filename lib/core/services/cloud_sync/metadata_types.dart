@@ -224,8 +224,7 @@ final MetadataEntityType _volumesType = MetadataEntityType(
       (volume) => volume.id,
     );
 
-    // 展开状态属于本机的界面偏好，不参与同步：已存在的分卷沿用本机状态，
-    // 避免被远端记录覆盖而让目录列表的展开/折叠状态在同步后跳变
+    // 展开状态属于本机界面偏好，已存在的分卷沿用本地值
     final expandedByUuid = {
       for (final volume in localVolumes) volume.uuid: volume.isExpanded,
     };
@@ -294,16 +293,24 @@ final MetadataEntityType _settingGroupsType = MetadataEntityType(
     return [for (final group in groups) group.toJson()];
   },
   putAll: (isar, entities) async {
+    final localGroups = await isar.settingGroupModels.where().findAll();
     final idMap = _idMapOf<SettingGroupModel>(
-      await isar.settingGroupModels.where().findAll(),
+      localGroups,
       (group) => group.uuid,
       (group) => group.id,
     );
+
+    // 展开状态属于本机界面偏好，已存在的分组沿用本地值
+    final expandedByUuid = {
+      for (final group in localGroups) group.uuid: group.isExpanded,
+    };
 
     final models = <SettingGroupModel>[];
     for (final json in entities) {
       final model = SettingGroupModel.fromJson(json);
       model.id = _resolveId(model.uuid, idMap);
+      final localExpanded = expandedByUuid[model.uuid];
+      if (localExpanded != null) model.isExpanded = localExpanded;
       models.add(model);
     }
     await isar.settingGroupModels.putAll(models);

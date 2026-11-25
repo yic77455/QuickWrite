@@ -58,14 +58,13 @@ class VolumeModel {
       ..updatedAt = updatedAt ?? this.updatedAt;
   }
 
-  /// 转换为 JSON
+  /// 转换为 JSON（展开状态仅存本地数据库，不参与同步）
   Map<String, dynamic> toJson() {
     return {
       'uuid': uuid,
       'bookUuid': bookUuid,
       'name': name,
       'orderIndex': orderIndex,
-      'isExpanded': isExpanded,
       'createdAt': createdAt.toIso8601String(),
       'updatedAt': updatedAt.toIso8601String(),
     };

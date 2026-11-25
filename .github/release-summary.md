@@ -19,6 +19,7 @@
 - 修复大纲编辑器在查找替换栏开启和关闭时内容闪烁的问题；
 - 修复编辑器宽度变化时视口位置偏移过大的问题；
 - 修复多分卷合并导出章节错位问题；
+- 修复开启实时同步后，分卷/分组的展开状态不会被保存的问题
 
 ## 下载
 
@@ -30,4 +31,3 @@
 | Android | [下载](https://github.com/yic77455/QuickWrite/releases/download/v{{VERSION}}/quick-write-{{VERSION}}-android.apk) | [下载](https://gitee.com/yic77455/quick-write/releases/download/v{{VERSION}}/quick-write-{{VERSION}}-android.apk) |
 
 > Linux 和 macOS 平台版本尚处于测试阶段，如果在使用过程中遇到问题，请及时反馈。
-> Linux 端卸载：终端执行 `sudo apt remove quickwrite` 即可，书稿与设置不会被删除；如需连同配置一起彻底清除，执行 `sudo apt purge quickwrite`。
