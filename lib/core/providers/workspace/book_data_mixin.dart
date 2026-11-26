@@ -1537,6 +1537,41 @@ mixin BookDataMixin on WorkspaceStateBase {
     return item;
   }
 
+  /// 导入原格式导出的设定文件
+  ///
+  /// 先按标题创建设定项，再写入设定内容、伴生文件与图片；
+  /// 写入失败时回滚新建的记录与文件。
+  Future<SettingImportResult> importSettingItem({
+    required String sourceFilePath,
+    required String title,
+    String groupUuid = '',
+  }) async {
+    if (_currentBook == null) return SettingImportResult.failure('尚未打开书籍');
+
+    final duplicate = _settingItems.any((i) => i.title == title && i.groupUuid == groupUuid);
+    if (duplicate) return SettingImportResult.failure('当前分组已存在同名设定');
+
+    final item = await addSettingItem(title: title, groupUuid: groupUuid);
+    if (item == null) return SettingImportResult.failure('创建设定项失败');
+
+    final result = await SettingImportService.instance.apply(
+      sourceFilePath: sourceFilePath,
+      targetFilePath: getSettingItemFilePath(item),
+    );
+    if (!result.success) {
+      await _isar.writeTxn(() async {
+        await _isar.settingItemModels.delete(item.id);
+      });
+      await _loadSettingItems();
+      notifyListeners();
+      return result;
+    }
+
+    final content = await File(getSettingItemFilePath(item)).readAsString();
+    await saveSettingItemContent(item, content);
+    return result.withItem(item);
+  }
+
   /// 重命名设定分组
   /// [groupUuid] 分组 UUID
   /// [newName] 新分组名

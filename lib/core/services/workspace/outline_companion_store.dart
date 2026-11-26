@@ -113,10 +113,10 @@ class OutlineCompanionStore {
       await File(targetMetaPath).writeAsString(content);
 
       if (includeImages) {
-        await _copyCompanionImages(
-          metaContent: content,
+        await copyImagesTo(
           sourceSettingItemFilePath: sourceSettingItemFilePath,
           targetDir: targetDir,
+          metaContent: content,
         );
       }
       return true;
@@ -129,25 +129,35 @@ class OutlineCompanionStore {
   /// 复制伴生文件中记录的图片到目标目录的 image 文件夹
   ///
   /// 图片文件名由伴生文件中的 `image` 字段给出，仅复制实际存在的文件。
-  static Future<void> _copyCompanionImages({
-    required String metaContent,
-    required String sourceSettingItemFilePath,
+  /// [metaContent] 为空时从源设定项旁重新读取伴生文件；返回复制的图片数量。
+  static Future<int> copyImagesTo({
+    required String? sourceSettingItemFilePath,
     required String targetDir,
+    String? metaContent,
   }) async {
+    if (sourceSettingItemFilePath == null || sourceSettingItemFilePath.isEmpty) return 0;
+
+    String content = metaContent ?? '';
+    if (content.isEmpty) {
+      final String? metaPath = BookFolderService.outlineMetaFilePath(sourceSettingItemFilePath);
+      if (metaPath == null || !await File(metaPath).exists()) return 0;
+      content = await File(metaPath).readAsString();
+    }
     final Set<String> imageFileNames = {};
     try {
-      _collectImageFileNames(jsonDecode(metaContent), imageFileNames);
+      _collectImageFileNames(jsonDecode(content), imageFileNames);
     } catch (e) {
       debugPrint('解析大纲伴生文件失败: $e');
-      return;
+      return 0;
     }
-    if (imageFileNames.isEmpty) return;
+    if (imageFileNames.isEmpty) return 0;
 
     final String? sourceImageDir = BookFolderService.settingImageDirectory(sourceSettingItemFilePath);
-    if (sourceImageDir == null) return;
+    if (sourceImageDir == null) return 0;
 
     final String targetImageDir =
         '$targetDir${Platform.pathSeparator}${BookFolderService.settingImageDirName}';
+    int copied = 0;
     for (final String fileName in imageFileNames) {
       // 只取文件名，避免异常字段导致路径跳出目标目录
       final String safeName = fileName.split(RegExp(r'[\\/]')).last;
@@ -161,7 +171,9 @@ class OutlineCompanionStore {
         await targetImageDirectory.create(recursive: true);
       }
       await source.copy('$targetImageDir${Platform.pathSeparator}$safeName');
+      copied++;
     }
+    return copied;
   }
 
   /// 递归收集伴生 JSON 中记录的全部图片文件名

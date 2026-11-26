@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:isar/isar.dart';
+import 'package:quick_write/core/constants/constants.dart';
 import 'package:quick_write/core/models/book.dart';
 import 'package:quick_write/core/models/chapter.dart';
 import 'package:quick_write/core/models/setting_group.dart';
@@ -10,6 +11,8 @@ import 'package:quick_write/core/services/app_paths.dart';
 import 'package:quick_write/core/services/workspace/outline_companion_store.dart';
 import 'package:quick_write/core/utils/docx_builder.dart';
 import 'package:quick_write/core/utils/relative_path_utils.dart';
+import 'package:quick_write/core/utils/setting_docx_exporter.dart';
+import 'package:quick_write/core/utils/setting_markdown_exporter.dart';
 import 'package:path/path.dart' as p;
 
 /// 导出格式
@@ -17,6 +20,16 @@ enum ExportFormat {
   /// TXT 纯文本格式
   txt,
   /// DOCX 文档格式
+  docx,
+}
+
+/// 设定文件导出格式
+enum SettingExportFormat {
+  /// 原格式：设定文件与伴生文件原样复制
+  original,
+  /// Markdown：伴生数据按 MD 语法写入设定文件
+  markdown,
+  /// DOCX：还原节点样式与层级
   docx,
 }
 
@@ -906,7 +919,8 @@ class BookExportService {
   /// [bookTitle] 书籍标题，用于定位数据文件夹和命名
   /// [groupName] 分组名称（分组导出时使用）
   /// [exportDir] 导出目标目录
-  /// [format] 导出格式
+  /// [format] 导出格式（书籍导出沿用）
+  /// [settingFormat] 设定专用导出格式；非空时优先使用
   /// [mergeIntoOneFile] 是否合并为一个文件导出
   /// [isar] Isar 数据库实例，用于查询分组数据
   /// [onProgress] 进度回调
@@ -916,6 +930,7 @@ class BookExportService {
     String? groupName,
     required String exportDir,
     required ExportFormat format,
+    SettingExportFormat? settingFormat,
     required bool mergeIntoOneFile,
     Isar? isar,
     ExportProgressCallback? onProgress,
@@ -947,6 +962,45 @@ class BookExportService {
         for (final g in groups) {
           groupMap[g.uuid] = g.name;
         }
+      }
+
+      // 原格式导出：逐项复制设定文件与伴生文件，不做合并
+      if (settingFormat == SettingExportFormat.original) {
+        return await _exportSettingsOriginal(
+          settingItems: settingItems,
+          bookTitle: bookTitle,
+          groupName: groupName,
+          groupMap: groupMap,
+          bookFolderPath: bookFolderPath,
+          exportDir: exportDir,
+          onProgress: onProgress,
+        );
+      }
+
+      // Markdown 导出：伴生备注、图片与表格写入 MD 文件
+      if (settingFormat == SettingExportFormat.markdown) {
+        return await _exportSettingsMarkdown(
+          settingItems: settingItems,
+          bookTitle: bookTitle,
+          groupName: groupName,
+          groupMap: groupMap,
+          bookFolderPath: bookFolderPath,
+          exportDir: exportDir,
+          onProgress: onProgress,
+        );
+      }
+
+      // DOCX 导出：还原节点样式与层级，嵌入备注、图片和表格
+      if (settingFormat == SettingExportFormat.docx) {
+        return await _exportSettingsDocx(
+          settingItems: settingItems,
+          bookTitle: bookTitle,
+          groupName: groupName,
+          groupMap: groupMap,
+          bookFolderPath: bookFolderPath,
+          exportDir: exportDir,
+          onProgress: onProgress,
+        );
       }
 
       // 单个设定项导出：直接导出为单个文件
@@ -995,6 +1049,206 @@ class BookExportService {
         errorMessage: '导出失败: $e',
       );
     }
+  }
+
+  /// 原格式导出：逐项复制设定文件、伴生文件与用到的图片
+  Future<ExportResult> _exportSettingsOriginal({
+    required List<SettingItemModel> settingItems,
+    required String bookTitle,
+    String? groupName,
+    required Map<String, String> groupMap,
+    required String bookFolderPath,
+    required String exportDir,
+    ExportProgressCallback? onProgress,
+  }) async {
+    onProgress?.call(0, settingItems.length, '正在准备导出...');
+
+    final String rootDir = settingItems.length == 1
+        ? exportDir
+        : p.join(exportDir, _sanitizeFileName(bookTitle));
+    await Directory(rootDir).create(recursive: true);
+
+    final failed = <String>[];
+    for (int i = 0; i < settingItems.length; i++) {
+      final item = settingItems[i];
+
+      String settingDir = rootDir;
+      if (groupName != null && groupName.isNotEmpty) {
+        settingDir = p.join(rootDir, _sanitizeFileName(groupName));
+      } else if (item.groupUuid.isNotEmpty) {
+        final gName = groupMap[item.groupUuid] ?? '未命名分组';
+        settingDir = p.join(rootDir, _sanitizeFileName(gName));
+      }
+      await Directory(settingDir).create(recursive: true);
+
+      final String sourcePath = p.join(
+        bookFolderPath,
+        'settings',
+        relativePathToPlatform(item.filePath),
+      );
+      final File sourceFile = File(sourcePath);
+      if (!await sourceFile.exists()) {
+        failed.add('${item.title}: 设定文件不存在');
+        onProgress?.call(i + 1, settingItems.length, '正在导出: ${item.title}');
+        continue;
+      }
+
+      final String baseName = _sanitizeFileName(item.title);
+      await sourceFile.copy(
+        p.join(settingDir, '$baseName${GlobalConstants.settingFileExtension}'),
+      );
+      await OutlineCompanionStore.copyTo(
+        sourceSettingItemFilePath: sourcePath,
+        targetDir: settingDir,
+        targetBaseName: baseName,
+      );
+      onProgress?.call(i + 1, settingItems.length, '正在导出: ${item.title}');
+    }
+
+    if (failed.isNotEmpty) {
+      return ExportResult(
+        success: false,
+        errorMessage: '导出失败: ${failed.join('；')}',
+      );
+    }
+    return ExportResult(success: true, exportPath: rootDir, bookCount: 1);
+  }
+
+  /// Markdown 导出：按设定项逐个写出 MD 文件与用到的图片
+  Future<ExportResult> _exportSettingsMarkdown({
+    required List<SettingItemModel> settingItems,
+    required String bookTitle,
+    String? groupName,
+    required Map<String, String> groupMap,
+    required String bookFolderPath,
+    required String exportDir,
+    ExportProgressCallback? onProgress,
+  }) async {
+    onProgress?.call(0, settingItems.length, '正在准备导出...');
+
+    final String rootDir = settingItems.length == 1
+        ? exportDir
+        : p.join(exportDir, _sanitizeFileName(bookTitle));
+    await Directory(rootDir).create(recursive: true);
+
+    final failed = <String>[];
+    for (int i = 0; i < settingItems.length; i++) {
+      final item = settingItems[i];
+
+      String settingDir = rootDir;
+      if (groupName != null && groupName.isNotEmpty) {
+        settingDir = p.join(rootDir, _sanitizeFileName(groupName));
+      } else if (item.groupUuid.isNotEmpty) {
+        final gName = groupMap[item.groupUuid] ?? '未命名分组';
+        settingDir = p.join(rootDir, _sanitizeFileName(gName));
+      }
+      await Directory(settingDir).create(recursive: true);
+
+      final String sourcePath = p.join(
+        bookFolderPath,
+        'settings',
+        relativePathToPlatform(item.filePath),
+      );
+      final sourceFile = File(sourcePath);
+      if (!await sourceFile.exists()) {
+        failed.add('${item.title}: 设定文件不存在');
+        onProgress?.call(i + 1, settingItems.length, '正在导出: ${item.title}');
+        continue;
+      }
+
+      final content = await sourceFile.readAsString();
+      final companion = await OutlineCompanionStore.instance.read(sourcePath);
+      final markdown = SettingMarkdownExporter.build(
+        title: item.title,
+        content: content,
+        notes: companion.notes,
+      );
+      final String baseName = _sanitizeFileName(item.title);
+      await File(
+        p.join(settingDir, '$baseName${GlobalConstants.settingFileExtension}'),
+      ).writeAsString(markdown);
+      await OutlineCompanionStore.copyImagesTo(
+        sourceSettingItemFilePath: sourcePath,
+        targetDir: settingDir,
+      );
+
+      onProgress?.call(i + 1, settingItems.length, '正在导出: ${item.title}');
+    }
+
+    if (failed.isNotEmpty) {
+      return ExportResult(
+        success: false,
+        errorMessage: '导出失败: ${failed.join('；')}',
+      );
+    }
+    return ExportResult(success: true, exportPath: rootDir, bookCount: 1);
+  }
+
+  /// DOCX 导出：按设定项逐个写出带样式和层级的文档
+  Future<ExportResult> _exportSettingsDocx({
+    required List<SettingItemModel> settingItems,
+    required String bookTitle,
+    String? groupName,
+    required Map<String, String> groupMap,
+    required String bookFolderPath,
+    required String exportDir,
+    ExportProgressCallback? onProgress,
+  }) async {
+    onProgress?.call(0, settingItems.length, '正在准备导出...');
+
+    final String rootDir = settingItems.length == 1
+        ? exportDir
+        : p.join(exportDir, _sanitizeFileName(bookTitle));
+    await Directory(rootDir).create(recursive: true);
+
+    final failed = <String>[];
+    for (int i = 0; i < settingItems.length; i++) {
+      final item = settingItems[i];
+
+      String settingDir = rootDir;
+      if (groupName != null && groupName.isNotEmpty) {
+        settingDir = p.join(rootDir, _sanitizeFileName(groupName));
+      } else if (item.groupUuid.isNotEmpty) {
+        final gName = groupMap[item.groupUuid] ?? '未命名分组';
+        settingDir = p.join(rootDir, _sanitizeFileName(gName));
+      }
+      await Directory(settingDir).create(recursive: true);
+
+      final String sourcePath = p.join(
+        bookFolderPath,
+        'settings',
+        relativePathToPlatform(item.filePath),
+      );
+      final sourceFile = File(sourcePath);
+      if (!await sourceFile.exists()) {
+        failed.add('${item.title}: 设定文件不存在');
+        onProgress?.call(i + 1, settingItems.length, '正在导出: ${item.title}');
+        continue;
+      }
+
+      final companion = await OutlineCompanionStore.instance.read(sourcePath);
+      final docx = DocxBuilder();
+      await SettingDocxExporter.build(
+        docx: docx,
+        title: item.title,
+        content: await sourceFile.readAsString(),
+        notes: companion.notes,
+        settingItemFilePath: sourcePath,
+      );
+      await docx.save(
+        p.join(settingDir, '${_sanitizeFileName(item.title)}.docx'),
+      );
+
+      onProgress?.call(i + 1, settingItems.length, '正在导出: ${item.title}');
+    }
+
+    if (failed.isNotEmpty) {
+      return ExportResult(
+        success: false,
+        errorMessage: '导出失败: ${failed.join('；')}',
+      );
+    }
+    return ExportResult(success: true, exportPath: rootDir, bookCount: 1);
   }
 
   /// 导出单个设定项

@@ -1,5 +1,4 @@
 import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:provider/provider.dart';
@@ -137,6 +136,8 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
   bool _mergeIntoOneFile = false;
   // 导出格式：0 = txt, 1 = docx
   int _formatIndex = 0;
+  // 设定专用导出格式：0 = 原格式, 1 = markdown, 2 = docx
+  int _settingFormatIndex = 0;
   // 导出目录
   String? _exportDir;
   // 移动端导出中转目录（导出内容先落盘于此，最终经系统保存框写入公共存储）
@@ -152,6 +153,13 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
 
   /// 当前选中的导出格式
   ExportFormat get _exportFormat => _formatIndex == 0 ? ExportFormat.txt : ExportFormat.docx;
+
+  /// 当前选中的设定导出格式
+  SettingExportFormat get _settingFormat => SettingExportFormat.values[_settingFormatIndex];
+
+  /// 是否为设定相关导出
+  bool get _isSettingMode =>
+      widget.mode == ExportMode.setting || widget.mode == ExportMode.settingGroup;
 
   /// 是否为单章导出（不显示导出方式选项）
   bool get _isSingleChapter => widget.mode == ExportMode.chapter && (widget.chapters?.length ?? 0) == 1;
@@ -390,6 +398,7 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
       groupName: widget.groupName,
       exportDir: _exportDir!,
       format: _exportFormat,
+      settingFormat: _settingFormat,
       mergeIntoOneFile: _isSingleSetting ? true : _mergeIntoOneFile,
       isar: context.read<BookshelfProvider>().isar,
       onProgress: (current, total, status) {
@@ -534,33 +543,63 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
       children: [
         Text('导出格式', style: context.titleSmall?.copyWith(color: colorScheme.onSurface.withValues(alpha: 0.7))),
         const SizedBox(height: 8),
-        Row(
-          children: [
-            // TXT 选项
-            Expanded(
-              child: _buildFormatOption(
+        if (_isSettingMode)
+          Column(
+            children: [
+              _buildFormatOption(
+                colorScheme: colorScheme,
+                icon: Icons.folder_copy_outlined,
+                label: '原格式',
+                description: '将设定文件按原格式导出，支持再次导入',
+                isSelected: _settingFormatIndex == 0,
+                onTap: () => setState(() => _settingFormatIndex = 0),
+              ),
+              const SizedBox(height: 8),
+              _buildFormatOption(
                 colorScheme: colorScheme,
                 icon: Icons.description_outlined,
-                label: 'TXT',
-                description: '纯文本格式',
-                isSelected: _formatIndex == 0,
-                onTap: () => setState(() => _formatIndex = 0),
+                label: 'Markdown',
+                description: '导出为标准 MD 文件',
+                isSelected: _settingFormatIndex == 1,
+                onTap: () => setState(() => _settingFormatIndex = 1),
               ),
-            ),
-            const SizedBox(width: 12),
-            // DOCX 选项
-            Expanded(
-              child: _buildFormatOption(
+              const SizedBox(height: 8),
+              _buildFormatOption(
                 colorScheme: colorScheme,
                 icon: Icons.article_outlined,
                 label: 'DOCX',
-                description: '文档格式',
-                isSelected: _formatIndex == 1,
-                onTap: () => setState(() => _formatIndex = 1),
+                description: '导出为文档格式',
+                isSelected: _settingFormatIndex == 2,
+                onTap: () => setState(() => _settingFormatIndex = 2),
               ),
-            ),
-          ],
-        ),
+            ],
+          )
+        else
+          Row(
+            children: [
+              Expanded(
+                child: _buildFormatOption(
+                  colorScheme: colorScheme,
+                  icon: Icons.description_outlined,
+                  label: 'TXT',
+                  description: '纯文本格式',
+                  isSelected: _formatIndex == 0,
+                  onTap: () => setState(() => _formatIndex = 0),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildFormatOption(
+                  colorScheme: colorScheme,
+                  icon: Icons.article_outlined,
+                  label: 'DOCX',
+                  description: '文档格式',
+                  isSelected: _formatIndex == 1,
+                  onTap: () => setState(() => _formatIndex = 1),
+                ),
+              ),
+            ],
+          ),
       ],
     );
   }
@@ -637,11 +676,15 @@ class _ExportDialogContentState extends State<_ExportDialogContent> {
     final String structureDesc;
     final String mergeDesc;
     if (widget.mode == ExportMode.settingGroup) {
-      structureDesc = '按分组名建文件夹，每个设定项一个文件';
-      mergeDesc = '将所有设定项合并为一个文件';
+      structureDesc = _settingFormat == SettingExportFormat.original
+          ? '按分组名建文件夹，每个设定项一个文件（含伴生文件与图片）'
+          : '按分组名建文件夹，每个设定项一个文件';
+      mergeDesc = '设定导出按项逐个进行，不合并';
     } else if (widget.mode == ExportMode.setting) {
-      structureDesc = '按分组名建文件夹，每个设定项一个文件';
-      mergeDesc = '将所有设定项合并为一个文件';
+      structureDesc = _settingFormat == SettingExportFormat.original
+          ? '每个设定项一个文件（含伴生文件与图片）'
+          : '每个设定项一个文件';
+      mergeDesc = '设定导出按项逐个进行，不合并';
     } else if (widget.mode == ExportMode.volume) {
       structureDesc = '按分卷名建文件夹，每章一个文件';
       mergeDesc = '将所有章节合并为一个文件';

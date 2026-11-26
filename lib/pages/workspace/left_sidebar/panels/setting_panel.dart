@@ -10,6 +10,7 @@ import 'package:quick_write/shared/widgets/widgets.dart';
 import 'package:quick_write/shared/widgets/sortable/sliver_sortable_list.dart';
 import 'package:quick_write/shared/dialogs/new_setting_dialog.dart';
 import 'package:quick_write/shared/dialogs/export_dialog.dart';
+import 'package:quick_write/shared/dialogs/import_setting_dialog.dart';
 import 'package:quick_write/core/utils/reorder_utils.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
 import 'package:quick_write/core/utils/batch_selection_controller.dart';
@@ -305,9 +306,15 @@ class _SettingPanelState extends State<SettingPanel>
       onToggleSidebar: () {
         context.read<WorkspaceProvider>().toggleLeftSidebar();
       },
+      menuItems: const [
+        PopupMenuItem<String>(value: 'batch', height: 32, child: Text('批量操作')),
+        PopupMenuItem<String>(value: 'import', height: 32, child: Text('导入设定')),
+      ],
       onMenuAction: (value) {
         if (value == 'batch') {
           _enterBatchMode();
+        } else if (value == 'import') {
+          showImportSettingDialog(context, context.read<WorkspaceProvider>());
         }
       },
     );

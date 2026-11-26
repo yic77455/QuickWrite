@@ -22,6 +22,7 @@ import 'package:quick_write/core/services/database_service.dart';
 import 'package:quick_write/core/services/backup_service.dart';
 import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 import 'package:quick_write/core/services/recycle_item_service.dart';
+import 'package:quick_write/core/services/setting_import_service.dart';
 import 'package:quick_write/core/services/cache_services/chapter_cursor_cache_service.dart';
 import 'package:quick_write/core/services/cache_services/outline_last_edit_cache_service.dart';
 import 'package:quick_write/core/services/cache_services/workspace_session_cache_service.dart';
