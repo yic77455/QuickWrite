@@ -3178,6 +3178,10 @@ class OutlineEditorState extends State<OutlineEditor>
       }
     }
 
+    // 新节点要等下一帧构建后才能获得焦点，先释放当前节点的焦点，
+    // 否则这一帧里旧光标仍会停在被下推的节点上
+    _focusNodes[nodeId]?.unfocus();
+
     // 开启批量操作，在操作完成后记录撤销项
     _undoManager.beginBatch();
 
@@ -3425,7 +3429,7 @@ class OutlineEditorState extends State<OutlineEditor>
   ///
   /// 子节点提升到当前节点的位置。
   /// 最后一个无子节点的根节点不可删除，始终保持至少一个节点存在。
-  void _deleteNode(String nodeId) {
+  void _deleteNode(String nodeId, {bool focusNext = false}) {
     final location = _findLocation(nodeId);
     if (location == null) return;
 
@@ -3442,10 +3446,22 @@ class OutlineEditorState extends State<OutlineEditor>
     // 开启批量操作，在操作完成后记录撤销项
     _undoManager.beginBatch();
 
-    // 删除前记录扁平列表中的上一节点（就近原则：删除后聚焦到上一位置）
+    // 删除前记录扁平列表中的相邻节点（默认聚焦上一节点，focusNext 时聚焦下一节点开头）
     final flatListBefore = _flatten();
     final currentIndex = flatListBefore.indexWhere((f) => f.node.id == nodeId);
     final previousNodeId = currentIndex > 0 ? flatListBefore[currentIndex - 1].node.id : null;
+    final nextNodeId = currentIndex >= 0 && currentIndex + 1 < flatListBefore.length
+        ? flatListBefore[currentIndex + 1].node.id
+        : null;
+
+    // 焦点目标需在移除节点前确定并同步转移：当前节点销毁时焦点会回退到上一个聚焦过的
+    // 历史节点，留到帧末再聚焦会先闪到那个节点
+    final bool focusNextNode = focusNext && nextNodeId != null;
+    final bool moveCursorToEnd = !focusNextNode;
+    final String? targetId = focusNextNode ? nextNodeId : previousNodeId;
+    if (targetId != null) {
+      _transferFocusBeforeRemoval(targetId, moveCursorToEnd: moveCursorToEnd);
+    }
 
     // 将子节点提升到当前节点的位置
     siblings.removeAt(location.index);
@@ -3467,21 +3483,29 @@ class OutlineEditorState extends State<OutlineEditor>
 
     setState(() {});
 
-    // 聚焦到扁平列表中的上一节点；无上一节点时聚焦到删除后的第一个节点
-    String? targetId = previousNodeId;
-    if (targetId == null) {
+    // 帧末再校正一次焦点并滚动到视口内（目标节点可能刚移入可见范围）
+    String? focusId = targetId;
+    bool cursorAtEnd = moveCursorToEnd;
+    if (focusId == null) {
       final flatListAfter = _flatten();
       if (flatListAfter.isNotEmpty) {
-        targetId = flatListAfter[0].node.id;
+        focusId = flatListAfter[0].node.id;
       } else if (location.parent != null) {
-        targetId = location.parent!.id;
+        focusId = location.parent!.id;
       }
+      cursorAtEnd = true;
     }
 
-    if (targetId != null) {
+    if (focusId != null) {
+      final resolvedId = focusId;
+      final resolvedAtEnd = cursorAtEnd;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _focusNodeWithSelection(targetId!, moveCursorToEnd: true);
-        _endBatchAndNotify(description: '删除节点', focusNodeId: targetId, focusSelection: _selectionAtEnd(targetId));
+        _focusNodeWithSelection(resolvedId, moveCursorToEnd: resolvedAtEnd);
+        _endBatchAndNotify(
+          description: '删除节点',
+          focusNodeId: resolvedId,
+          focusSelection: resolvedAtEnd ? _selectionAtEnd(resolvedId) : _selectionAtStart(),
+        );
       });
     } else {
       // 无可聚焦节点时（如所有节点被删除），仍需结束批量操作
@@ -3489,6 +3513,20 @@ class OutlineEditorState extends State<OutlineEditor>
         _endBatchAndNotify(description: '删除节点');
       });
     }
+  }
+
+  /// 移除节点前把焦点同步交给目标节点
+  ///
+  /// 被聚焦节点销毁时焦点会回退到上一个聚焦过的历史节点；提前发起聚焦，
+  /// 焦点更新时就会直接落到目标节点，不会先闪到历史节点上。
+  void _transferFocusBeforeRemoval(String nodeId, {required bool moveCursorToEnd}) {
+    final focusNode = _focusNodes[nodeId];
+    final controller = _controllers[nodeId];
+    if (focusNode == null || controller == null) return;
+
+    focusNode.requestFocus();
+    final offset = moveCursorToEnd ? controller.text.length : 0;
+    controller.selection = TextSelection.fromPosition(TextPosition(offset: offset));
   }
 
   /// 合并当前节点到上一节点
@@ -6875,18 +6913,20 @@ class OutlineEditorState extends State<OutlineEditor>
       }
     }
 
-    // Backspace：空节点删除；有内容且光标在开头时仅合并到同级上一节点
+    // Backspace/Delete：空节点删除，Delete 聚焦下一节点开头；Backspace 在文本开头时合并上一节点
     // 有子节点的节点视为非空，不删除也不合并
-    if (event.logicalKey == LogicalKeyboardKey.backspace) {
+    if (event.logicalKey == LogicalKeyboardKey.backspace ||
+        (event.logicalKey == LogicalKeyboardKey.delete && !isCommand && !isAlt && !isShift)) {
       final controller = _controllers[nodeId];
       if (controller != null && controller.selection.isCollapsed) {
         final node = _findNode(nodeId);
         final hasChildren = node != null && node.children.isNotEmpty;
         if (!hasChildren) {
           if (controller.text.isEmpty) {
-            _deleteNode(nodeId);
+            _deleteNode(nodeId, focusNext: event.logicalKey == LogicalKeyboardKey.delete);
             return KeyEventResult.handled;
-          } else if (controller.selection.baseOffset == 0) {
+          } else if (event.logicalKey == LogicalKeyboardKey.backspace &&
+              controller.selection.baseOffset == 0) {
             _mergeWithPreviousNode(nodeId);
             return KeyEventResult.handled;
           }
