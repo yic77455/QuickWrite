@@ -5,6 +5,7 @@
 /// 缓存内容包括：
 /// - 书架上当前选中的分组 ID（应用重启后恢复）
 /// - 每本书的已展开设定分类 ID 列表
+/// - 已展示过的一次性引导 ID
 class MiscCacheData {
   /// 书架选中的分组 ID
   ///
@@ -46,6 +47,9 @@ class MiscCacheData {
   /// 开启后正文中的敏感词会立即标红，关闭后仅保留敏感词检测弹窗的扫描结果
   final bool sensitiveWordHighlightEnabled;
 
+  /// 已展示过的一次性引导 ID
+  final List<String> shownGuideIds;
+
   /// 书籍展开状态映射
   ///
   /// Key: 书籍 UUID
@@ -60,6 +64,7 @@ class MiscCacheData {
     this.toolsSectionOrder = const ['bookInfo', 'stats'],
     this.keywordHighlightEnabled = false,
     this.sensitiveWordHighlightEnabled = true,
+    this.shownGuideIds = const [],
     this.books = const {},
   });
 
@@ -88,6 +93,10 @@ class MiscCacheData {
       keywordHighlightEnabled: json['keywordHighlightEnabled'] as bool? ?? false,
       sensitiveWordHighlightEnabled:
           json['sensitiveWordHighlightEnabled'] as bool? ?? true,
+      shownGuideIds: (json['shownGuideIds'] as List<dynamic>?)
+              ?.map((e) => e as String)
+              .toList() ??
+          const [],
       books: books,
     );
   }
@@ -102,6 +111,7 @@ class MiscCacheData {
       'toolsSectionOrder': toolsSectionOrder,
       'keywordHighlightEnabled': keywordHighlightEnabled,
       'sensitiveWordHighlightEnabled': sensitiveWordHighlightEnabled,
+      'shownGuideIds': shownGuideIds,
       'books': books.map((key, value) => MapEntry(key, value.toJson())),
     };
   }
@@ -115,6 +125,7 @@ class MiscCacheData {
     List<String>? toolsSectionOrder,
     bool? keywordHighlightEnabled,
     bool? sensitiveWordHighlightEnabled,
+    List<String>? shownGuideIds,
     Map<String, BookGroupExpandCache>? books,
   }) {
     return MiscCacheData(
@@ -126,6 +137,7 @@ class MiscCacheData {
       keywordHighlightEnabled: keywordHighlightEnabled ?? this.keywordHighlightEnabled,
       sensitiveWordHighlightEnabled:
           sensitiveWordHighlightEnabled ?? this.sensitiveWordHighlightEnabled,
+      shownGuideIds: shownGuideIds ?? this.shownGuideIds,
       books: books ?? this.books,
     );
   }

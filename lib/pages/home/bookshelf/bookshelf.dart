@@ -6,6 +6,7 @@ import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/shared/dialogs/integrity_check_dialog.dart';
+import 'package:quick_write/shared/widgets/app_guide.dart';
 import 'widgets/widgets.dart';
 
 /// 书架页面
@@ -25,6 +26,10 @@ class _BookshelfPageState extends State<BookshelfPage> {
   bool _isReady = false;
   // 最近一次已经反映到界面的同步轮次，用于识别同步是否带来了新数据
   int _syncedRevision = CloudSyncService.instance.syncRevision;
+  // 移动端封面长按引导
+  final GlobalKey _mobileCoverGuideKey = GlobalKey();
+  GuideHandle? _mobileCoverGuide;
+  bool _mobileCoverGuideRequested = false;
 
   @override
   void initState() {
@@ -60,6 +65,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
   @override
   void dispose() {
+    _mobileCoverGuide?.dismiss();
     CloudSyncService.instance.removeListener(_onCloudSyncChanged);
     super.dispose();
   }
@@ -115,9 +121,27 @@ class _BookshelfPageState extends State<BookshelfPage> {
       return const EmptyBookshelf();
     }
 
+    // 移动端书架非空且网格就绪后，提示长按封面
+    if (PlatformCapabilities.isMobile && _isReady && !_mobileCoverGuideRequested) {
+      _mobileCoverGuideRequested = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _mobileCoverGuide = AppGuide.showOnce(
+          context: context,
+          id: 'mobile_bookshelf_cover_long_press',
+          targetKey: _mobileCoverGuideKey,
+          message: '长按封面可拖动排序，原地松手可打开操作菜单。',
+        );
+      });
+    }
+
     // 数据加载完成，且不是空的，开始渲染书架页面
     // 移动端只展示书架网格，桌面端在网格左侧额外展示最近编辑区域
-    final Widget booksGrid = AllBooksGrid(books: books, isReady: _isReady);
+    final Widget booksGrid = AllBooksGrid(
+      books: books,
+      isReady: _isReady,
+      mobileCoverGuideKey: _mobileCoverGuideKey,
+    );
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,

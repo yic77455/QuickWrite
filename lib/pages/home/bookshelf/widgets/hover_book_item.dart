@@ -38,6 +38,8 @@ class HoverBookItem extends StatefulWidget {
   final VoidCallback? onBatchExport;
   // 移动到分组回调（批量模式下使用）
   final void Function(String groupUuid)? onMoveToGroup;
+  // 封面区域定位键，供新手引导锚定
+  final GlobalKey? coverKey;
 
   const HoverBookItem({
     super.key,
@@ -52,6 +54,7 @@ class HoverBookItem extends StatefulWidget {
     this.onBatchDelete,
     this.onBatchExport,
     this.onMoveToGroup,
+    this.coverKey,
   });
 
   @override
@@ -186,6 +189,7 @@ class _HoverBookItemState extends State<HoverBookItem> {
         child: GestureDetector(
           onTap: widget.onTap,
           child: AnimatedContainer(
+            key: widget.coverKey,
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeOutCubic,
             // 批量模式下不显示悬停动画；普通模式下显示悬停效果

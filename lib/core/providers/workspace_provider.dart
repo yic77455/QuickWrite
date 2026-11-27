@@ -74,7 +74,8 @@ class WorkspaceProvider extends WorkspaceStateBase
   // ================= 右侧边栏状态 =================
 
   /// 右侧边栏是否展开（从缓存索引派生：-1 为关闭，否则为展开）
-  bool _isRightSidebarExpanded =
+  /// 移动端始终从关闭状态进入，不恢复桌面端的面板状态
+  bool _isRightSidebarExpanded = !PlatformCapabilities.isMobile &&
       WindowCacheService.instance.workspaceRightSidebarTypeIndex >= 0;
 
   /// 右侧边栏宽度，从缓存文件读取
@@ -82,13 +83,15 @@ class WorkspaceProvider extends WorkspaceStateBase
       WindowCacheService.instance.workspaceRightSidebarWidth;
 
   /// 右侧边栏当前显示的面板类型（从缓存索引恢复，越界时回退为 layout）
-  RightSidebarType _rightSidebarType =
-      WindowCacheService.instance.workspaceRightSidebarTypeIndex >= 0 &&
+  /// 移动端不记忆上次面板，固定以码字统计为默认类型
+  RightSidebarType _rightSidebarType = PlatformCapabilities.isMobile
+      ? RightSidebarType.stats
+      : (WindowCacheService.instance.workspaceRightSidebarTypeIndex >= 0 &&
               WindowCacheService.instance.workspaceRightSidebarTypeIndex <
                   RightSidebarType.values.length
           ? RightSidebarType
               .values[WindowCacheService.instance.workspaceRightSidebarTypeIndex]
-          : RightSidebarType.layout;
+          : RightSidebarType.layout);
 
   // ================= 窗口宽度状态 =================
 
@@ -317,6 +320,8 @@ class WorkspaceProvider extends WorkspaceStateBase
   ///
   /// 展开时写入当前面板类型的枚举索引，关闭时写入 -1
   void _saveRightSidebarState() {
+    // 移动端不记忆面板类型，也不覆盖桌面端保存的状态
+    if (PlatformCapabilities.isMobile) return;
     final index = _isRightSidebarExpanded ? _rightSidebarType.index : -1;
     WindowCacheService.instance
         .updateSidebarState(workspaceRightSidebarTypeIndex: index);

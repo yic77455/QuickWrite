@@ -54,6 +54,11 @@ class _RightSidebarState extends State<RightSidebar>
   // 显示设置下拉菜单控制器
   final MenuController _displaySettingsMenuController = MenuController();
 
+  // 工具面板显示设置引导：按钮定位键、句柄与上一次面板可见状态
+  final GlobalKey _displaySettingsGuideKey = GlobalKey();
+  GuideHandle? _displaySettingsGuide;
+  bool _wasToolsPanelVisible = false;
+
   // 关闭按钮的按压反馈状态（移动端使用）
   // 用 ValueNotifier 单独驱动按钮自身重绘，避免为反馈重建整个侧边栏
   final ValueNotifier<bool> _closeButtonPressed = ValueNotifier<bool>(false);
@@ -80,7 +85,15 @@ class _RightSidebarState extends State<RightSidebar>
   void didChangeDependencies() {
     super.didChangeDependencies();
     // 强制展开时（移动端以抽屉展示）忽略 Provider 的收起状态
-    final isExpanded = widget.forceExpanded || context.watch<WorkspaceProvider>().isRightSidebarExpanded;
+    final provider = context.watch<WorkspaceProvider>();
+    final isExpanded = widget.forceExpanded || provider.isRightSidebarExpanded;
+
+    // 桌面端首次打开工具面板时给出显示设置引导
+    final toolsVisible = isExpanded && provider.rightSidebarType == RightSidebarType.tools;
+    if (PlatformCapabilities.isDesktop && toolsVisible && !_wasToolsPanelVisible) {
+      _scheduleDisplaySettingsGuide();
+    }
+    _wasToolsPanelVisible = toolsVisible;
 
     // 首次同步：直接将动画控制器跳到目标值，不播放动画
     if (_isFirstSync) {
@@ -101,8 +114,29 @@ class _RightSidebarState extends State<RightSidebar>
     }
   }
   
+  /// 工具面板展开动画结束后再定位显示设置按钮，避免高亮框落在裁剪区外
+  void _scheduleDisplaySettingsGuide() {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await Future.delayed(const Duration(milliseconds: 250));
+      if (!mounted) return;
+      final provider = context.read<WorkspaceProvider>();
+      if (!provider.isRightSidebarExpanded ||
+          provider.rightSidebarType != RightSidebarType.tools) {
+        return;
+      }
+      _displaySettingsGuide?.dismiss();
+      _displaySettingsGuide = AppGuide.showOnce(
+        context: context,
+        id: 'workspace_tools_display_settings',
+        targetKey: _displaySettingsGuideKey,
+        message: '点击右上角的显示设置，可以隐藏不需要的区域。',
+      );
+    });
+  }
+
   @override
   void dispose() {
+    _displaySettingsGuide?.dismiss();
     _expandController.dispose();
     _closeButtonFeedbackTimer?.cancel();
     _closeButtonPressed.dispose();
@@ -377,6 +411,7 @@ class _RightSidebarState extends State<RightSidebar>
               mouseCursor: SystemMouseCursors.click,
               borderRadius: BorderRadius.circular(18),
               child: Container(
+                key: _displaySettingsGuideKey,
                 width: 18,
                 height: 18,
                 decoration: BoxDecoration(

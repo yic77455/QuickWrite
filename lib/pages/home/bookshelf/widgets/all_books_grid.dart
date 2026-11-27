@@ -26,8 +26,15 @@ import 'normal_toolbar.dart';
 class AllBooksGrid extends StatefulWidget {
   final List<BookModel> books;
   final bool isReady;
+  // 移动端首本封面的引导定位键
+  final GlobalKey? mobileCoverGuideKey;
 
-  const AllBooksGrid({super.key, required this.books, required this.isReady});
+  const AllBooksGrid({
+    super.key,
+    required this.books,
+    required this.isReady,
+    this.mobileCoverGuideKey,
+  });
 
   @override
   State<AllBooksGrid> createState() => _AllBooksGridState();
@@ -436,9 +443,12 @@ class _AllBooksGridState extends State<AllBooksGrid> {
         );
 
         // 根据过滤后的书籍动态生成子组件
-        final generatedChildren = filteredBooks.map((book) {
+        final generatedChildren = filteredBooks.asMap().entries.map((entry) {
+          final index = entry.key;
+          final book = entry.value;
           return HoverBookItem(
             key: ValueKey(book.uuid),
+            coverKey: index == 0 ? widget.mobileCoverGuideKey : null,
             book: book,
             // 卡片尺寸由网格尺寸解析结果决定
             width: metrics.itemWidth,

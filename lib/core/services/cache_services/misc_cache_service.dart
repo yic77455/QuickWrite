@@ -15,6 +15,7 @@ import 'package:quick_write/core/services/cache_services/cache_service.dart';
 /// - 工具面板功能区与区块显示顺序
 /// - 移动端正文关键词预览开关状态
 /// - 正文敏感词标红开关状态
+/// - 已展示过的一次性引导 ID
 class MiscCacheService extends CacheService<MiscCacheData> {
   // ================= 单例模式 =================
 
@@ -214,6 +215,20 @@ class MiscCacheService extends CacheService<MiscCacheData> {
   /// 保存正文敏感词标红开关状态
   Future<bool> saveSensitiveWordHighlightEnabled(bool enabled) async {
     _data = _data.copyWith(sensitiveWordHighlightEnabled: enabled);
+    return await save(_data);
+  }
+
+  // ================= 一次性引导 =================
+
+  /// 判断引导是否已展示过
+  bool isGuideShown(String id) {
+    return _data.shownGuideIds.contains(id);
+  }
+
+  /// 记录引导已展示
+  Future<bool> markGuideShown(String id) async {
+    if (isGuideShown(id)) return true;
+    _data = _data.copyWith(shownGuideIds: [..._data.shownGuideIds, id]);
     return await save(_data);
   }
 

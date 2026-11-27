@@ -92,6 +92,19 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
   // 移动端左侧目录抽屉是否打开，用于同步顶部目录入口的选中高亮
   bool _isMobileContentsDrawerOpen = false;
 
+  // 返回书架引导：目标图标的键与可提前关闭的句柄
+  final GlobalKey _backToShelfGuideKey = GlobalKey();
+  GuideHandle? _backToShelfGuide;
+
+  // 移动端边缘滑动引导：左右边缘锚点与引导句柄
+  final GlobalKey _mobileLeftEdgeGuideKey = GlobalKey();
+  final GlobalKey _mobileRightEdgeGuideKey = GlobalKey();
+  GuideHandle? _mobileEdgeGuide;
+  bool _mobileEdgeGuideRequested = false;
+
+  // 右抽屉由代码打开时跳过「滑动打开码字统计」的覆写
+  bool _mobileRightDrawerOpenedByProvider = false;
+
   // 编辑区卡片的缓存实例及构建依据
   // 键盘弹出动画期间，Scaffold 会逐帧缩小 body 的可用高度并触发 LayoutBuilder 重建，
   // 复用同一份实例可让框架只重新布局编辑区，而不重建整棵编辑器子树
@@ -188,7 +201,46 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
       _windowProvider!.onAfterUnmaximize = () async {
         workspaceProvider.requestEditorFocus();
       };
+
+      // 单窗口模式首次进入工作台时，提示左上角图标可返回书架
+      if (PlatformCapabilities.isDesktop &&
+          _windowProvider!.windowType == WindowType.main &&
+          !workspaceProvider.isEditorFullscreen) {
+        _backToShelfGuide = AppGuide.showOnce(
+          context: context,
+          id: 'workspace_back_to_shelf',
+          targetKey: _backToShelfGuideKey,
+          message: '点击左上角的图标，可以随时返回书架。',
+        );
+      }
+
+      // 移动端进入工作台后依次提示左右边缘滑动
+      if (PlatformCapabilities.isMobile && !_mobileEdgeGuideRequested) {
+        _mobileEdgeGuideRequested = true;
+        _showMobileEdgeGuide(0);
+      }
     });
+  }
+
+  /// 分步展示移动端边缘滑动引导：0 左侧目录，1 右侧码字统计
+  void _showMobileEdgeGuide(int step) {
+    if (!mounted) return;
+    final isLeft = step == 0;
+    _mobileEdgeGuide?.dismiss();
+    final handle = AppGuide.showOnce(
+      context: context,
+      id: isLeft ? 'mobile_workspace_left_swipe' : 'mobile_workspace_right_swipe',
+      targetKey: isLeft ? _mobileLeftEdgeGuideKey : _mobileRightEdgeGuideKey,
+      message: isLeft
+          ? '从屏幕左边缘向右滑，可以打开章节目录。'
+          : '从屏幕右边缘向左滑，可以打开码字统计。',
+      onDismiss: isLeft ? () => _showMobileEdgeGuide(1) : null,
+    );
+    if (handle == null && isLeft) {
+      _showMobileEdgeGuide(1);
+      return;
+    }
+    _mobileEdgeGuide = handle;
   }
 
   @override
@@ -238,6 +290,9 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
     _windowProvider?.onAfterMaximize = null;
     _windowProvider?.onAfterUnmaximize = null;
     MultiWindowService.instance.onRequestClose = null;
+    // 页面卸载时关闭尚未消失的引导，避免浮层停留在其它页面
+    _backToShelfGuide?.dismiss();
+    _mobileEdgeGuide?.dismiss();
     // 清空菜单栏入口的确认回调，避免持有失效 context
     TrayService.instance.onLeaveWorkspaceBeforeNavigate = null;
     super.dispose();
@@ -439,8 +494,13 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
         onEndDrawerChanged: (isOpen) {
           final provider = context.read<WorkspaceProvider>();
           if (isOpen) {
-            // 右边缘滑出抽屉时补齐展开状态，保证后续开合判断与面板类型保持一致
-            provider.openRightSidebar(provider.rightSidebarType);
+            if (_mobileRightDrawerOpenedByProvider) {
+              // 工具栏按钮打开的面板保留指定类型
+              _mobileRightDrawerOpenedByProvider = false;
+            } else {
+              // 屏幕右边缘滑入固定打开码字统计
+              provider.openRightSidebar(RightSidebarType.stats);
+            }
           } else {
             provider.closeRightSidebar();
           }
@@ -448,78 +508,99 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
         // 常规状态下应用界面延伸到系统状态栏后方，由顶部操作栏自行避让系统状态栏；
         // 沉浸编辑时顶部操作栏已收起，改由下方 AnimatedPadding 避让，避免正文被系统状态栏压住。
         // 底部间距交由下方状态栏自行避让系统导航栏，此处不再重复避让
-        body: SafeArea(
-          top: false,
-          bottom: false,
-          // 正文区域加绘制隔离：抽屉滑出与收回期间正文保持静止，可直接复用已缓存的图层
-          child: RepaintBoundary(
-            // 屏蔽键盘内边距对子树的影响，避免整个编辑区在键盘动画期间逐帧重建
-            child: _KeyboardStableMediaQuery(
-              child: AnimatedPadding(
-                // 沉浸编辑时补上系统状态栏高度，与顶部操作栏的收起动画同步，全程无跳动
-                duration: const Duration(milliseconds: 180),
-                curve: Curves.easeOut,
-                padding: EdgeInsets.only(top: immersiveEditing ? topInset : 0),
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    // 键盘上方工具栏可占用的最大高度：扣除顶部操作栏（含其状态栏安全区）后的剩余高度。
-                    // 沉浸编辑时顶部操作栏已收起，无需扣减；横屏等纵向空间紧张的场景下
-                    // 工具栏会被压缩到该上限内，保证整列布局不溢出
-                    final double chromeHeight =
-                        immersiveEditing ? 0.0 : MobileWorkspaceAppBar.contentHeight + topInset;
-                    final double barsMaxHeight = math.max(0.0, constraints.maxHeight - chromeHeight);
+        body: Stack(
+          children: [
+            Positioned.fill(
+              child: SafeArea(
+                top: false,
+                bottom: false,
+                // 正文区域加绘制隔离：抽屉滑出与收回期间正文保持静止，可直接复用已缓存的图层
+                child: RepaintBoundary(
+                  // 屏蔽键盘内边距对子树的影响，避免整个编辑区在键盘动画期间逐帧重建
+                  child: _KeyboardStableMediaQuery(
+                    child: AnimatedPadding(
+                      // 沉浸编辑时补上系统状态栏高度，与顶部操作栏的收起动画同步，全程无跳动
+                      duration: const Duration(milliseconds: 180),
+                      curve: Curves.easeOut,
+                      padding: EdgeInsets.only(top: immersiveEditing ? topInset : 0),
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          // 键盘上方工具栏可占用的最大高度：扣除顶部操作栏（含其状态栏安全区）后的剩余高度。
+                          // 沉浸编辑时顶部操作栏已收起，无需扣减；横屏等纵向空间紧张的场景下
+                          // 工具栏会被压缩到该上限内，保证整列布局不溢出
+                          final double chromeHeight =
+                              immersiveEditing ? 0.0 : MobileWorkspaceAppBar.contentHeight + topInset;
+                          final double barsMaxHeight = math.max(0.0, constraints.maxHeight - chromeHeight);
 
-                    return Column(
-                      children: [
-                        // 顶部操作栏（自定义，不占用 Scaffold 的 appBar 槽位）
-                        // 移动端横屏输入法弹出时收起，把纵向空间全部让给编辑区；
-                        // 占满整宽由外层 SizedBox 保证，使收起/恢复动画只发生在纵向
-                        SizedBox(
-                          width: double.infinity,
-                          child: AnimatedSize(
-                            duration: const Duration(milliseconds: 180),
-                            curve: Curves.easeOut,
-                            alignment: Alignment.topCenter,
-                            child: immersiveEditing
-                                ? const SizedBox.shrink()
-                                // 监听专用的历史状态通知器，仅刷新撤销/恢复按钮的禁用态
-                                : ListenableBuilder(
-                                    listenable: workspaceProvider.editHistoryNotifier,
-                                    builder: (context, _) => MobileWorkspaceAppBar(
-                                      onBack: _handleBackToShelf,
-                                      onUndo: workspaceProvider.undo,
-                                      onRedo: workspaceProvider.redo,
-                                      canUndo: workspaceProvider.canUndo,
-                                      canRedo: workspaceProvider.canRedo,
-                                      onContents: () => _mobileScaffoldKey.currentState?.openDrawer(),
-                                      isContentsSelected: _isMobileContentsDrawerOpen,
-                                    ),
-                                  ),
-                          ),
-                        ),
+                          return Column(
+                            children: [
+                              // 顶部操作栏（自定义，不占用 Scaffold 的 appBar 槽位）
+                              // 移动端横屏输入法弹出时收起，把纵向空间全部让给编辑区；
+                              // 占满整宽由外层 SizedBox 保证，使收起/恢复动画只发生在纵向
+                              SizedBox(
+                                width: double.infinity,
+                                child: AnimatedSize(
+                                  duration: const Duration(milliseconds: 180),
+                                  curve: Curves.easeOut,
+                                  alignment: Alignment.topCenter,
+                                  child: immersiveEditing
+                                      ? const SizedBox.shrink()
+                                      // 监听专用的历史状态通知器，仅刷新撤销/恢复按钮的禁用态
+                                      : ListenableBuilder(
+                                          listenable: workspaceProvider.editHistoryNotifier,
+                                          builder: (context, _) => MobileWorkspaceAppBar(
+                                            onBack: _handleBackToShelf,
+                                            onUndo: workspaceProvider.undo,
+                                            onRedo: workspaceProvider.redo,
+                                            canUndo: workspaceProvider.canUndo,
+                                            canRedo: workspaceProvider.canRedo,
+                                            onContents: () => _mobileScaffoldKey.currentState?.openDrawer(),
+                                            isContentsSelected: _isMobileContentsDrawerOpen,
+                                          ),
+                                        ),
+                                ),
+                              ),
 
-                        // 编辑区占满剩余空间（沉浸编辑时一并收起编辑区内的标签页栏）
-                        Expanded(child: _buildEditorCard(context, hideTabBar: immersiveEditing)),
+                              // 编辑区占满剩余空间（沉浸编辑时一并收起编辑区内的标签页栏）
+                              Expanded(child: _buildEditorCard(context, hideTabBar: immersiveEditing)),
 
-                        // 键盘上方的快捷输入栏（键盘弹出时显示）
-                        ConstrainedBox(
-                          constraints: BoxConstraints(maxHeight: barsMaxHeight),
-                          child: const MobileQuickInputBar(),
-                        ),
+                              // 键盘上方的快捷输入栏（键盘弹出时显示）
+                              ConstrainedBox(
+                                constraints: BoxConstraints(maxHeight: barsMaxHeight),
+                                child: const MobileQuickInputBar(),
+                              ),
 
-                        // 键盘上方的大纲编辑器工具栏（键盘弹出或节点批量选择模式下显示）
-                        // 与快捷输入栏分属不同类型的标签页，同一时刻只会显示其中一个
-                        ConstrainedBox(
-                          constraints: BoxConstraints(maxHeight: barsMaxHeight),
-                          child: const MobileOutlineToolbar(),
-                        ),
-                      ],
-                    );
-                  },
+                              // 键盘上方的大纲编辑器工具栏（键盘弹出或节点批量选择模式下显示）
+                              // 与快捷输入栏分属不同类型的标签页，同一时刻只会显示其中一个
+                              ConstrainedBox(
+                                constraints: BoxConstraints(maxHeight: barsMaxHeight),
+                                child: const MobileOutlineToolbar(),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
-          ),
+            // 边缘滑动引导的不可见锚点，仅用于定位气泡
+            if (PlatformCapabilities.isMobile) ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: IgnorePointer(
+                  child: SizedBox(key: _mobileLeftEdgeGuideKey, width: 28, height: 64),
+                ),
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: IgnorePointer(
+                  child: SizedBox(key: _mobileRightEdgeGuideKey, width: 28, height: 64),
+                ),
+              ),
+            ],
+          ],
         ),
 
         // 底部状态栏（精简信息，仅保留保存状态与字数）
@@ -554,6 +635,7 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
       // 以抽屉实际状态为准，状态标记为展开但抽屉关闭时也能正常唤出
       if (expanded == scaffoldState.isEndDrawerOpen) return;
       if (expanded) {
+        _mobileRightDrawerOpenedByProvider = true;
         scaffoldState.openEndDrawer();
       } else {
         scaffoldState.closeEndDrawer();
@@ -980,7 +1062,12 @@ class _WorkspaceContentState extends State<_WorkspaceContent> with WidgetsBindin
       // 统一用 Center 包裹：Center 提供松约束，避免 LOGO 被标题栏的紧约束拉伸放大
       leading: isOpenInNewWindow
           ? const Center(child: _AppLogo())
-          : Center(child: _LogoBackButton(onPressed: _handleBackToShelf)),
+          : Center(
+              child: _LogoBackButton(
+                key: _backToShelfGuideKey,
+                onPressed: _handleBackToShelf,
+              ),
+            ),
       // 收窄左侧区域宽度与标题间距，让标题贴近 LOGO
       leadingWidth: 40,
       titleSpacing: 4,
@@ -1061,7 +1148,7 @@ class _LogoBackButton extends StatefulWidget {
   // 点击返回时执行的回调
   final VoidCallback onPressed;
 
-  const _LogoBackButton({required this.onPressed});
+  const _LogoBackButton({super.key, required this.onPressed});
 
   @override
   State<_LogoBackButton> createState() => _LogoBackButtonState();

@@ -3,6 +3,7 @@
 /// 统一导出所有全局组件，方便在其他文件中直接导入
 library;
 
+export 'app_guide.dart';
 export 'app_title_bar.dart';
 export 'color_swatch_option.dart';
 export 'context_menu.dart';
