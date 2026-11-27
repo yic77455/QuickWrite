@@ -16,6 +16,8 @@ enum NameResultTab {
 
   const NameResultTab(this.label);
 }
+/// 结果区滚动条宽度
+const double _scrollbarThickness = 6.0;
 
 /// 结果面板
 ///
@@ -99,14 +101,25 @@ class NameResultPanel extends StatelessWidget {
                     style: context.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
                   ),
                 )
-              : SingleChildScrollView(
-                  child: Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: [
-                      for (final name in names)
-                        _NameChip(name: name, onTap: () => onCopy(name)),
-                    ],
+              : ScrollbarTheme(
+                  // 收窄滚动条，避免手柄过宽
+                  data: Theme.of(context).scrollbarTheme.copyWith(
+                    thickness: const WidgetStatePropertyAll(_scrollbarThickness),
+                    radius: const Radius.circular(_scrollbarThickness / 2),
+                  ),
+                  child: SingleChildScrollView(
+                    // 右侧让出8像素，避免手柄压住名字标签
+                    padding: const EdgeInsets.only(
+                      right: _scrollbarThickness + 8,
+                    ),
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 8,
+                      children: [
+                        for (final name in names)
+                          _NameChip(name: name, onTap: () => onCopy(name)),
+                      ],
+                    ),
                   ),
                 ),
         ),

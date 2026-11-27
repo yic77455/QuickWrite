@@ -703,16 +703,16 @@ class _InputDialogContentState extends State<_InputDialogContent> {
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
+              TextButton(
+                onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
+                child: Text(widget.cancelText),
+              ),
+              const SizedBox(width: 12),
               FilledButton(
                 onPressed: _isLoading ? null : _handleConfirm,
                 child: _isLoading
                     ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                     : Text(widget.confirmText, textAlign: TextAlign.center),
-              ),
-              const SizedBox(width: 12),
-              TextButton(
-                onPressed: _isLoading ? null : () => Navigator.of(context).pop(),
-                child: Text(widget.cancelText),
               ),
             ],
           ),

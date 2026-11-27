@@ -498,7 +498,7 @@ class _AutoReplaceRuleEditContentState extends State<_AutoReplaceRuleEditContent
       ),
       filled: true,
       isDense: true,
-      contentPadding: const EdgeInsets.all(12),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(8),
         borderSide: BorderSide.none,

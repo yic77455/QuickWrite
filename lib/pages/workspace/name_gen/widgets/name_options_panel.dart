@@ -241,6 +241,8 @@ class NameOptionsPanel extends StatelessWidget {
         const SizedBox(width: 6),
         SizedBox(
           width: width ?? _fieldWidth,
+          // 与下拉框等高，避免只有输入框的行比其他行矮
+          height: _controlHeight,
           child: ImeCursorFixerWrapper(
             controller: controller,
             focusNode: focusNode,
