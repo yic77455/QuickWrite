@@ -703,11 +703,19 @@ class GlobalSearchMatchLine {
   /// 该行在全文中的起始偏移量
   final int startOffset;
 
+  /// 备注或表格命中所属的节点键；正文命中为 null
+  final String? attachmentNodeKey;
+
+  /// 附加内容来源标签（备注/表格）；正文命中为 null
+  final String? attachmentLabel;
+
   const GlobalSearchMatchLine({
     required this.lineNumber,
     required this.lineContent,
     required this.matchCount,
     required this.startOffset,
+    this.attachmentNodeKey,
+    this.attachmentLabel,
   });
 }
 

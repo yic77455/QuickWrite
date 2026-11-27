@@ -452,12 +452,12 @@ class _SearchPanelState extends State<SearchPanel> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // 行号
+              // 行号；备注与表格命中显示来源标签
               Container(
                 width: 28,
                 margin: const EdgeInsets.only(right: 6, top: 1),
                 child: Text(
-                  'L${matchLine.lineNumber}',
+                  matchLine.attachmentLabel ?? 'L${matchLine.lineNumber}',
                   style: context.labelSmall?.copyWith(
                     color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
                     fontFeatures: [const FontFeature.tabularFigures()],

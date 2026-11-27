@@ -678,13 +678,25 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
           final content = await readSettingItemContent(item);
           // 大纲文件为 Markdown 序列化文本，转为节点纯文本行后再匹配，
           // 使行内容与偏移量与大纲编辑器中的文本保持一致，便于跳转定位
+          final lines = OutlineMarkdownCodec.parseContentLines(content);
+          final lineMeta = List<({String? nodeKey, String? label})>.filled(
+            lines.length,
+            (nodeKey: null, label: null),
+            growable: true,
+          );
+          try {
+            await _appendOutlineAttachmentLines(item, lines, lineMeta);
+          } catch (e) {
+            debugPrint('全文搜索读取设定附加内容失败: ${item.title}, $e');
+          }
           final result = _matchGlobalSearchContent(
-            content: OutlineMarkdownCodec.parseContentLines(content).join('\n'),
+            content: lines.join('\n'),
             keywords: keywords,
             targetUuid: item.uuid,
             title: item.title,
             groupName: getSettingGroupName(item.groupUuid),
             isOutline: true,
+            lineMeta: lineMeta,
           );
           if (result != null) results.add(result);
         } catch (e) {
@@ -716,11 +728,39 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
     notifyListeners();
   }
 
+  /// 把伴生文件中的备注与表格文本追加到搜索行，并记录所属节点键
+  Future<void> _appendOutlineAttachmentLines(
+    SettingItemModel item,
+    List<String> lines,
+    List<({String? nodeKey, String? label})> meta,
+  ) async {
+    final notes = await OutlineCompanionStore.instance.readNotes(getSettingItemFilePath(item));
+    for (final entry in notes.entries) {
+      for (final rawLine in entry.value.note.split('\n')) {
+        final line = rawLine.replaceAll('\r', '').trim();
+        if (line.isEmpty) continue;
+        lines.add(line);
+        meta.add((nodeKey: entry.key, label: '备注'));
+      }
+      final table = entry.value.table;
+      if (table == null) continue;
+      for (final row in table.rows) {
+        final cells = row
+            .map((cell) => cell.text.replaceAll('\r', ' ').replaceAll('\n', ' ').trim())
+            .where((text) => text.isNotEmpty);
+        final line = cells.join('  ');
+        if (line.isEmpty) continue;
+        lines.add(line);
+        meta.add((nodeKey: entry.key, label: '表格'));
+      }
+    }
+  }
+
   /// 在单个文件内容中匹配关键词
   ///
   /// 先做文件级交集过滤（必须同时包含所有关键词），再收集行级命中；
   /// 无匹配时返回 null。[content] 的行结构需与目标编辑器中的文本保持一致，
-  /// 以便按行偏移量跳转定位。
+  /// 以便按行偏移量跳转定位；[lineMeta] 标记备注/表格行所属节点。
   GlobalSearchResult? _matchGlobalSearchContent({
     required String content,
     required List<String> keywords,
@@ -728,6 +768,7 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
     required String title,
     required String groupName,
     required bool isOutline,
+    List<({String? nodeKey, String? label})>? lineMeta,
   }) {
     if (content.isEmpty) return null;
 
@@ -754,11 +795,16 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
       );
 
       if (matchCountInLine > 0) {
+        final meta = lineMeta != null && lineIndex < lineMeta.length
+            ? lineMeta[lineIndex]
+            : null;
         matchLines.add(GlobalSearchMatchLine(
           lineNumber: lineIndex + 1,
           lineContent: line,
           matchCount: matchCountInLine,
           startOffset: lineStartOffset,
+          attachmentNodeKey: meta?.nodeKey,
+          attachmentLabel: meta?.label,
         ));
       }
 
@@ -848,6 +894,12 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
         _openedTabs.where((t) => t.id == result.targetUuid).firstOrNull;
     if (tab == null) return;
 
+    final nodeKey = matchLine.attachmentNodeKey;
+    if (nodeKey != null) {
+      _revealAttachmentWhenReady(tab, nodeKey, 10);
+      return;
+    }
+
     final text = _searchableTextOf(tab);
     if (text == null) return;
 
@@ -883,6 +935,16 @@ mixin EditorMixin on WorkspaceStateBase, BookDataMixin {
 
     // 通知编辑器滚动到新选区位置（编辑器尚未挂载时延后至挂载完成）
     _scrollToSelectionWhenReady(tab, 10);
+  }
+
+  /// 在编辑器挂载并加载完成后定位备注/表格所属节点
+  void _revealAttachmentWhenReady(EditorTab tab, String nodeKey, int maxFrames) {
+    final editorState = tab.editorKey.currentState;
+    if (editorState is OutlineEditorState && editorState.revealNodeByKey(nodeKey)) return;
+    if (maxFrames <= 0 || !_openedTabs.contains(tab)) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _revealAttachmentWhenReady(tab, nodeKey, maxFrames - 1);
+    });
   }
 
   /// 取标签页编辑器可搜索的完整文本
