@@ -311,7 +311,6 @@ class _NameDictionaryEditorContentState extends State<_NameDictionaryEditorConte
             color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
           ),
           filled: true,
-          fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
           isDense: true,
           contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           border: OutlineInputBorder(
@@ -349,7 +348,6 @@ class _NameDictionaryEditorContentState extends State<_NameDictionaryEditorConte
               color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
             ),
             filled: true,
-            fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
             isDense: true,
             contentPadding: const EdgeInsets.all(12),
             border: OutlineInputBorder(

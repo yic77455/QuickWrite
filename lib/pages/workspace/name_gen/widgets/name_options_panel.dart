@@ -259,7 +259,6 @@ class NameOptionsPanel extends StatelessWidget {
                   color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
                 ),
                 filled: true,
-                fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
                 border: OutlineInputBorder(

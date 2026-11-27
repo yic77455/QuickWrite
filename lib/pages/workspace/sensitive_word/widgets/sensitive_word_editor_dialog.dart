@@ -121,9 +121,6 @@ class _SensitiveWordEditorContentState
                       ),
                     ),
                     filled: true,
-                    fillColor: colorScheme.surfaceContainerHighest.withValues(
-                      alpha: 0.5,
-                    ),
                     isDense: true,
                     contentPadding: const EdgeInsets.all(12),
                     border: OutlineInputBorder(

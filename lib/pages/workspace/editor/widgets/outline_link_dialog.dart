@@ -278,7 +278,6 @@ class _OutlineLinkDialogState extends State<OutlineLinkDialog> {
           prefixIcon: Icon(Icons.search, size: 18, color: colorScheme.onSurfaceVariant),
           prefixIconConstraints: const BoxConstraints(minWidth: 34, minHeight: 34),
           filled: true,
-          fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
             borderSide: BorderSide.none,

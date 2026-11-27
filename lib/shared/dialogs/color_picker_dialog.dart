@@ -126,7 +126,6 @@ class _ColorPickerDialogContentState extends State<_ColorPickerDialogContent> {
                 prefixIcon: const Icon(Icons.tag, size: 18),
                 prefixIconConstraints: const BoxConstraints(minWidth: 40),
                 filled: true,
-                fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.6),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
