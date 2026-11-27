@@ -238,7 +238,7 @@ class _StatsPageState extends State<StatsPage> {
   Widget _buildStatsSettingsButton(
     BuildContext context,
     WritingStatsProvider statsProvider, {
-    double iconSize = 16,
+    double iconSize = 18,
     Offset offset = const Offset(0, 1),
   }) {
     final colorScheme = Theme.of(context).colorScheme;

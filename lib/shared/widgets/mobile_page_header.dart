@@ -11,6 +11,9 @@ class MobilePageHeader extends StatelessWidget {
   /// 标题下方的说明文字（可选）
   final Widget? subtitle;
 
+  /// 标题行右侧的操作入口（可选）
+  final List<Widget> actions;
+
   /// 返回按钮点击回调
   final VoidCallback onBack;
 
@@ -24,6 +27,7 @@ class MobilePageHeader extends StatelessWidget {
     required this.title,
     required this.onBack,
     this.subtitle,
+    this.actions = const [],
     super.key,
   });
 
@@ -37,7 +41,11 @@ class MobilePageHeader extends StatelessWidget {
           children: [
             _buildBackButton(context),
             const SizedBox(width: _backButtonGap),
-            title,
+            Expanded(child: title),
+            if (actions.isNotEmpty) ...[
+              const SizedBox(width: 4),
+              ...actions,
+            ],
           ],
         ),
         // 说明文字

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:quick_write/core/providers/home_state_provider.dart';
 import 'package:quick_write/core/utils/platform_capabilities.dart';
 import 'package:quick_write/core/utils/typography_extension.dart';
+import 'package:quick_write/core/utils/url_opener.dart';
 import 'package:quick_write/shared/widgets/widgets.dart';
 import 'widgets/widgets.dart';
 
@@ -15,6 +16,9 @@ import 'widgets/widgets.dart';
 /// - 云端数据管理：云端数据清理
 class CloudSyncPage extends StatelessWidget {
   const CloudSyncPage({super.key});
+
+  /// 帮助地址
+  static const String _helpUrl = 'https://www.bilibili.com/video/BV1rT4G6gEmd';
 
   @override
   Widget build(BuildContext context) {
@@ -53,8 +57,8 @@ class CloudSyncPage extends StatelessWidget {
 
   /// 构建页面顶部标题区域
   ///
-  /// 移动端在标题左侧放置返回按钮，与标题同行展示；
-  /// 桌面端仅渲染标题与说明
+  /// 移动端在标题左侧放置返回按钮、右侧提供配置教程入口；
+  /// 桌面端在标题旁提供配置教程入口，下方保留说明文字
   Widget _buildPageHeader(BuildContext context, ColorScheme colorScheme) {
     final title = Text(
       '云同步',
@@ -77,16 +81,57 @@ class CloudSyncPage extends StatelessWidget {
         subtitle: subtitle,
         onBack: () =>
             context.read<HomeStateProvider>().setPage(HomePageEnum.tools),
+        actions: [
+          _buildHelpButton(context, iconSize: 20, offset: const Offset(0, -1)),
+        ],
       );
     }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        title,
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            title,
+            const SizedBox(width: 8),
+            _buildHelpButton(context),
+          ],
+        ),
         const SizedBox(height: 8),
         subtitle,
       ],
     );
+  }
+
+  /// 构建帮助按钮，点击后打开配置教程视频
+  Widget _buildHelpButton(
+    BuildContext context, {
+    double iconSize = 18,
+    Offset offset = const Offset(-6, 1),
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Transform.translate(
+      offset: offset,
+      child: CursorTooltipTarget(
+        showTooltip: true,
+        tooltipContent: Text('配置教程', style: context.bodySmall),
+        child: IconButton(
+          icon: const Icon(Icons.help_outline),
+          iconSize: iconSize,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          color: colorScheme.onSurfaceVariant,
+          onPressed: () => _openHelp(context),
+        ),
+      ),
+    );
+  }
+
+  /// 在系统浏览器中打开配置教程
+  Future<void> _openHelp(BuildContext context) async {
+    final success = await UrlOpener.open(_helpUrl);
+    if (!context.mounted) return;
+    SnackBarService.show(context, success ? '已在浏览器中打开配置教程' : '打开配置教程失败');
   }
 }
