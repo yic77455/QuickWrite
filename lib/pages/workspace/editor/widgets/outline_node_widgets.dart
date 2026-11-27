@@ -838,9 +838,17 @@ class _OutlineNodeTileState extends State<OutlineNodeTile> {
       // 以文字顶部为基准整体下移，偏移随字号等比变化，
       // 保证任意字号下标签与文字的相对位置一致
       final double verticalOffset = _fontSize * 0.32;
-      return (left: anchor.right + gap, top: anchor.top + verticalOffset, width: remaining);
+      return (
+        left: _textLeftInset + anchor.right + gap,
+        top: anchor.top + verticalOffset,
+        width: remaining,
+      );
     }
-    return (left: 0, top: anchor.bottom + 2, width: _keywordFieldWidth);
+    return (
+      left: _textLeftInset,
+      top: anchor.bottom + 2,
+      width: _keywordFieldWidth,
+    );
   }
 
   /// 构建节点关键词标签组
