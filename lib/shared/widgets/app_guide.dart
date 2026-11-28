@@ -18,7 +18,6 @@ class AppGuide {
     required String message,
     String title = '提示',
     String buttonText = '知道了',
-    VoidCallback? onDismiss,
   }) {
     // 目标未布局时不弹引导，避免遮罩挡住界面却没有可见提示
     final renderObject = targetKey.currentContext?.findRenderObject();
@@ -28,18 +27,13 @@ class AppGuide {
     // if (cache.isGuideShown(id)) return null;
     // cache.markGuideShown(id);
     dismiss();
-    late final OverlayEntry entry;
-    void close() {
-      _remove(entry);
-      onDismiss?.call();
-    }
-    entry = OverlayEntry(
+    final entry = OverlayEntry(
       builder: (_) => _GuideTip(
         targetKey: targetKey,
         title: title,
         message: message,
         buttonText: buttonText,
-        onDismiss: close,
+        onDismiss: dismiss,
       ),
     );
     _activeEntry = entry;
