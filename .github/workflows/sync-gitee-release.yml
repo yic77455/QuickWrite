@@ -1,8 +1,8 @@
-name: Sync release to Gitee
+name: Sync release notes to Gitee
 
-# GitHub 草稿 Release 被人工 Publish 后触发。Gitee 是客户端的优先更新源，
-# 两边必须同名同内容；这一步把 GitHub 上的 Release 正文与全部资产镜像过去。
-# 同步失败时可用 workflow_dispatch 指定同一个 tag 手动补跑，无需重发版本。
+# GitHub 草稿 Release 被 Publish 后，只把更新日志同步到 Gitee。
+# 安装包改由本地脚本 scripts/sync_gitee_assets.ps1 下载并上传，避免海外 runner 传大文件。
+# 同步失败时可用 workflow_dispatch 指定同一个 tag 手动补跑。
 on:
   release:
     types: [published]
@@ -19,19 +19,17 @@ permissions:
 jobs:
   sync:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 10
 
     steps:
       # 两种触发方式的 tag 来源不同：自动事件从 release 对象取，手动触发从 input 取。
-      # 手动补跑时 release 对象为空，name/body 改用 gh API 现查，避免传空值覆盖 Gitee。
       - name: Resolve release metadata
         id: meta
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT_TAG: ${{ github.event.release.tag_name }}
           INPUT_TAG: ${{ inputs.tag }}
-          # Release 名称与正文含反引号等特殊字符，经环境变量传入，
-          # 避免被内联进脚本后由 shell 当作命令执行
+          # Release 名称与正文含特殊字符，经环境变量传入避免被 shell 执行
           EVENT_NAME: ${{ github.event.release.name }}
           EVENT_BODY: ${{ github.event.release.body }}
         run: |
@@ -56,17 +54,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
           echo "同步目标：${TAG} / ${NAME}"
 
-      - name: Download GitHub release assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.meta.outputs.tag }}
-        run: |
-          set -euo pipefail
-          mkdir -p assets
-          gh release download "${TAG}" --repo "${GITHUB_REPOSITORY}" --dir assets --clobber
-          ls -lh assets
-
-      - name: Create Gitee release and upload assets
+      - name: Sync release notes to Gitee
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           TAG: ${{ steps.meta.outputs.tag }}
@@ -75,7 +63,7 @@ jobs:
           set -euo pipefail
 
           if [ -z "${GITEE_TOKEN:-}" ]; then
-            echo "::warning::未配置 Secret GITEE_TOKEN，跳过 Gitee 同步"
+            echo "::warning::未配置 Secret GITEE_TOKEN，跳过同步"
             exit 0
           fi
 
@@ -83,41 +71,36 @@ jobs:
           REPO="quick-write"
           API="https://gitee.com/api/v5/repos/${OWNER}/${REPO}"
 
-          # Gitee 创建 Release 强制要求 target_commitish，否则报 target_commitish is missing。
-          CREATE_RESPONSE="$(curl -sS -X POST "${API}/releases" \
+          # 先查同 tag 的 Release，存在则只更新正文，不重复创建
+          EXIST="$(curl -fsS --connect-timeout 15 --max-time 90 \
+            "${API}/releases/tags/${TAG}?access_token=${GITEE_TOKEN}" 2>/dev/null || true)"
+          RELEASE_ID="$(printf '%s' "${EXIST}" | jq -r '.id // empty' 2>/dev/null || true)"
+
+          if [ -n "${RELEASE_ID}" ]; then
+            echo "更新已有 Release id=${RELEASE_ID} 的更新日志"
+            RESPONSE="$(curl -sS -X PATCH "${API}/releases/${RELEASE_ID}" \
+              --data-urlencode "access_token=${GITEE_TOKEN}" \
+              --data-urlencode "name=${RELEASE_NAME}" \
+              --data-urlencode "body@release-body.md" || true)"
+            if printf '%s' "${RESPONSE}" | jq -e '.id' >/dev/null 2>&1; then
+              echo "更新日志同步完成"
+            else
+              echo "::error::更新日志写入失败：${RESPONSE}"
+              exit 1
+            fi
+            exit 0
+          fi
+
+          # Gitee 创建 Release 强制要求 target_commitish
+          RESPONSE="$(curl -sS -X POST "${API}/releases" \
             --data-urlencode "access_token=${GITEE_TOKEN}" \
             --data-urlencode "tag_name=${TAG}" \
             --data-urlencode "target_commitish=main" \
             --data-urlencode "name=${RELEASE_NAME}" \
             --data-urlencode "body@release-body.md" \
             --data-urlencode "prerelease=false")"
-
-          RELEASE_ID="$(printf '%s' "${CREATE_RESPONSE}" | jq -r '.id // empty' 2>/dev/null || true)"
-
-          if [ -z "${RELEASE_ID}" ]; then
-            echo "Gitee 创建 Release 未返回 id，尝试查询同 tag 的已有 Release"
-            echo "${CREATE_RESPONSE}"
-            EXIST_RESPONSE="$(curl -sS "${API}/releases/tags/${TAG}?access_token=${GITEE_TOKEN}" || true)"
-            RELEASE_ID="$(printf '%s' "${EXIST_RESPONSE}" | jq -r '.id // empty' 2>/dev/null || true)"
-          fi
-
-          if [ -z "${RELEASE_ID}" ]; then
-            echo "::error::Gitee Release 创建失败"
+          if ! printf '%s' "${RESPONSE}" | jq -e '.id' >/dev/null 2>&1; then
+            echo "::error::Gitee Release 创建失败：${RESPONSE}"
             exit 1
           fi
-
-          echo "Gitee Release id=${RELEASE_ID}"
-
-          # 按体积从小到大传，避免最后只剩大文件在超时边缘反复重试。
-          while IFS= read -r asset; do
-            echo "上传 $(basename "${asset}")"
-            # 单连接限制 180 秒，临时网络故障自动重试 3 次；失败立即报错，不再无限挂起。
-            if ! curl -fsS --connect-timeout 15 --max-time 180 --retry 3 --retry-delay 5 \
-              -X POST "${API}/releases/${RELEASE_ID}/attach_files?access_token=${GITEE_TOKEN}" \
-              -F "file=@${asset}" > /dev/null; then
-              echo "::error::上传 $(basename "${asset}") 失败"
-              exit 1
-            fi
-          done < <(find assets -maxdepth 1 -type f -printf '%s\t%p\n' | sort -n | cut -f2-)
-
-          echo "Gitee 同步完成：https://gitee.com/${OWNER}/${REPO}/releases/tag/${TAG}"
+          echo "同步完成：https://gitee.com/${OWNER}/${REPO}/releases/tag/${TAG}"
