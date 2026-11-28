@@ -1,16 +1,18 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-// 测试用：临时关闭一次性限制，测完取消本行及 showOnce 内三行注释
-// import 'package:quick_write/core/services/cache_services/misc_cache_service.dart';
+import 'package:quick_write/core/services/cache_services/misc_cache_service.dart';
 
 /// 一次性引导：遮罩非重点区域并拦截交互，气泡锚定目标控件，按 ID 记忆避免重复打扰
 class AppGuide {
   AppGuide._();
 
   static OverlayEntry? _activeEntry;
+  static _GuideRequest? _activeRequest;
+  static final List<_GuideRequest> _queue = [];
 
-  /// 展示引导并返回可提前关闭的句柄
-  /// 测试期间临时取消一次性判断，恢复注释后已展示过的 ID 返回 null
+  /// 展示引导并返回可提前关闭的句柄；已有引导时排队，关闭后依次展示
+  /// 已展示过的 ID 返回 null
   static GuideHandle? showOnce({
     required BuildContext context,
     required String id,
@@ -22,42 +24,101 @@ class AppGuide {
     // 目标未布局时不弹引导，避免遮罩挡住界面却没有可见提示
     final renderObject = targetKey.currentContext?.findRenderObject();
     if (renderObject is! RenderBox || !renderObject.hasSize) return null;
-    // 测试用：临时关闭一次性限制，测完取消本行与下面两行注释
-    // final cache = MiscCacheService.instance;
-    // if (cache.isGuideShown(id)) return null;
-    // cache.markGuideShown(id);
-    dismiss();
+    if (MiscCacheService.instance.isGuideShown(id)) return null;
+    final request = _GuideRequest(
+      id: id,
+      overlay: Overlay.of(context),
+      targetKey: targetKey,
+      title: title,
+      message: message,
+      buttonText: buttonText,
+    );
+    if (_activeEntry == null) {
+      _show(request);
+    } else {
+      _queue.add(request);
+    }
+    return GuideHandle(request);
+  }
+
+  /// 关闭当前引导并展示队列中的下一个
+  static void dismiss() {
+    if (_activeRequest == null) return;
+    _removeActive();
+    _showNext();
+  }
+
+  static void _cancel(_GuideRequest request) {
+    request.cancelled = true;
+    if (identical(request, _activeRequest)) {
+      dismiss();
+    } else {
+      _queue.remove(request);
+    }
+  }
+
+  static bool _show(_GuideRequest request) {
+    if (request.cancelled || !request.overlay.mounted) return false;
+    final renderObject = request.targetKey.currentContext?.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.hasSize) return false;
     final entry = OverlayEntry(
       builder: (_) => _GuideTip(
-        targetKey: targetKey,
-        title: title,
-        message: message,
-        buttonText: buttonText,
+        targetKey: request.targetKey,
+        title: request.title,
+        message: request.message,
+        buttonText: request.buttonText,
         onDismiss: dismiss,
       ),
     );
     _activeEntry = entry;
-    Overlay.of(context).insert(entry);
-    return GuideHandle(entry);
+    _activeRequest = request;
+    request.overlay.insert(entry);
+    // 排队项可能在展示前被取消，因此真正显示时才记为已展示
+    unawaited(MiscCacheService.instance.markGuideShown(request.id));
+    return true;
   }
 
-  /// 关闭当前引导
-  static void dismiss() => _remove(_activeEntry);
+  static void _showNext() {
+    if (_activeEntry != null) return;
+    while (_queue.isNotEmpty) {
+      if (_show(_queue.removeAt(0))) return;
+    }
+  }
 
-  static void _remove(OverlayEntry? entry) {
-    if (entry == null || !identical(entry, _activeEntry)) return;
-    entry.remove();
+  static void _removeActive() {
+    _activeEntry?.remove();
     _activeEntry = null;
+    _activeRequest = null;
   }
+}
+
+/// 等待展示的引导请求
+class _GuideRequest {
+  final String id;
+  final OverlayState overlay;
+  final GlobalKey targetKey;
+  final String title;
+  final String message;
+  final String buttonText;
+  bool cancelled = false;
+
+  _GuideRequest({
+    required this.id,
+    required this.overlay,
+    required this.targetKey,
+    required this.title,
+    required this.message,
+    required this.buttonText,
+  });
 }
 
 /// 引导句柄，页面卸载时可主动关闭
 class GuideHandle {
-  final OverlayEntry _entry;
+  final Object _request;
 
-  const GuideHandle(this._entry);
+  const GuideHandle(this._request);
 
-  void dismiss() => AppGuide._remove(_entry);
+  void dismiss() => AppGuide._cancel(_request as _GuideRequest);
 }
 
 /// 锚定目标的引导气泡
@@ -84,6 +145,8 @@ class _GuideTipState extends State<_GuideTip> with SingleTickerProviderStateMixi
   static const double _bubbleWidth = 260;
   static const double _gap = 10;
   static const double _edgePadding = 12;
+  static const double _bubbleMinLeft = 2;
+  static const double _arrowInset = 20;
   static const double _highlightPadding = 4;
 
   late final AnimationController _controller = AnimationController(
@@ -113,9 +176,10 @@ class _GuideTipState extends State<_GuideTip> with SingleTickerProviderStateMixi
     final Rect target = renderObject.localToGlobal(Offset.zero) & renderObject.size;
     final Rect highlight = target.inflate(_highlightPadding);
     final Size screen = MediaQuery.sizeOf(context);
-    final double maxLeft = math.max(_edgePadding, screen.width - _bubbleWidth - _edgePadding);
-    final double left = (target.center.dx - _bubbleWidth / 2).clamp(_edgePadding, maxLeft);
-    final double arrowLeft = (target.center.dx - left).clamp(20.0, _bubbleWidth - 20.0);
+    final double maxLeft = math.max(_bubbleMinLeft, screen.width - _bubbleWidth - _edgePadding);
+    final double left = (target.center.dx - _arrowInset + 1).clamp(_bubbleMinLeft, maxLeft);
+    final double arrowLeft = (target.center.dx - left + 1)
+        .clamp(_arrowInset, _bubbleWidth - _arrowInset);
     final ColorScheme colorScheme = Theme.of(context).colorScheme;
 
     return Stack(
@@ -168,14 +232,6 @@ class _GuideTipState extends State<_GuideTip> with SingleTickerProviderStateMixi
     return Stack(
       clipBehavior: Clip.none,
       children: [
-        Positioned(
-          left: arrowLeft - 7,
-          top: -6,
-          child: Transform.rotate(
-            angle: math.pi / 4,
-            child: Container(width: 12, height: 12, color: background),
-          ),
-        ),
         Material(
           color: Colors.transparent,
           child: Container(
@@ -217,6 +273,15 @@ class _GuideTipState extends State<_GuideTip> with SingleTickerProviderStateMixi
                 ),
               ],
             ),
+          ),
+        ),
+        // 箭头盖在卡片阴影之上，避免被阴影压暗形成色差
+        Positioned(
+          left: arrowLeft - 7,
+          top: -6,
+          child: Transform.rotate(
+            angle: math.pi / 4,
+            child: Container(width: 12, height: 12, color: background),
           ),
         ),
       ],
