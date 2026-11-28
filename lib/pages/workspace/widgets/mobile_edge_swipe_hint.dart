@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:quick_write/core/services/cache_services/misc_cache_service.dart';
 
 /// 移动端工作台左右边缘滑动引导
 ///
@@ -9,13 +11,17 @@ class MobileEdgeSwipeHint {
   MobileEdgeSwipeHint._();
 
   static OverlayEntry? _entry;
+  static const String _guideId = 'mobile_workspace_edge_swipe';
 
   /// 显示边缘滑动引导
   static void show(BuildContext context) {
     if (_entry != null) return;
+    final cache = MiscCacheService.instance;
+    if (cache.isGuideShown(_guideId)) return;
     final entry = OverlayEntry(builder: (_) => const _EdgeSwipeHintOverlay());
     _entry = entry;
     Overlay.of(context).insert(entry);
+    unawaited(cache.markGuideShown(_guideId));
   }
 
   /// 关闭边缘滑动引导

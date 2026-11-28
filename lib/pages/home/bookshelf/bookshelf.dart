@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:quick_write/core/providers/bookshelf_provider.dart';
+import 'package:quick_write/core/providers/home_state_provider.dart';
 import 'package:quick_write/core/providers/writing_stats_provider.dart';
 import 'package:quick_write/core/services/cloud_sync/cloud_sync_service.dart';
 import 'package:quick_write/core/services/multi_window_service.dart';
@@ -121,11 +122,19 @@ class _BookshelfPageState extends State<BookshelfPage> {
       return const EmptyBookshelf();
     }
 
-    // 移动端书架非空且网格就绪后，提示长按封面
-    if (PlatformCapabilities.isMobile && _isReady && !_mobileCoverGuideRequested) {
-      _mobileCoverGuideRequested = true;
+    // 移动端真正停留在书架页、且上方没有弹窗或其他页面时再提示长按封面
+    final isBookshelfActive =
+        context.watch<HomeStateProvider>().currentPage == HomePageEnum.bookshelf;
+    if (PlatformCapabilities.isMobile &&
+        isBookshelfActive &&
+        !Navigator.of(context).canPop() &&
+        _isReady &&
+        !_mobileCoverGuideRequested) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
+        if (!mounted || _mobileCoverGuideRequested) return;
+        if (context.read<HomeStateProvider>().currentPage != HomePageEnum.bookshelf) return;
+        if (Navigator.of(context).canPop()) return;
+        _mobileCoverGuideRequested = true;
         _mobileCoverGuide = AppGuide.showOnce(
           context: context,
           id: 'mobile_bookshelf_cover_long_press',
